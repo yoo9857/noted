@@ -1,10 +1,13 @@
-// Application entry. Wires Engine + Window + GPU stack and runs the event
-// loop. No rendering yet — record/submit/present land in feat/render-clear.
+// Application entry. Wires Engine + Window + GPU stack and runs the
+// clear-color frame loop. Resize is handled by reacting to OUT_OF_DATE /
+// SUBOPTIMAL from the renderer: device wait_idle, swapchain.recreate,
+// renderer.rebind_swapchain, then re-issue the frame next iteration.
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -16,6 +19,7 @@
 #include "noted/engine/gpu/device.hpp"
 #include "noted/engine/gpu/instance.hpp"
 #include "noted/engine/gpu/physical_device.hpp"
+#include "noted/engine/gpu/renderer.hpp"
 #include "noted/engine/gpu/surface.hpp"
 #include "noted/engine/gpu/swapchain.hpp"
 #include "noted/engine/harness/harness.hpp"
@@ -143,10 +147,61 @@ int main() {
               << " | format=" << swapchain->summary().color_format
               << " | mode="   << swapchain->summary().present_mode << '\n';
 
+    auto renderer = noted::gpu::Renderer::create(*device, *swapchain);
+    if (!renderer) {
+        std::cerr << renderer.error().format() << '\n';
+        device->wait_idle();
+        (void)engine.shutdown();
+        return EXIT_FAILURE;
+    }
+
+    auto recreate_swapchain = [&]() -> noted::Result<void> {
+        device->wait_idle();
+        const auto [w, h] = window->framebuffer_size();
+        if (w == 0 || h == 0) {
+            // Window is minimized; skip recreate this iteration.
+            return {};
+        }
+        if (auto r = swapchain->recreate(*physical, surface, VkExtent2D{w, h},
+                noted::gpu::SwapchainConfig{
+                    .desired_image_count = 3,
+                    .prefer_srgb         = true,
+                    .allow_mailbox       = !static_cast<bool>(flag_force_vsync),
+                    .force_fifo          = static_cast<bool>(flag_force_vsync),
+                }); !r) {
+            return std::unexpected(std::move(r).error());
+        }
+        return renderer->rebind_swapchain(*device, *swapchain);
+    };
+
     while (!window->should_close()) {
         engine.begin_frame();
         window->poll_events();
-        // Record/submit/present lands in feat/render-clear.
+
+        // Animate the clear color so we can see frames advancing without a
+        // FPS overlay. Will be replaced with real rendering in feat/triangle.
+        const auto t = static_cast<float>(engine.frame_index()) * 0.005F;
+        VkClearColorValue color{};
+        color.float32[0] = 0.5F + 0.5F * std::sin(t);
+        color.float32[1] = 0.5F + 0.5F * std::sin(t + 2.094F);  // +120°
+        color.float32[2] = 0.5F + 0.5F * std::sin(t + 4.188F);  // +240°
+        color.float32[3] = 1.0F;
+
+        auto rr = renderer->render_frame(*device, *swapchain, color);
+        if (!rr) {
+            const auto code = rr.error().code;
+            if (code == noted::ErrorCode::gpu_swapchain_out_of_date ||
+                code == noted::ErrorCode::gpu_swapchain_suboptimal) {
+                if (auto recr = recreate_swapchain(); !recr) {
+                    std::cerr << recr.error().format() << '\n';
+                    break;
+                }
+            } else {
+                std::cerr << rr.error().format() << '\n';
+                break;
+            }
+        }
+
         engine.end_frame();
     }
 
