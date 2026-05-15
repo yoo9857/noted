@@ -67,6 +67,7 @@ add_subdirectory(domain)
 add_subdirectory(plugin)
 add_subdirectory(platform)
 add_subdirectory(ui)
+add_subdirectory(shaders)
 add_subdirectory(app)
 
 if(NOTED_BUILD_TESTS)

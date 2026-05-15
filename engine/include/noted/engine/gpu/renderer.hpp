@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include <vulkan/vulkan.h>
@@ -43,13 +44,29 @@ public:
     auto operator=(const Renderer&) -> Renderer& = delete;
     ~Renderer();
 
-    // Run one frame: acquire image, record a layout transition + vkCmdClearColorImage
-    // + transition back to PRESENT, submit, present. Returns void on success
-    // or an Error (see class doc for recoverable codes).
+    // Run one frame: acquire image, record a layout transition +
+    // vkCmdClearColorImage + transition back to PRESENT, submit, present.
+    // Returns void on success or an Error (see class doc for recoverable codes).
     [[nodiscard]] auto render_frame(
         const Device&    device,
         const Swapchain& swapchain,
         VkClearColorValue color) -> Result<void>;
+
+    // Like render_frame, but instead of just clearing, the caller supplies a
+    // draw_callback that records pipeline-bound work between
+    // vkCmdBeginRendering and vkCmdEndRendering. The callback receives the
+    // current frame's command buffer and the swapchain extent.
+    //
+    // The renderer takes care of layout transitions (UNDEFINED -> COLOR_ATTACHMENT
+    // -> PRESENT_SRC), viewport / scissor (set from the extent), and the
+    // load-op clear.
+    using DrawCallback = std::function<void(VkCommandBuffer cb, VkExtent2D extent)>;
+
+    [[nodiscard]] auto render_frame_with(
+        const Device&    device,
+        const Swapchain& swapchain,
+        VkClearColorValue clear_color,
+        const DrawCallback& draw_callback) -> Result<void>;
 
     // Tell the renderer the swapchain has been recreated. Internal per-image
     // resources that depend on image count are rebuilt.
