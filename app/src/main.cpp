@@ -297,8 +297,8 @@ int main() {
 
     // -------- Pipeline: textured quad.
     const std::filesystem::path shader_dir{NOTED_SHADER_DIR};
-    auto vert = load_shader(*device, shader_dir / "fullscreen_triangle.vert.spv");
-    auto frag = load_shader(*device, shader_dir / "textured_quad.frag.spv");
+    auto vert = load_shader(*device, shader_dir / "fullscreen.vs_main.spv");
+    auto frag = load_shader(*device, shader_dir / "fullscreen.ps_textured.spv");
     if (!vert || !frag) {
         std::cerr << (!vert ? vert.error().format() : frag.error().format()) << '\n';
         device->wait_idle();
@@ -317,9 +317,11 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    // Slang entry-point names survive into the SPIR-V module; pass them
+    // explicitly so vkCreateGraphicsPipelines finds the right function.
     auto pipeline = noted::gpu::GraphicsPipelineBuilder{}
-        .add_stage(VK_SHADER_STAGE_VERTEX_BIT,   *vert)
-        .add_stage(VK_SHADER_STAGE_FRAGMENT_BIT, *frag)
+        .add_stage(VK_SHADER_STAGE_VERTEX_BIT,   *vert, "vs_main")
+        .add_stage(VK_SHADER_STAGE_FRAGMENT_BIT, *frag, "ps_textured")
         .rasterization(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE,
                        VK_FRONT_FACE_COUNTER_CLOCKWISE)
         .color_format(swapchain->summary().color_format)

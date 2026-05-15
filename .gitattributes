@@ -47,6 +47,7 @@ CMakeLists.txt text eol=lf
 *.7z    filter=lfs diff=lfs merge=lfs -text
 
 # Linguist hints (clean GitHub language stats)
-*.glsl  linguist-language=GLSL
+# Slang's HLSL-derived syntax is the closest match in GitHub Linguist's
+# language table; this keeps shader code highlighted correctly on the web UI.
 *.slang linguist-language=HLSL
 docs/*  linguist-documentation

@@ -17,6 +17,7 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0009 | [Memory allocator + upload model](0009-memory-allocator.md) | Accepted |
 | 0010 | [Pipeline conventions: dynamic rendering + builder](0010-pipeline.md) | Accepted |
 | 0011 | [2026 modernization baseline](0011-2026-modernization.md) | Accepted |
+| 0012 | [Slang is the only shader language](0012-slang-shaders.md) | Accepted |
 
 ## Format
 

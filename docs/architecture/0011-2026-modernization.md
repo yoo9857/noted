@@ -64,7 +64,7 @@ Turing / AMD RDNA / Intel Xe device from 2019 onward supports them.
 | PR | Goal |
 |---|---|
 | `feat/format-sweep` | Apply clang-format-18 across the codebase; flip the CI lint job back to `continue-on-error: false`. |
-| `feat/slang-shaders` | Add Slang (Microsoft + Khronos) as the primary shader compiler. Keep glslc as the fallback. Slang's modules + generics + multi-backend (SPIR-V, MSL, HLSL) is the 2026+ story. |
+| `feat/slang-shaders` | **Landed (ADR 0012).** Slang is now the only shader language. GLSL and glslc removed entirely. |
 | `feat/tracy-integration` | Tracy via FetchContent + `NOTED_ENABLE_TRACY` option. `harness::ScopedTimer` and `harness::Counter` route into Tracy zones / plots when enabled. |
 | `feat/shader-objects` | `VK_EXT_shader_object` — pipeline-less shaders. Avoids the combinatorial explosion of pipeline state objects when we ship hundreds of brushes and filters. |
 | `feat/descriptor-buffer` | `VK_EXT_descriptor_buffer` — pack descriptors into ordinary `VkBuffer`s, removing the per-descriptor-update cost. AAA-grade bindless. |
