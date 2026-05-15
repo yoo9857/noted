@@ -24,6 +24,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include "noted/engine/error/error.hpp"
@@ -40,10 +41,15 @@ public:
         return value_.load(std::memory_order_relaxed);
     }
     [[nodiscard]] auto name() const noexcept -> std::string_view { return name_; }
-    void set(bool v) noexcept { value_.store(v, std::memory_order_relaxed); }
+    [[nodiscard]] auto default_value() const noexcept -> bool { return default_; }
+
+    // Publishes hook::FlagChanged when the value actually transitions.
+    void set(bool v);
+    void reset_to_default() { set(default_); }
 
 private:
     std::string_view  name_;
+    bool              default_;
     std::atomic<bool> value_;
 };
 
@@ -72,6 +78,10 @@ private:
 };
 
 [[nodiscard]] auto all_counters() -> std::vector<Counter*>;
+
+// Restore every registered flag to its construction default and zero every
+// counter. Intended for test teardown; not safe to call mid-frame.
+void reset_all();
 
 // ---- Scoped timer -------------------------------------------------------
 
@@ -143,6 +153,3 @@ private:
 };
 
 }  // namespace noted::harness
-
-// Variant include needs to come from the std header for Config::Value.
-#include <variant>

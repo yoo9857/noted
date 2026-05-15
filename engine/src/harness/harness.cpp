@@ -34,10 +34,20 @@ auto counter_registry() -> CounterRegistry& {
 // ---- FeatureFlag --------------------------------------------------------
 
 FeatureFlag::FeatureFlag(std::string_view name, bool default_value)
-    : name_(name), value_(default_value) {
+    : name_(name), default_(default_value), value_(default_value) {
     auto& r = flag_registry();
     std::scoped_lock lk(r.mu);
     r.by_name.emplace(name, this);
+}
+
+void FeatureFlag::set(bool v) {
+    const bool prev = value_.exchange(v, std::memory_order_relaxed);
+    if (prev != v) {
+        hook::registry().on_flag_changed.publish(hook::FlagChanged{
+            .name      = name_,
+            .new_value = v,
+        });
+    }
 }
 
 auto find_flag(std::string_view name) noexcept -> FeatureFlag* {
@@ -74,19 +84,35 @@ auto all_counters() -> std::vector<Counter*> {
     return r.all;
 }
 
+void reset_all() {
+    {
+        auto& fr = flag_registry();
+        std::scoped_lock lk(fr.mu);
+        for (auto& [_, f] : fr.by_name) {
+            f->reset_to_default();
+        }
+    }
+    {
+        auto& cr = counter_registry();
+        std::scoped_lock lk(cr.mu);
+        for (auto* c : cr.all) {
+            c->reset();
+        }
+    }
+}
+
 // ---- ScopedTimer --------------------------------------------------------
 
 ScopedTimer::ScopedTimer(std::string_view label) noexcept
     : label_(label), start_(std::chrono::steady_clock::now()) {}
 
 ScopedTimer::~ScopedTimer() {
-    // Timing is observable through hooks. In a real build we'd push to Tracy
-    // or our own ring buffer; the structured event keeps tests simple.
     const auto end = std::chrono::steady_clock::now();
     const auto ms = std::chrono::duration<double, std::milli>(end - start_).count();
-    (void)label_;
-    (void)ms;
-    // Intentionally minimal here — wiring to a profiler comes in feat/profile.
+    hook::registry().on_timer_span.publish(hook::TimerSpan{
+        .label = label_,
+        .ms    = ms,
+    });
 }
 
 // ---- validate -----------------------------------------------------------

@@ -21,6 +21,8 @@ public:
     Channel<DocumentClosed>   on_document_closed;
     Channel<ErrorObserved>    on_error;
     Channel<CommandExecuted>  on_command_executed;
+    Channel<TimerSpan>        on_timer_span;
+    Channel<FlagChanged>      on_flag_changed;
 };
 
 // Access the process-wide Registry. App owns its lifetime via construct/destroy.
