@@ -4,6 +4,8 @@
 #include <string>
 #include <utility>
 
+#include "noted/engine/profile.hpp"
+
 namespace noted::gpu {
 
 namespace {
@@ -270,6 +272,7 @@ auto Renderer::render_frame_with(
     const Swapchain&    swapchain,
     VkClearColorValue   clear_color,
     const DrawCallback& draw_callback) -> Result<void> {
+    NOTED_PROFILE_ZONE_N("Renderer::render_frame_with");
     const auto slot_idx = frame_counter_ % frames_.size();
     auto& slot          = frames_[slot_idx];
 
@@ -278,16 +281,23 @@ auto Renderer::render_frame_with(
     const VkSwapchainKHR sc_h     = swapchain.handle();
     const auto          extent    = swapchain.summary().extent;
 
-    if (auto vr = vkWaitForFences(owner_, 1, &fence_h, VK_TRUE, UINT64_MAX);
-        vr != VK_SUCCESS) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::gpu_validation_failed,
-            std::string{"vkWaitForFences: "} + std::to_string(static_cast<int>(vr))));
+    {
+        NOTED_PROFILE_ZONE_N("waitForFences");
+        if (auto vr = vkWaitForFences(owner_, 1, &fence_h, VK_TRUE, UINT64_MAX);
+            vr != VK_SUCCESS) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::gpu_validation_failed,
+                std::string{"vkWaitForFences: "} + std::to_string(static_cast<int>(vr))));
+        }
     }
 
     std::uint32_t image_index = 0;
-    auto acq = vkAcquireNextImageKHR(owner_, sc_h, UINT64_MAX,
-                                     acquire_h, VK_NULL_HANDLE, &image_index);
+    VkResult      acq         = VK_SUCCESS;
+    {
+        NOTED_PROFILE_ZONE_N("acquireNextImage");
+        acq = vkAcquireNextImageKHR(owner_, sc_h, UINT64_MAX,
+                                    acquire_h, VK_NULL_HANDLE, &image_index);
+    }
     if (acq == VK_ERROR_OUT_OF_DATE_KHR) {
         return std::unexpected(noted::make_error(
             noted::ErrorCode::gpu_swapchain_out_of_date,
@@ -390,11 +400,14 @@ auto Renderer::render_frame_with(
     si.signalSemaphoreInfoCount = 1;
     si.pSignalSemaphoreInfos    = &signal_info;
 
-    if (auto vr = vkQueueSubmit2(device.graphics_queue(), 1, &si, fence_h);
-        vr != VK_SUCCESS) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::gpu_validation_failed,
-            std::string{"vkQueueSubmit2: "} + std::to_string(static_cast<int>(vr))));
+    {
+        NOTED_PROFILE_ZONE_N("queueSubmit2");
+        if (auto vr = vkQueueSubmit2(device.graphics_queue(), 1, &si, fence_h);
+            vr != VK_SUCCESS) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::gpu_validation_failed,
+                std::string{"vkQueueSubmit2: "} + std::to_string(static_cast<int>(vr))));
+        }
     }
 
     VkPresentInfoKHR pi{};
@@ -405,7 +418,11 @@ auto Renderer::render_frame_with(
     pi.pSwapchains        = &sc_h;
     pi.pImageIndices      = &image_index;
 
-    const auto pres = vkQueuePresentKHR(device.present_queue(), &pi);
+    VkResult pres = VK_SUCCESS;
+    {
+        NOTED_PROFILE_ZONE_N("queuePresent");
+        pres = vkQueuePresentKHR(device.present_queue(), &pi);
+    }
     ++frame_counter_;
 
     if (pres == VK_ERROR_OUT_OF_DATE_KHR) {

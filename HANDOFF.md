@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-15 · **main HEAD:** `701127f`
+**Last updated:** 2026-05-16 · **main HEAD:** `867fc99` (+ `feat/tracy-integration`)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -69,7 +69,9 @@ tests/        Unit + integration + bench + fuzz scaffolds
    cause chain.
 ✅ Hook system: typed channels with priorities, RAII subscriptions.
 ✅ Harness: FeatureFlag, Counter, ScopedTimer, Config, validate.
-✅ CI matrix verifies build + sanitizers on every PR.
+✅ Profiler: Tracy 0.11 (opt-in via `-DNOTED_ENABLE_TRACY=ON`,
+   on-demand), ScopedTimer→zone and Counter→plot. See ADR 0013.
+✅ CI matrix verifies build + sanitizers + Tracy smoke build on every PR.
 
 ### What does NOT work yet (by design — not bugs)
 
@@ -139,7 +141,7 @@ These unblock everything else. Do them before adding new features.
 | # | PR | Effort | Why |
 |---|---|---|---|
 | 1 | `feat/format-sweep` | 1h | Apply `clang-format-18` across the repo, flip CI lint job back to `continue-on-error: false`. Every PR since #10 has format drift; clean it up. |
-| 2 | `feat/tracy-integration` | 3h | Tracy via FetchContent + `NOTED_ENABLE_TRACY` option. Wire `harness::ScopedTimer` and `harness::Counter` into Tracy zones / plots. Mandatory for AAA-grade dev iteration. |
+| 2 | ~~`feat/tracy-integration`~~ ✅ **landed** | — | Tracy via FetchContent + `NOTED_ENABLE_TRACY` option. `harness::ScopedTimer` → Tracy zones, `Counter` → Tracy plots. See ADR 0013. |
 
 ### 🎨 Priority 2 — Canvas + stroke (Goodnotes side)
 

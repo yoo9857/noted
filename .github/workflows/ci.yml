@@ -98,3 +98,43 @@ jobs:
 
       - name: Build
         run: cmake --build build --parallel
+
+  tracy:
+    # Smoke build with the Tracy profiler client compiled in. Verifies the
+    # NOTED_ENABLE_TRACY=ON path doesn't bit-rot. We don't run anything — we
+    # just need to link the engine + app and ensure Tracy's FetchContent
+    # plus the harness/profile.hpp integration both compile.
+    name: linux-gcc / Tracy=ON
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Vulkan SDK
+        uses: humbletim/install-vulkan-sdk@v1.2
+        with:
+          version: ${{ env.VULKAN_SDK_VERSION }}
+          cache: true
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build g++-13 \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libgl1-mesa-dev libwayland-dev libxkbcommon-dev wayland-protocols \
+            libdbus-1-dev \
+            pkg-config
+
+      - name: Configure
+        env:
+          CC: gcc-13
+          CXX: g++-13
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DNOTED_ENABLE_TRACY=ON \
+            -DNOTED_BUILD_TESTS=OFF
+
+      - name: Build
+        run: cmake --build build --parallel

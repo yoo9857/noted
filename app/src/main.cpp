@@ -36,6 +36,7 @@
 #include "noted/engine/gpu/upload.hpp"
 #include "noted/engine/harness/harness.hpp"
 #include "noted/engine/hook/registry.hpp"
+#include "noted/engine/profile.hpp"
 #include "noted/platform/fs/fs.hpp"
 #include "noted/platform/image_io/image_io.hpp"
 #include "noted/platform/window/window.hpp"
@@ -133,6 +134,7 @@ void install_default_observers() {
 }  // namespace
 
 int main() {
+    NOTED_PROFILE_THREAD("main");
     install_default_observers();
 
     noted::engine::Engine engine;
@@ -375,7 +377,10 @@ int main() {
 
     while (!window->should_close()) {
         engine.begin_frame();
-        window->poll_events();
+        {
+            NOTED_PROFILE_ZONE_N("poll_events");
+            window->poll_events();
+        }
 
         VkClearColorValue clear{};
         clear.float32[0] = 0.05F;
@@ -399,6 +404,7 @@ int main() {
         }
 
         engine.end_frame();
+        NOTED_PROFILE_FRAME();
     }
 
     device->wait_idle();

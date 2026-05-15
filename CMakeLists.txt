@@ -22,6 +22,7 @@ option(NOTED_WARNINGS_AS_ERRORS  "Treat warnings as errors"           OFF)
 option(NOTED_ENABLE_ASAN         "Enable AddressSanitizer"            OFF)
 option(NOTED_ENABLE_UBSAN        "Enable UndefinedBehaviorSanitizer"  OFF)
 option(NOTED_ENABLE_TSAN         "Enable ThreadSanitizer"             OFF)
+option(NOTED_ENABLE_TRACY        "Enable Tracy profiler instrumentation" OFF)
 
 # ---- External dependencies ----------------------------------------------
 find_package(Vulkan 1.3 REQUIRED)
@@ -70,6 +71,22 @@ if(NOTED_BUILD_TESTS)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(googletest)
     enable_testing()
+endif()
+
+# Tracy — frame-grained profiler. Off by default. When enabled we set
+# TRACY_ENABLE so the client compiles its full machinery, and TRACY_ON_DEMAND
+# so the client only collects when a profiler is connected (safe for shipped
+# builds that ship with Tracy compiled in). See docs/architecture/0013.
+if(NOTED_ENABLE_TRACY)
+    set(TRACY_ENABLE    ON  CACHE BOOL "" FORCE)
+    set(TRACY_ON_DEMAND ON  CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        tracy
+        GIT_REPOSITORY https://github.com/wolfpld/tracy.git
+        GIT_TAG v0.11.1
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(tracy)
 endif()
 
 # ---- Modules (order: leaves first) --------------------------------------
