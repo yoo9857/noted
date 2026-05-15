@@ -18,6 +18,7 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0010 | [Pipeline conventions: dynamic rendering + builder](0010-pipeline.md) | Accepted |
 | 0011 | [2026 modernization baseline](0011-2026-modernization.md) | Accepted |
 | 0012 | [Slang is the only shader language](0012-slang-shaders.md) | Accepted |
+| 0016 | [Layer graph — the Photoshop side's data backbone](0016-layer-domain-model.md) | Accepted |
 
 ## Format
 

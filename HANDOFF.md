@@ -158,7 +158,7 @@ The image-editor half. Can be developed in parallel with strokes.
 
 | # | PR | Effort | Why |
 |---|---|---|---|
-| 7 | `feat/layer-domain-model` | 6h | Real `domain::Layer` implementation (currently a stub). Layer graph (DAG) with non-destructive operations. |
+| 7 | ~~`feat/layer-domain-model`~~ ✅ **landed** | — | `domain::LayerGraph` — DAG of `LayerNode` (id/kind/blend/opacity/visible/inputs). 16-mode Photoshop blend enum + 5-kind layer enum, both wire-stable. Monotonic IDs, validate-then-mutate, cycle detection via iterative DFS. See ADR 0016. |
 | 8 | `feat/layer-compositor` | 8h | GPU compositor that walks the layer DAG and renders to the canvas render target. Supports the standard 16 blend modes. |
 | 9 | `feat/selection-mask` | 6h | Marquee / lasso selection → 1-channel mask image. Mask gates compositor output per-pixel. |
 
