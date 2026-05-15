@@ -21,9 +21,12 @@ half-migration is the kind of legacy that compounds. Pick one, commit.
   `[shader("vertex")]` / `[shader("fragment")]` / `[shader("compute")]`
   attributes. `slangc` is invoked once per entry point, producing one
   SPIR-V module per stage.
-- The SPIR-V entry-point name matches the Slang function name (e.g.
-  `vs_main`, `ps_textured`). The `GraphicsPipelineBuilder::add_stage`
-  call takes the entry name explicitly.
+- Slang **rewrites every entry point to `"main"` in the emitted SPIR-V**,
+  matching the convention every other shading language uses (GLSL / HLSL
+  / WGSL all output `OpEntryPoint ... "main"`). The Slang function name
+  is only used at compile time to select which entry slangc compiles.
+  `GraphicsPipelineBuilder::add_stage` therefore keeps its default
+  `entry = "main"`. Verified empirically on slangc 2026.x.
 - `cmake/Shaders.cmake` exposes `noted_compile_slang_entry(SOURCE,
   ENTRY, OUTPUT[, PROFILE])`. Profile defaults to `spirv_1_5` (matches
   the engine's Vulkan 1.4 + `dynamicRendering` baseline).

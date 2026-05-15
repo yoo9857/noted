@@ -317,11 +317,12 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    // Slang entry-point names survive into the SPIR-V module; pass them
-    // explicitly so vkCreateGraphicsPipelines finds the right function.
+    // Slang renames every entry point to "main" in SPIR-V output (matches
+    // the convention every other shading language uses). The .slang
+    // function name is only used to select which entry slangc compiles.
     auto pipeline = noted::gpu::GraphicsPipelineBuilder{}
-        .add_stage(VK_SHADER_STAGE_VERTEX_BIT,   *vert, "vs_main")
-        .add_stage(VK_SHADER_STAGE_FRAGMENT_BIT, *frag, "ps_textured")
+        .add_stage(VK_SHADER_STAGE_VERTEX_BIT,   *vert, "main")
+        .add_stage(VK_SHADER_STAGE_FRAGMENT_BIT, *frag, "main")
         .rasterization(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE,
                        VK_FRONT_FACE_COUNTER_CLOCKWISE)
         .color_format(swapchain->summary().color_format)
