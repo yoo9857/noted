@@ -205,4 +205,62 @@ struct FlagChanged {
     bool             new_value = false;
 };
 
+// ---- Input events --------------------------------------------------------
+//
+// Coordinates are in framebuffer pixels with origin at the top-left.
+// Pressure is in [0, 1]; 1.0 for mouse and for pen tips that don't report
+// pressure. Tilt is in radians, [-pi/2, pi/2]; zero on devices that don't
+// report tilt.
+
+enum class PointerButton : std::uint8_t {
+    left   = 0,
+    right  = 1,
+    middle = 2,
+    other  = 3,
+};
+
+struct PointerMoved {
+    double x = 0.0;
+    double y = 0.0;
+    float  pressure = 1.0F;
+    float  tilt_x   = 0.0F;
+    float  tilt_y   = 0.0F;
+};
+
+struct PointerPressed {
+    double        x = 0.0;
+    double        y = 0.0;
+    PointerButton button = PointerButton::left;
+    float         pressure = 1.0F;
+};
+
+struct PointerReleased {
+    double        x = 0.0;
+    double        y = 0.0;
+    PointerButton button = PointerButton::left;
+};
+
+struct Scrolled {
+    double dx = 0.0;
+    double dy = 0.0;
+};
+
+struct KeyPressed {
+    int  glfw_key  = 0;
+    int  scancode  = 0;
+    int  mods      = 0;  // GLFW_MOD_* bitset
+    bool is_repeat = false;
+};
+
+struct KeyReleased {
+    int glfw_key = 0;
+    int scancode = 0;
+    int mods     = 0;
+};
+
+struct FramebufferResized {
+    std::uint32_t width  = 0;
+    std::uint32_t height = 0;
+};
+
 }  // namespace noted::hook

@@ -68,6 +68,13 @@ void install_default_observers() {
                       << " | cpu " << f.cpu_ms << " ms\n";
         }
     });
+    (void)reg.on_pointer_pressed.subscribe([](const noted::hook::PointerPressed& p) {
+        std::cout << "pointer down " << p.x << ", " << p.y
+                  << " btn=" << static_cast<int>(p.button) << '\n';
+    });
+    (void)reg.on_framebuffer_resized.subscribe([](const noted::hook::FramebufferResized& r) {
+        std::cout << "framebuffer resized to " << r.width << "x" << r.height << '\n';
+    });
 }
 
 [[nodiscard]] auto create_window_surface(
