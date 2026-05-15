@@ -5,5 +5,7 @@ noted_add_module(
         src/input/input.cpp
         src/fs/fs.cpp
         src/ipc/ipc.cpp
-    PUBLIC_DEPS  noted::engine glfw
+        src/image_io/image_io.cpp
+    PUBLIC_DEPS   noted::engine glfw
+    PRIVATE_DEPS  stb_image
 )

@@ -49,6 +49,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(VulkanMemoryAllocator)
 
+# stb_image — single-header PNG/JPG/BMP/TGA decoder. Implementation TU
+# lives in platform/src/image_io/image_io.cpp via STB_IMAGE_IMPLEMENTATION.
+FetchContent_Declare(
+    stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG        f0569113c93ad095470c54bf34a17b36646bbbb5
+)
+FetchContent_MakeAvailable(stb)
+add_library(stb_image INTERFACE)
+target_include_directories(stb_image INTERFACE "${stb_SOURCE_DIR}")
+
 if(NOTED_BUILD_TESTS)
     FetchContent_Declare(
         googletest
