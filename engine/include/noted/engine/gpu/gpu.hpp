@@ -3,12 +3,12 @@
 // GPU abstraction. Backed by Vulkan today; Metal and DX12 backends slot in
 // behind the same interface. All resource handles are opaque ids; the engine
 // hides API differences from everything above.
-//
-// Real implementation lands in feat/gpu-vulkan.
 
 #include <cstdint>
 
 #include "noted/engine/error/error.hpp"
+#include "noted/engine/gpu/instance.hpp"
+#include "noted/engine/gpu/physical_device.hpp"
 
 namespace noted::gpu {
 

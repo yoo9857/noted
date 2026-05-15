@@ -1,110 +1,105 @@
-// Application entry. The app layer is intentionally thin: wire up the
-// engine, install observation hooks for the harness, run the main loop,
-// shut everything down on the way out.
+// Application entry. The app layer is intentionally thin: spin up the
+// Engine, open a Window, create the GPU Instance + pick a PhysicalDevice,
+// then run the event loop until the window closes.
 
 #include <GLFW/glfw3.h>
-#include <vulkan/vulkan.h>
 
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
-#include <vector>
+#include <span>
+#include <string_view>
 
+#include "noted/engine/engine.hpp"
 #include "noted/engine/error/error.hpp"
+#include "noted/engine/gpu/instance.hpp"
+#include "noted/engine/gpu/physical_device.hpp"
 #include "noted/engine/harness/harness.hpp"
 #include "noted/engine/hook/registry.hpp"
+#include "noted/platform/window/window.hpp"
 
 namespace {
 
-// Static feature flags so the harness picks them up at init.
-noted::harness::FeatureFlag flag_enable_validation_layers{
+noted::harness::FeatureFlag flag_validation_layers{
     "gpu.enable_validation_layers", /*default=*/true};
-noted::harness::Counter ctr_frames{"engine.frames"};
 
-[[nodiscard]] auto create_instance() -> noted::Result<VkInstance> {
-    std::uint32_t ext_count = 0;
-    const char** exts = glfwGetRequiredInstanceExtensions(&ext_count);
-
-    VkApplicationInfo app{};
-    app.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    app.pApplicationName   = "noted";
-    app.applicationVersion = VK_MAKE_API_VERSION(0, 0, 1, 0);
-    app.pEngineName        = "noted-engine";
-    app.engineVersion      = VK_MAKE_API_VERSION(0, 0, 1, 0);
-    app.apiVersion         = VK_API_VERSION_1_3;
-
-    VkInstanceCreateInfo ci{};
-    ci.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    ci.pApplicationInfo        = &app;
-    ci.enabledExtensionCount   = ext_count;
-    ci.ppEnabledExtensionNames = exts;
-
-    VkInstance instance = VK_NULL_HANDLE;
-    if (vkCreateInstance(&ci, nullptr, &instance) != VK_SUCCESS) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::gpu_validation_failed, "vkCreateInstance failed"));
-    }
-    return instance;
+[[nodiscard]] auto glfw_required_extensions() -> std::span<const char* const> {
+    std::uint32_t count = 0;
+    const char** ptr = glfwGetRequiredInstanceExtensions(&count);
+    return {ptr, static_cast<std::size_t>(count)};
 }
 
-void log_devices(VkInstance instance) {
-    std::uint32_t count = 0;
-    vkEnumeratePhysicalDevices(instance, &count, nullptr);
-    std::vector<VkPhysicalDevice> devs(count);
-    vkEnumeratePhysicalDevices(instance, &count, devs.data());
-
-    std::cout << "noted bootstrap: " << count << " Vulkan device(s)\n";
-    for (std::uint32_t i = 0; i < count; ++i) {
-        VkPhysicalDeviceProperties props{};
-        vkGetPhysicalDeviceProperties(devs[i], &props);
-        std::cout << "  [" << i << "] " << props.deviceName
-                  << " | API "
-                  << VK_API_VERSION_MAJOR(props.apiVersion) << '.'
-                  << VK_API_VERSION_MINOR(props.apiVersion) << '.'
-                  << VK_API_VERSION_PATCH(props.apiVersion) << '\n';
-    }
+void install_default_observers() {
+    auto& reg = noted::hook::registry();
+    (void)reg.on_error.subscribe([](const noted::hook::ErrorObserved& e) {
+        std::cerr << "[error] " << e.error.format() << '\n';
+    });
+    (void)reg.on_frame_end.subscribe([](const noted::hook::FrameEnd& f) {
+        if ((f.frame_index % 240) == 0) {
+            std::cout << "frame " << f.frame_index
+                      << " | cpu " << f.cpu_ms << " ms\n";
+        }
+    });
 }
 
 }  // namespace
 
 int main() {
-    // Install a default error observer so anything publishing on the error
-    // channel surfaces during the bootstrap.
-    auto& reg = noted::hook::registry();
-    const auto err_sub = reg.on_error.subscribe(
-        [](const noted::hook::ErrorObserved& e) {
-            std::cerr << "[error] " << e.error.format() << '\n';
-        });
+    install_default_observers();
 
-    reg.on_startup.publish({});
-
-    if (glfwInit() != GLFW_TRUE) {
-        std::cerr << "glfwInit failed\n";
-        return EXIT_FAILURE;
-    }
-    if (glfwVulkanSupported() != GLFW_TRUE) {
-        std::cerr << "Vulkan loader not available via GLFW\n";
-        glfwTerminate();
+    noted::engine::Engine engine;
+    if (auto r = engine.init(); !r) {
+        std::cerr << r.error().format() << '\n';
         return EXIT_FAILURE;
     }
 
-    auto instance = create_instance();
+    auto window = noted::platform::Window::create({
+        .title  = "noted",
+        .width  = 1600,
+        .height = 1000,
+    });
+    if (!window) {
+        std::cerr << window.error().format() << '\n';
+        (void)engine.shutdown();
+        return EXIT_FAILURE;
+    }
+
+    const auto surface_exts = glfw_required_extensions();
+    auto instance = noted::gpu::Instance::create({
+        .app_name           = "noted",
+        .app_version        = VK_MAKE_API_VERSION(0, 0, 1, 0),
+        .api_version        = VK_API_VERSION_1_3,
+        .enable_validation  = static_cast<bool>(flag_validation_layers),
+        .extra_extensions   = {},
+        .surface_extensions = surface_exts,
+    });
     if (!instance) {
         std::cerr << instance.error().format() << '\n';
-        glfwTerminate();
+        (void)engine.shutdown();
         return EXIT_FAILURE;
     }
 
-    log_devices(*instance);
-
-    ctr_frames.add();  // demonstrate counters
-    if (flag_enable_validation_layers) {
-        std::cout << "validation layers requested\n";
+    auto picked = noted::gpu::PhysicalDevice::select(*instance);
+    if (!picked) {
+        std::cerr << picked.error().format() << '\n';
+        (void)engine.shutdown();
+        return EXIT_FAILURE;
     }
 
-    vkDestroyInstance(*instance, nullptr);
-    glfwTerminate();
-    reg.on_shutdown.publish({});
-    reg.on_error.unsubscribe(err_sub);
+    std::cout << "selected GPU: " << picked->properties().deviceName
+              << " | API "
+              << VK_API_VERSION_MAJOR(picked->properties().apiVersion) << '.'
+              << VK_API_VERSION_MINOR(picked->properties().apiVersion) << '.'
+              << VK_API_VERSION_PATCH(picked->properties().apiVersion) << '\n';
+
+    while (!window->should_close()) {
+        engine.begin_frame();
+        window->poll_events();
+        // Render work lands in feat/swapchain-clear.
+        engine.end_frame();
+    }
+
+    (void)engine.shutdown();
     return EXIT_SUCCESS;
 }
