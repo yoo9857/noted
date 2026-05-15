@@ -8,6 +8,18 @@ namespace noted::gpu {
 
 namespace {
 
+[[nodiscard]] auto create_binary_semaphore(VkDevice device, VkSemaphore& out) -> Result<void> {
+    VkSemaphoreCreateInfo sci{};
+    sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    if (auto vr = vkCreateSemaphore(device, &sci, nullptr, &out); vr != VK_SUCCESS) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::gpu_validation_failed,
+            std::string{"vkCreateSemaphore(render_finished_per_image): "} +
+                std::to_string(static_cast<int>(vr))));
+    }
+    return {};
+}
+
 [[nodiscard]] auto build_slot(const Device& device) -> Result<Renderer::FrameSlot> {
     auto pool = CommandPool::create(device, device.graphics_family());
     if (!pool) {
@@ -65,7 +77,7 @@ void image_layout_transition(
 
 auto Renderer::create(
     const Device&    device,
-    const Swapchain& /*swapchain*/,
+    const Swapchain& swapchain,
     std::uint32_t    frames_in_flight) -> Result<Renderer> {
     if (frames_in_flight == 0) {
         return std::unexpected(noted::make_error(
@@ -83,16 +95,42 @@ auto Renderer::create(
         }
         r.frames_.push_back(std::move(*slot));
     }
+    if (auto rs = r.rebuild_present_semaphores(device, swapchain); !rs) {
+        return std::unexpected(std::move(rs).error());
+    }
     return r;
 }
 
-auto Renderer::rebind_swapchain(const Device& /*device*/,
-                                const Swapchain& /*swapchain*/) -> Result<void> {
-    // Currently the renderer doesn't hold any per-swapchain-image resources
-    // (no framebuffers — we use dynamic_rendering on the swapchain image
-    // views directly). When per-image resources arrive (e.g. depth attachments)
-    // they will be rebuilt here.
+auto Renderer::rebuild_present_semaphores(const Device& device,
+                                          const Swapchain& swapchain) -> Result<void> {
+    // Destroy any existing per-image semaphores first. They were not in use
+    // at this point because rebuild is only called after wait_idle.
+    for (auto s : render_finished_per_image_) {
+        if (s != VK_NULL_HANDLE) {
+            vkDestroySemaphore(owner_, s, nullptr);
+        }
+    }
+    render_finished_per_image_.clear();
+
+    const auto image_count = swapchain.images().size();
+    render_finished_per_image_.reserve(image_count);
+    for (std::size_t i = 0; i < image_count; ++i) {
+        VkSemaphore s = VK_NULL_HANDLE;
+        if (auto r = create_binary_semaphore(device.handle(), s); !r) {
+            return std::unexpected(std::move(r).error());
+        }
+        render_finished_per_image_.push_back(s);
+    }
     return {};
+}
+
+auto Renderer::rebind_swapchain(const Device& device,
+                                const Swapchain& swapchain) -> Result<void> {
+    // The per-image render_finished semaphore array must match the new
+    // swapchain image count. Image-count changes are rare (mode change,
+    // surface caps), but harmless to rebuild always — wait_idle was already
+    // called by the swapchain recreate path.
+    return rebuild_present_semaphores(device, swapchain);
 }
 
 auto Renderer::render_frame(
@@ -104,7 +142,6 @@ auto Renderer::render_frame(
 
     const VkFence     fence_h    = slot.sync.in_flight();
     const VkSemaphore acquire_h  = slot.sync.image_available();
-    const VkSemaphore present_h  = slot.sync.render_finished();
     const VkSwapchainKHR sc_h    = swapchain.handle();
 
     // 1. Wait for this slot's previous in-flight frame to finish.
@@ -130,6 +167,9 @@ auto Renderer::render_frame(
             std::string{"vkAcquireNextImageKHR: "} + std::to_string(static_cast<int>(acq))));
     }
     const bool suboptimal_acq = (acq == VK_SUBOPTIMAL_KHR);
+    // The render_finished semaphore is picked per-acquired-image so the
+    // present queue never sees a still-in-use binary semaphore.
+    const VkSemaphore present_h = render_finished_per_image_[image_index];
 
     // Only reset the fence once we know we will submit.
     vkResetFences(owner_, 1, &fence_h);
@@ -235,7 +275,6 @@ auto Renderer::render_frame_with(
 
     const VkFence       fence_h   = slot.sync.in_flight();
     const VkSemaphore   acquire_h = slot.sync.image_available();
-    const VkSemaphore   present_h = slot.sync.render_finished();
     const VkSwapchainKHR sc_h     = swapchain.handle();
     const auto          extent    = swapchain.summary().extent;
 
@@ -260,6 +299,8 @@ auto Renderer::render_frame_with(
             std::string{"vkAcquireNextImageKHR: "} + std::to_string(static_cast<int>(acq))));
     }
     const bool suboptimal_acq = (acq == VK_SUBOPTIMAL_KHR);
+    // Per-image render_finished — picked after we know which image was acquired.
+    const VkSemaphore present_h = render_finished_per_image_[image_index];
 
     vkResetFences(owner_, 1, &fence_h);
 
@@ -388,6 +429,7 @@ auto Renderer::render_frame_with(
 Renderer::Renderer(Renderer&& other) noexcept
     : owner_(other.owner_),
       frames_(std::move(other.frames_)),
+      render_finished_per_image_(std::move(other.render_finished_per_image_)),
       frame_counter_(other.frame_counter_) {
     other.owner_         = VK_NULL_HANDLE;
     other.frame_counter_ = 0;
@@ -396,9 +438,10 @@ Renderer::Renderer(Renderer&& other) noexcept
 auto Renderer::operator=(Renderer&& other) noexcept -> Renderer& {
     if (this != &other) {
         destroy();
-        owner_         = other.owner_;
-        frames_        = std::move(other.frames_);
-        frame_counter_ = other.frame_counter_;
+        owner_                     = other.owner_;
+        frames_                    = std::move(other.frames_);
+        render_finished_per_image_ = std::move(other.render_finished_per_image_);
+        frame_counter_             = other.frame_counter_;
         other.owner_         = VK_NULL_HANDLE;
         other.frame_counter_ = 0;
     }
@@ -408,6 +451,15 @@ auto Renderer::operator=(Renderer&& other) noexcept -> Renderer& {
 Renderer::~Renderer() { destroy(); }
 
 void Renderer::destroy() noexcept {
+    // Per-image semaphores live in plain VkSemaphore — destroy them manually.
+    if (owner_ != VK_NULL_HANDLE) {
+        for (auto s : render_finished_per_image_) {
+            if (s != VK_NULL_HANDLE) {
+                vkDestroySemaphore(owner_, s, nullptr);
+            }
+        }
+    }
+    render_finished_per_image_.clear();
     // The FrameSync / CommandBuffer / CommandPool destructors do their own
     // cleanup; clearing the vector destroys them in reverse-construction order.
     frames_.clear();
