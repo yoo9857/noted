@@ -12,6 +12,7 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0004 | [Runtime harness for flexible control](0004-harness.md) | Accepted |
 | 0005 | [Module layout: layered C++ libraries](0005-module-layout.md) | Accepted |
 | 0006 | [Vulkan resource ownership: move-only RAII](0006-vulkan-resource-raii.md) | Accepted |
+| 0007 | [Swapchain policy: format, present mode, resize](0007-swapchain-policy.md) | Accepted |
 
 ## Format
 
