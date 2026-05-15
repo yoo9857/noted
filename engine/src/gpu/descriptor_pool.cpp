@@ -25,9 +25,14 @@ auto DescriptorPool::create(const Device& device,
 
     VkDescriptorPoolCreateInfo ci{};
     ci.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    ci.flags         = info.allow_free
-                        ? static_cast<VkDescriptorPoolCreateFlags>(VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT)
-                        : 0;
+    VkDescriptorPoolCreateFlags flags = 0;
+    if (info.allow_free) {
+        flags |= VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    }
+    if (info.update_after_bind) {
+        flags |= VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+    }
+    ci.flags         = flags;
     ci.maxSets       = info.max_sets;
     ci.poolSizeCount = static_cast<std::uint32_t>(sizes.size());
     ci.pPoolSizes    = sizes.empty() ? nullptr : sizes.data();

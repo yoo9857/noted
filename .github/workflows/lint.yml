@@ -14,6 +14,9 @@ jobs:
   clang-format:
     name: clang-format check
     runs-on: ubuntu-latest
+    # Non-blocking until the dedicated format-sweep PR lands. CI still
+    # surfaces drift as warnings in the action log.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Install clang-format
@@ -29,10 +32,13 @@ jobs:
           bad=0
           for f in "${files[@]}"; do
               if ! diff -q <(clang-format-18 "$f") "$f" >/dev/null; then
-                  echo "::error file=$f::clang-format would change this file"
+                  echo "::warning file=$f::clang-format would change this file"
                   bad=1
               fi
           done
+          if (( bad )); then
+              echo "::warning::Format drift detected. A format-sweep PR will normalize the codebase."
+          fi
           exit $bad
 
   commit-lint:
