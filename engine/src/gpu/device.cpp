@@ -1,0 +1,164 @@
+#include "noted/engine/gpu/device.hpp"
+
+#include <array>
+#include <cstring>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace noted::gpu {
+
+namespace {
+
+constexpr const char* kSwapchainExt = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+
+[[nodiscard]] auto find_present_family(
+    VkPhysicalDevice physical,
+    VkSurfaceKHR     surface,
+    std::uint32_t    preferred) -> std::uint32_t {
+    std::uint32_t count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(physical, &count, nullptr);
+
+    // Prefer the graphics family if it supports present.
+    if (preferred != UINT32_MAX) {
+        VkBool32 supported = VK_FALSE;
+        if (vkGetPhysicalDeviceSurfaceSupportKHR(physical, preferred, surface, &supported)
+                == VK_SUCCESS &&
+            supported == VK_TRUE) {
+            return preferred;
+        }
+    }
+    for (std::uint32_t i = 0; i < count; ++i) {
+        VkBool32 supported = VK_FALSE;
+        if (vkGetPhysicalDeviceSurfaceSupportKHR(physical, i, surface, &supported)
+                == VK_SUCCESS &&
+            supported == VK_TRUE) {
+            return i;
+        }
+    }
+    return UINT32_MAX;
+}
+
+}  // namespace
+
+auto Device::create(
+    const PhysicalDevice&   physical,
+    const Surface&          surface,
+    const DeviceCreateInfo& info) -> Result<Device> {
+    const auto graphics_fam = physical.queue_families().graphics;
+    const auto present_fam  =
+        find_present_family(physical.handle(), surface.handle(), graphics_fam);
+    if (present_fam == UINT32_MAX) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::gpu_validation_failed,
+            "no queue family on the chosen physical device supports presenting "
+            "to the given surface"));
+    }
+
+    const std::set<std::uint32_t> unique_families{graphics_fam, present_fam};
+    constexpr float kPriority = 1.0F;
+
+    std::vector<VkDeviceQueueCreateInfo> qcis;
+    qcis.reserve(unique_families.size());
+    for (auto fam : unique_families) {
+        VkDeviceQueueCreateInfo qci{};
+        qci.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+        qci.queueFamilyIndex = fam;
+        qci.queueCount       = 1;
+        qci.pQueuePriorities = &kPriority;
+        qcis.push_back(qci);
+    }
+
+    std::vector<const char*> exts;
+    exts.reserve(info.extra_extensions.size() + 1);
+    exts.push_back(kSwapchainExt);
+    for (auto* e : info.extra_extensions) {
+        // Skip duplicates of the swapchain extension that callers might
+        // have included themselves.
+        if (std::strcmp(e, kSwapchainExt) != 0) {
+            exts.push_back(e);
+        }
+    }
+
+    VkPhysicalDeviceVulkan13Features vk13{};
+    vk13.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    vk13.dynamicRendering = info.enable_dynamic_rendering ? VK_TRUE : VK_FALSE;
+    vk13.synchronization2 = info.enable_synchronization2  ? VK_TRUE : VK_FALSE;
+
+    VkPhysicalDeviceFeatures2 feat2{};
+    feat2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    feat2.pNext = &vk13;
+
+    VkDeviceCreateInfo dci{};
+    dci.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    dci.pNext                   = &feat2;
+    dci.queueCreateInfoCount    = static_cast<std::uint32_t>(qcis.size());
+    dci.pQueueCreateInfos       = qcis.data();
+    dci.enabledExtensionCount   = static_cast<std::uint32_t>(exts.size());
+    dci.ppEnabledExtensionNames = exts.data();
+
+    VkDevice raw = VK_NULL_HANDLE;
+    if (auto vr = vkCreateDevice(physical.handle(), &dci, nullptr, &raw); vr != VK_SUCCESS) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::gpu_validation_failed,
+            std::string{"vkCreateDevice failed: VkResult="} + std::to_string(vr)));
+    }
+
+    Device out;
+    out.handle_          = raw;
+    out.graphics_family_ = graphics_fam;
+    out.present_family_  = present_fam;
+    vkGetDeviceQueue(raw, graphics_fam, 0, &out.graphics_queue_);
+    vkGetDeviceQueue(raw, present_fam,  0, &out.present_queue_);
+    return out;
+}
+
+Device::Device(Device&& other) noexcept
+    : handle_(other.handle_),
+      graphics_queue_(other.graphics_queue_),
+      present_queue_(other.present_queue_),
+      graphics_family_(other.graphics_family_),
+      present_family_(other.present_family_) {
+    other.handle_           = VK_NULL_HANDLE;
+    other.graphics_queue_   = VK_NULL_HANDLE;
+    other.present_queue_    = VK_NULL_HANDLE;
+    other.graphics_family_  = UINT32_MAX;
+    other.present_family_   = UINT32_MAX;
+}
+
+auto Device::operator=(Device&& other) noexcept -> Device& {
+    if (this != &other) {
+        destroy();
+        handle_           = other.handle_;
+        graphics_queue_   = other.graphics_queue_;
+        present_queue_    = other.present_queue_;
+        graphics_family_  = other.graphics_family_;
+        present_family_   = other.present_family_;
+        other.handle_           = VK_NULL_HANDLE;
+        other.graphics_queue_   = VK_NULL_HANDLE;
+        other.present_queue_    = VK_NULL_HANDLE;
+        other.graphics_family_  = UINT32_MAX;
+        other.present_family_   = UINT32_MAX;
+    }
+    return *this;
+}
+
+Device::~Device() { destroy(); }
+
+void Device::destroy() noexcept {
+    if (handle_ != VK_NULL_HANDLE) {
+        // No use-after-free on outstanding work: callers are expected to
+        // wait_idle before letting the Device go out of scope.
+        vkDestroyDevice(handle_, nullptr);
+        handle_ = VK_NULL_HANDLE;
+    }
+}
+
+void Device::wait_idle() const noexcept {
+    if (handle_ != VK_NULL_HANDLE) {
+        (void)vkDeviceWaitIdle(handle_);
+    }
+}
+
+}  // namespace noted::gpu
