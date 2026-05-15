@@ -8,6 +8,7 @@
 
 #include "noted/engine/error/error.hpp"
 #include "noted/engine/gpu/allocator.hpp"
+#include "noted/engine/gpu/buffer.hpp"
 #include "noted/engine/gpu/command_buffer.hpp"
 #include "noted/engine/gpu/command_pool.hpp"
 #include "noted/engine/gpu/device.hpp"
