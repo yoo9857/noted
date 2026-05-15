@@ -13,6 +13,7 @@
 #include "noted/engine/gpu/frame_sync.hpp"
 #include "noted/engine/gpu/instance.hpp"
 #include "noted/engine/gpu/physical_device.hpp"
+#include "noted/engine/gpu/renderer.hpp"
 #include "noted/engine/gpu/surface.hpp"
 #include "noted/engine/gpu/swapchain.hpp"
 
