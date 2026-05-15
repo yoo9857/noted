@@ -160,8 +160,8 @@ The product's note-taking half. Each PR builds on the previous.
 |---|---|---|---|---|
 | 3 | ~~`feat/canvas-render-target`~~ ✅ **landed** | — | — | `CanvasRenderTarget` (R8G8B8A8_UNORM, COLOR_ATTACHMENT\|SAMPLED\|TRANSFER_DST) + `Renderer::render_with_canvas` two-pass flow. Internal layout tracking via sync2 barriers. See ADR 0014. |
 | 4 | ~~`feat/stroke-engine-mvp`~~ ✅ **landed** | — | — | SDF disk-stamp pipeline (`stamp.slang`) + `noted::stroke::StrokeEngine` (heap-allocated, non-movable, RAII hook subscriptions). Mouse drag → anti-aliased disks layered over the textured background. See ADR 0015. |
-| 5 | `feat/pen-input` | 6h | — | Replace GLFW mouse with Windows Pointer Input API (pressure + tilt). NSEvent / libinput equivalents for mac/Linux later. |
-| 6 | `feat/stroke-engine-pressure` | 4h | #4, #5 | Brush width / opacity respond to pressure. First time the app feels like a real note-taking tool. |
+| 5 | ~~`feat/pen-input`~~ ✅ **landed** | — | — | Win32 `WM_POINTER` subclass over GLFW. Real pressure (0..1024 → [0, 1]) + tilt (degrees) flow through existing hook events. See ADR 0017. |
+| 6 | ~~`feat/stroke-engine-pressure`~~ ✅ **landed** | — | — | `BrushStyle` (min/max radius, gamma alpha curve, softness ratio) + pure `stamp_from_pressure()` mapping. Live-tunable via `set_brush()`. See ADR 0018. |
 
 ### 🖼️ Priority 3 — Layers + blend (Photoshop side)
 

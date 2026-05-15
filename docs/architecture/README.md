@@ -21,6 +21,7 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0013 | [Tracy for frame-grained profiling](0013-profiling.md) | Accepted |
 | 0014 | [Canvas render target — two-pass composition](0014-canvas-render-target.md) | Accepted |
 | 0015 | [Stroke engine — MVP disk-stamp pipeline](0015-stroke-engine-mvp.md) | Accepted |
+| 0018 | [Pressure-driven stamps in the stroke engine](0018-stroke-engine-pressure.md) | Accepted |
 
 ## Format
 
