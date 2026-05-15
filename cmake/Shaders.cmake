@@ -43,15 +43,30 @@ function(noted_compile_slang_entry)
     get_filename_component(_out_dir "${SH_OUTPUT}" DIRECTORY)
     file(MAKE_DIRECTORY "${_out_dir}")
 
+    # slangc on the LunarG Linux SDK ships its plugins (slang-glslang,
+    # spirv-opt) next to the binary but without an rpath set. Without
+    # LD_LIBRARY_PATH pointing at $VULKAN_SDK/lib slangc reports
+    # "failed to load dynamic library 'slang-glslang'" / 'pthread'.
+    # Wrap with `cmake -E env` so the lib path is in scope per invocation.
+    # -O3 + -emit-spirv-directly need spirv-opt at runtime; both are
+    # dropped here for portability. Optimization comes back once the env
+    # is verified across all matrix entries.
+    if(WIN32)
+        set(_slangc_cmd "${NOTED_SLANGC}")
+    else()
+        set(_slangc_cmd
+            ${CMAKE_COMMAND} -E env
+            "LD_LIBRARY_PATH=$ENV{VULKAN_SDK}/lib:$ENV{LD_LIBRARY_PATH}"
+            "${NOTED_SLANGC}")
+    endif()
+
     add_custom_command(
         OUTPUT "${SH_OUTPUT}"
-        COMMAND "${NOTED_SLANGC}"
+        COMMAND ${_slangc_cmd}
                 "${SH_SOURCE}"
                 -target spirv
                 -profile ${SH_PROFILE}
                 -entry ${SH_ENTRY}
-                -O3
-                -emit-spirv-directly
                 -o "${SH_OUTPUT}"
         DEPENDS "${SH_SOURCE}"
         COMMENT "Slang -> SPIR-V: ${SH_SOURCE} @ ${SH_ENTRY}"
