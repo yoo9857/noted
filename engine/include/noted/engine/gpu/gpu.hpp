@@ -7,6 +7,8 @@
 #include <cstdint>
 
 #include "noted/engine/error/error.hpp"
+#include "noted/engine/gpu/command_buffer.hpp"
+#include "noted/engine/gpu/command_pool.hpp"
 #include "noted/engine/gpu/device.hpp"
 #include "noted/engine/gpu/instance.hpp"
 #include "noted/engine/gpu/physical_device.hpp"
@@ -18,8 +20,6 @@ namespace noted::gpu {
 enum class Backend : std::uint8_t { vulkan, metal, dx12 };
 
 // Forward-declarations for resource types that land in subsequent PRs.
-class CommandQueue;
-class CommandBuffer;
 class Buffer;
 class Texture;
 class Pipeline;

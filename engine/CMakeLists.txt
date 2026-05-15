@@ -11,6 +11,8 @@ noted_add_module(
         src/gpu/surface.cpp
         src/gpu/device.cpp
         src/gpu/swapchain.cpp
+        src/gpu/command_pool.cpp
+        src/gpu/command_buffer.cpp
         src/tile/tile.cpp
         src/color/color.cpp
         src/job/job.cpp
