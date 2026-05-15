@@ -19,6 +19,11 @@ noted_add_module(
         src/gpu/buffer.cpp
         src/gpu/image.cpp
         src/gpu/upload.cpp
+        src/gpu/sampler.cpp
+        src/gpu/shader_module.cpp
+        src/gpu/descriptor_set_layout.cpp
+        src/gpu/descriptor_pool.cpp
+        src/gpu/descriptor_set.cpp
         src/tile/tile.cpp
         src/color/color.cpp
         src/job/job.cpp
