@@ -16,9 +16,11 @@
 #include "noted/engine/gpu/descriptor_set_layout.hpp"
 #include "noted/engine/gpu/device.hpp"
 #include "noted/engine/gpu/frame_sync.hpp"
+#include "noted/engine/gpu/graphics_pipeline.hpp"
 #include "noted/engine/gpu/image.hpp"
 #include "noted/engine/gpu/instance.hpp"
 #include "noted/engine/gpu/physical_device.hpp"
+#include "noted/engine/gpu/pipeline_layout.hpp"
 #include "noted/engine/gpu/renderer.hpp"
 #include "noted/engine/gpu/sampler.hpp"
 #include "noted/engine/gpu/shader_module.hpp"
@@ -29,8 +31,5 @@
 namespace noted::gpu {
 
 enum class Backend : std::uint8_t { vulkan, metal, dx12 };
-
-// Forward-declarations for resource types that land in subsequent PRs.
-class Pipeline;
 
 }  // namespace noted::gpu
