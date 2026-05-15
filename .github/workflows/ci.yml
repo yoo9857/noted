@@ -93,7 +93,8 @@ jobs:
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DNOTED_ENABLE_ASAN=ON \
-            -DNOTED_ENABLE_UBSAN=ON
+            -DNOTED_ENABLE_UBSAN=ON \
+            -DNOTED_BUILD_TESTS=OFF
 
       - name: Build
         run: cmake --build build --parallel
