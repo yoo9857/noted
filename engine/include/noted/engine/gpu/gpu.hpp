@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "noted/engine/error/error.hpp"
+#include "noted/engine/gpu/device.hpp"
 #include "noted/engine/gpu/instance.hpp"
 #include "noted/engine/gpu/physical_device.hpp"
 #include "noted/engine/gpu/surface.hpp"
@@ -15,14 +16,7 @@ namespace noted::gpu {
 
 enum class Backend : std::uint8_t { vulkan, metal, dx12 };
 
-struct DeviceInfo {
-    std::uint32_t api_version  = 0;
-    std::uint32_t driver_version = 0;
-    char          name[256]    = {};
-    bool          discrete     = false;
-};
-
-class Device;
+// Forward-declarations for resource types that land in subsequent PRs.
 class CommandQueue;
 class CommandBuffer;
 class Buffer;
