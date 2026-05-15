@@ -62,7 +62,9 @@ jobs:
   sanitizers:
     # ASan + UBSan smoke build. We don't run tests yet (no GPU on the runner)
     # but we link the executable so the sanitizer link layer is exercised.
-    name: linux-clang / ASan+UBSan
+    # Uses g++-13 because clang-18 + libstdc++ on the hosted ubuntu-latest
+    # image doesn't reliably resolve <expected>; g++-13 ships std::expected.
+    name: linux-gcc / ASan+UBSan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -78,15 +80,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build clang-18 lld-18 \
+            ninja-build g++-13 \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libgl1-mesa-dev libwayland-dev libxkbcommon-dev wayland-protocols \
             pkg-config
 
       - name: Configure
         env:
-          CC: clang-18
-          CXX: clang++-18
+          CC: gcc-13
+          CXX: g++-13
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
