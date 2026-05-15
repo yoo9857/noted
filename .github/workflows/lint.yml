@@ -1,0 +1,63 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clang-format:
+    name: clang-format check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-18
+      - name: Run clang-format
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find engine domain plugin platform ui app tests \
+              -type f \( -name '*.hpp' -o -name '*.h' -o -name '*.cpp' -o -name '*.cc' \) \
+              -not -path '*/build/*')
+          bad=0
+          for f in "${files[@]}"; do
+              if ! diff -q <(clang-format-18 "$f") "$f" >/dev/null; then
+                  echo "::error file=$f::clang-format would change this file"
+                  bad=1
+              fi
+          done
+          exit $bad
+
+  commit-lint:
+    name: commit message lint
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify Conventional Commits
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          pattern='^(feat|fix|chore|refactor|docs|test|perf|build|ci|style)(\([a-z0-9._-]+\))?!?: .+'
+          fail=0
+          while read -r sha; do
+              subj=$(git log -1 --format='%s' "$sha")
+              case "$subj" in
+                  "Merge "*|"Revert "*|"fixup! "*|"squash! "*) continue ;;
+              esac
+              if ! [[ "$subj" =~ $pattern ]]; then
+                  echo "::error::Bad commit subject in $sha: $subj"
+                  fail=1
+              fi
+          done < <(git log --format='%H' "$base..$head")
+          exit $fail

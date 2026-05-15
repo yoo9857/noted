@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Enforce Conventional Commits subject line.
+set -euo pipefail
+
+msg_file="$1"
+subject="$(head -n1 "$msg_file")"
+
+# Skip auto-generated commit types (merge, revert, fixup, squash).
+case "$subject" in
+    "Merge "*|"Revert "*|"fixup! "*|"squash! "*) exit 0 ;;
+esac
+
+pattern='^(feat|fix|chore|refactor|docs|test|perf|build|ci|style)(\([a-z0-9._-]+\))?!?: .+'
+if ! [[ "$subject" =~ $pattern ]]; then
+    cat >&2 <<'EOF'
+commit-msg: subject does not match Conventional Commits.
+
+Expected:  <type>(<scope>): <subject>
+Types:     feat | fix | chore | refactor | docs | test | perf | build | ci | style
+
+Example:   feat(engine): add tile streaming budget
+EOF
+    exit 1
+fi
+
+# Subject length cap (Tim Pope rule: 50 chars ideal, 72 hard limit).
+if (( ${#subject} > 72 )); then
+    echo "commit-msg: subject is ${#subject} chars (>72). Trim it." >&2
+    exit 1
+fi
+
+exit 0
