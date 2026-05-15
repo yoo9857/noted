@@ -39,6 +39,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glfw)
 
+# Vulkan Memory Allocator — header-only with a CMake INTERFACE target.
+# We compile the implementation in exactly one TU (engine/src/gpu/allocator.cpp).
+FetchContent_Declare(
+    VulkanMemoryAllocator
+    GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+    GIT_TAG v3.1.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(VulkanMemoryAllocator)
+
 if(NOTED_BUILD_TESTS)
     FetchContent_Declare(
         googletest
