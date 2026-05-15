@@ -15,6 +15,7 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0007 | [Swapchain policy: format, present mode, resize](0007-swapchain-policy.md) | Accepted |
 | 0008 | [Frames-in-flight policy](0008-frames-in-flight.md) | Accepted |
 | 0009 | [Memory allocator + upload model](0009-memory-allocator.md) | Accepted |
+| 0010 | [Pipeline conventions: dynamic rendering + builder](0010-pipeline.md) | Accepted |
 
 ## Format
 
