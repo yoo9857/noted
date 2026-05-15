@@ -3,6 +3,7 @@ add_executable(noted_unit_tests
     hook_test.cpp
     harness_test.cpp
     engine_test.cpp
+    stroke_engine_test.cpp
 )
 
 target_link_libraries(noted_unit_tests PRIVATE noted_test_harness)

@@ -23,11 +23,28 @@ noted_compile_slang_entry(
     OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.ps_textured.spv"
 )
 
+# Stamp shader — two entries (vs_stamp + ps_stamp). Used by the stroke
+# engine to draw disk stamps into the canvas. See stamp.slang for the
+# push-constant contract.
+set(_stamp_src "${CMAKE_CURRENT_SOURCE_DIR}/stamp.slang")
+noted_compile_slang_entry(
+    SOURCE  "${_stamp_src}"
+    ENTRY   vs_stamp
+    OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/stamp.vs_stamp.spv"
+)
+noted_compile_slang_entry(
+    SOURCE  "${_stamp_src}"
+    ENTRY   ps_stamp
+    OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/stamp.ps_stamp.spv"
+)
+
 add_custom_target(noted_shaders ALL
     DEPENDS
         "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.vs_main.spv"
         "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.ps_gradient.spv"
         "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.ps_textured.spv"
+        "${NOTED_SHADER_OUTPUT_DIR}/stamp.vs_stamp.spv"
+        "${NOTED_SHADER_OUTPUT_DIR}/stamp.ps_stamp.spv"
 )
 
 set(NOTED_SHADER_OUTPUT_DIR "${NOTED_SHADER_OUTPUT_DIR}" PARENT_SCOPE)

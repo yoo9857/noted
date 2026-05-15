@@ -27,6 +27,7 @@ noted_add_module(
         src/gpu/descriptor_set.cpp
         src/gpu/pipeline_layout.cpp
         src/gpu/graphics_pipeline.cpp
+        src/stroke/stroke_engine.cpp
         src/tile/tile.cpp
         src/color/color.cpp
         src/job/job.cpp
