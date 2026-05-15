@@ -81,14 +81,39 @@ auto Device::create(
         }
     }
 
+    // 1.3 features (dynamic rendering, sync2).
     VkPhysicalDeviceVulkan13Features vk13{};
     vk13.sType            = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     vk13.dynamicRendering = info.enable_dynamic_rendering ? VK_TRUE : VK_FALSE;
     vk13.synchronization2 = info.enable_synchronization2  ? VK_TRUE : VK_FALSE;
 
+    // 1.2 features: the 2026 baseline — descriptor indexing for bindless,
+    // buffer device address for pointer-as-uniform shader code, timeline
+    // semaphores as the canonical multi-queue sync primitive.
+    VkPhysicalDeviceVulkan12Features vk12{};
+    vk12.sType                                       = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    vk12.pNext                                       = &vk13;
+    if (info.enable_descriptor_indexing) {
+        vk12.descriptorIndexing                              = VK_TRUE;
+        vk12.shaderSampledImageArrayNonUniformIndexing       = VK_TRUE;
+        vk12.shaderStorageBufferArrayNonUniformIndexing      = VK_TRUE;
+        vk12.descriptorBindingSampledImageUpdateAfterBind    = VK_TRUE;
+        vk12.descriptorBindingStorageBufferUpdateAfterBind   = VK_TRUE;
+        vk12.descriptorBindingUpdateUnusedWhilePending       = VK_TRUE;
+        vk12.descriptorBindingPartiallyBound                 = VK_TRUE;
+        vk12.descriptorBindingVariableDescriptorCount        = VK_TRUE;
+        vk12.runtimeDescriptorArray                          = VK_TRUE;
+    }
+    if (info.enable_buffer_device_address) {
+        vk12.bufferDeviceAddress = VK_TRUE;
+    }
+    if (info.enable_timeline_semaphore) {
+        vk12.timelineSemaphore = VK_TRUE;
+    }
+
     VkPhysicalDeviceFeatures2 feat2{};
     feat2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    feat2.pNext = &vk13;
+    feat2.pNext = &vk12;
 
     VkDeviceCreateInfo dci{};
     dci.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;

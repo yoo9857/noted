@@ -21,6 +21,22 @@ struct DeviceCreateInfo {
     // synchronization2 across the codebase.
     bool enable_dynamic_rendering = true;
     bool enable_synchronization2  = true;
+
+    // ---- Vulkan 1.2 modern feature set ----
+    // The engine treats these as the "2026 baseline" — every backend assumes
+    // they are available. The Device::create call checks support and returns
+    // an error if the picked physical device cannot honor them.
+    //
+    // descriptor_indexing               — runtime descriptor arrays, partial
+    //                                     binding, update-after-bind. The
+    //                                     foundation for bindless rendering.
+    // buffer_device_address              — pointer-as-uniform GPU access; used
+    //                                     by ray tracing and modern shader code.
+    // timeline_semaphore                 — single primitive replaces fences +
+    //                                     binary semaphores for cross-queue sync.
+    bool enable_descriptor_indexing  = true;
+    bool enable_buffer_device_address = true;
+    bool enable_timeline_semaphore   = true;
 };
 
 // Logical device + queue handles.

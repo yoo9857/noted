@@ -16,6 +16,7 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0008 | [Frames-in-flight policy](0008-frames-in-flight.md) | Accepted |
 | 0009 | [Memory allocator + upload model](0009-memory-allocator.md) | Accepted |
 | 0010 | [Pipeline conventions: dynamic rendering + builder](0010-pipeline.md) | Accepted |
+| 0011 | [2026 modernization baseline](0011-2026-modernization.md) | Accepted |
 
 ## Format
 

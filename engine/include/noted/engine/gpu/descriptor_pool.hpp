@@ -22,7 +22,10 @@ struct DescriptorPoolCreateInfo {
     // When true, sets the FREE_DESCRIPTOR_SET_BIT flag, allowing
     // vkFreeDescriptorSets. Off by default: callers reset the whole pool
     // for the standard frame-recycling pattern.
-    bool                                 allow_free = false;
+    bool                                 allow_free        = false;
+    // Required when allocating from layouts that use
+    // VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT.
+    bool                                 update_after_bind = false;
 };
 
 // VkDescriptorPool RAII. allocate(layout) returns a raw VkDescriptorSet
