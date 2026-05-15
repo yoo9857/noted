@@ -29,12 +29,22 @@
 #include <vulkan/vulkan.h>
 
 #include "noted/engine/error/error.hpp"
-#include "noted/engine/gpu/device.hpp"
+// PipelineLayout / GraphicsPipeline are held by-value (in optional) so they
+// need the full definitions. Device / ShaderModule / Registry only appear
+// as pointers in CreateInfo — forward declarations below keep the header's
+// transitive include footprint small.
 #include "noted/engine/gpu/graphics_pipeline.hpp"
 #include "noted/engine/gpu/pipeline_layout.hpp"
-#include "noted/engine/gpu/shader_module.hpp"
 #include "noted/engine/hook/hook.hpp"
-#include "noted/engine/hook/registry.hpp"
+
+namespace noted::gpu {
+class Device;
+class ShaderModule;
+}  // namespace noted::gpu
+
+namespace noted::hook {
+class Registry;
+}  // namespace noted::hook
 
 namespace noted::stroke {
 

@@ -34,10 +34,15 @@
 #include <vulkan/vulkan.h>
 
 #include "noted/engine/error/error.hpp"
-#include "noted/engine/gpu/allocator.hpp"
+// Image is held in std::optional so its full definition is needed.
+// Allocator only appears as `const Allocator&` — forward declared below to
+// keep this header from transitively pulling vk_mem_alloc.h into every
+// consumer.
 #include "noted/engine/gpu/image.hpp"
 
 namespace noted::gpu {
+
+class Allocator;
 
 struct CanvasCreateInfo {
     VkExtent2D extent;

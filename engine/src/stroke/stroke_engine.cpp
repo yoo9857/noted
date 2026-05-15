@@ -5,6 +5,10 @@
 #include <cstring>
 #include <utility>
 
+// Full definitions for types the header only forward-declares.
+#include "noted/engine/gpu/device.hpp"
+#include "noted/engine/gpu/shader_module.hpp"
+#include "noted/engine/hook/registry.hpp"
 #include "noted/engine/profile.hpp"
 
 namespace noted::stroke {

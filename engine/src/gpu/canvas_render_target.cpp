@@ -2,6 +2,9 @@
 
 #include <utility>
 
+// Forward-declared in the header; full Allocator definition needed here.
+#include "noted/engine/gpu/allocator.hpp"
+
 namespace noted::gpu {
 
 namespace {
