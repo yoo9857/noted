@@ -8,6 +8,7 @@ noted_add_module(
         src/gpu/gpu.cpp
         src/gpu/instance.cpp
         src/gpu/physical_device.cpp
+        src/gpu/surface.cpp
         src/tile/tile.cpp
         src/color/color.cpp
         src/job/job.cpp

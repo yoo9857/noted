@@ -9,6 +9,7 @@
 #include "noted/engine/error/error.hpp"
 #include "noted/engine/gpu/instance.hpp"
 #include "noted/engine/gpu/physical_device.hpp"
+#include "noted/engine/gpu/surface.hpp"
 
 namespace noted::gpu {
 
