@@ -7,6 +7,7 @@ add_library(noted_test_harness STATIC
 target_include_directories(noted_test_harness PUBLIC harness)
 target_link_libraries(noted_test_harness PUBLIC
     GTest::gtest
+    GTest::gtest_main
     GTest::gmock
     noted::engine
 )
