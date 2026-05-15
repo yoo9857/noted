@@ -56,7 +56,7 @@ void install_default_observers() {
                                           nullptr, &raw); vr != VK_SUCCESS) {
         return std::unexpected(noted::make_error(
             noted::ErrorCode::gpu_surface_lost,
-            std::string{"glfwCreateWindowSurface failed: VkResult="} + std::to_string(vr)));
+            std::string{"glfwCreateWindowSurface failed: VkResult="} + std::to_string(static_cast<int>(vr))));
     }
     return raw;
 }

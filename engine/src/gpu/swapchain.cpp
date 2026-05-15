@@ -93,7 +93,7 @@ namespace {
         vr != VK_SUCCESS) {
         return std::unexpected(noted::make_error(
             noted::ErrorCode::gpu_validation_failed,
-            std::string{"vkGetPhysicalDeviceSurfaceCapabilitiesKHR: "} + std::to_string(vr)));
+            std::string{"vkGetPhysicalDeviceSurfaceCapabilitiesKHR: "} + std::to_string(static_cast<int>(vr))));
     }
 
     const auto fmt    = pick_surface_format(physical, surface, cfg.prefer_srgb);
@@ -135,7 +135,7 @@ namespace {
     if (auto vr = vkCreateSwapchainKHR(device, &sci, nullptr, &raw); vr != VK_SUCCESS) {
         return std::unexpected(noted::make_error(
             noted::ErrorCode::gpu_validation_failed,
-            std::string{"vkCreateSwapchainKHR: "} + std::to_string(vr)));
+            std::string{"vkCreateSwapchainKHR: "} + std::to_string(static_cast<int>(vr))));
     }
 
     out_summary.color_format = fmt.format;
@@ -185,7 +185,7 @@ namespace {
             out_images.clear();
             return std::unexpected(noted::make_error(
                 noted::ErrorCode::gpu_validation_failed,
-                std::string{"vkCreateImageView: "} + std::to_string(vr)));
+                std::string{"vkCreateImageView: "} + std::to_string(static_cast<int>(vr))));
         }
         out_views.push_back(view);
     }
