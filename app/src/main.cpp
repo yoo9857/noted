@@ -2,6 +2,7 @@
 // Engine, open a Window, create the GPU Instance + pick a PhysicalDevice,
 // then run the event loop until the window closes.
 
+#define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
 #include <array>

@@ -57,7 +57,7 @@ auto PhysicalDevice::select(const Instance& instance, std::uint32_t min_api_vers
         vr != VK_SUCCESS) {
         return std::unexpected(noted::make_error(
             noted::ErrorCode::gpu_validation_failed,
-            std::string{"vkEnumeratePhysicalDevices(count) failed: "} + std::to_string(vr)));
+            std::string{"vkEnumeratePhysicalDevices(count) failed: "} + std::to_string(static_cast<int>(vr))));
     }
     if (count == 0) {
         return std::unexpected(noted::make_error(
@@ -70,7 +70,7 @@ auto PhysicalDevice::select(const Instance& instance, std::uint32_t min_api_vers
         vr != VK_SUCCESS) {
         return std::unexpected(noted::make_error(
             noted::ErrorCode::gpu_validation_failed,
-            std::string{"vkEnumeratePhysicalDevices failed: "} + std::to_string(vr)));
+            std::string{"vkEnumeratePhysicalDevices failed: "} + std::to_string(static_cast<int>(vr))));
     }
 
     PhysicalDevice best;
