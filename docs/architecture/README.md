@@ -11,6 +11,7 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0003 | [Error handling: `Result<T>` instead of exceptions](0003-error-handling.md) | Accepted |
 | 0004 | [Runtime harness for flexible control](0004-harness.md) | Accepted |
 | 0005 | [Module layout: layered C++ libraries](0005-module-layout.md) | Accepted |
+| 0006 | [Vulkan resource ownership: move-only RAII](0006-vulkan-resource-raii.md) | Accepted |
 
 ## Format
 
