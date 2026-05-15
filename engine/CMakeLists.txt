@@ -14,6 +14,7 @@ noted_add_module(
         src/gpu/command_pool.cpp
         src/gpu/command_buffer.cpp
         src/gpu/frame_sync.cpp
+        src/gpu/renderer.cpp
         src/tile/tile.cpp
         src/color/color.cpp
         src/job/job.cpp
