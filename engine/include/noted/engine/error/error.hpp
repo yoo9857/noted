@@ -42,6 +42,8 @@ enum class ErrorCode : std::uint16_t {
     gpu_surface_lost,
     gpu_shader_compile_failed,
     gpu_validation_failed,
+    gpu_swapchain_out_of_date,   // recoverable: rebuild swapchain
+    gpu_swapchain_suboptimal,    // recoverable: rebuild swapchain at convenience
 
     // Document / domain
     document_corrupt,
@@ -75,6 +77,8 @@ enum class ErrorCode : std::uint16_t {
         case ErrorCode::gpu_surface_lost:              return "gpu_surface_lost";
         case ErrorCode::gpu_shader_compile_failed:     return "gpu_shader_compile_failed";
         case ErrorCode::gpu_validation_failed:         return "gpu_validation_failed";
+        case ErrorCode::gpu_swapchain_out_of_date:     return "gpu_swapchain_out_of_date";
+        case ErrorCode::gpu_swapchain_suboptimal:      return "gpu_swapchain_suboptimal";
         case ErrorCode::document_corrupt:              return "document_corrupt";
         case ErrorCode::document_version_unsupported:  return "document_version_unsupported";
         case ErrorCode::invalid_image_format:          return "invalid_image_format";
