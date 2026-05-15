@@ -13,6 +13,7 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0005 | [Module layout: layered C++ libraries](0005-module-layout.md) | Accepted |
 | 0006 | [Vulkan resource ownership: move-only RAII](0006-vulkan-resource-raii.md) | Accepted |
 | 0007 | [Swapchain policy: format, present mode, resize](0007-swapchain-policy.md) | Accepted |
+| 0008 | [Frames-in-flight policy](0008-frames-in-flight.md) | Accepted |
 
 ## Format
 
