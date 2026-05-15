@@ -40,12 +40,23 @@ tests/     unit + GPU golden-image regression
 tools/     profiling, benchmarks
 ```
 
-## Build (placeholder)
+## Build
+
+Prerequisites: Visual Studio 2022 Build Tools, CMake >= 3.28, Ninja, Vulkan SDK >= 1.3.290.
+Full install guide: [`docs/SETUP.md`](docs/SETUP.md).
 
 ```
-cmake -S . -B build -G Ninja
-cmake --build build
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --parallel
+./build/bin/noted_app
 ```
+
+Current bootstrap enumerates Vulkan physical devices and exits — proves the toolchain
+is wired end-to-end before any real engine work begins.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). All work goes through PRs to `main`.
 
 ## License
 
