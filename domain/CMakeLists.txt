@@ -8,6 +8,3 @@ noted_add_module(
     PUBLIC_DEPS  noted::engine
 )
 
-if(NOTED_BUILD_TESTS)
-    add_subdirectory(tests)
-endif()

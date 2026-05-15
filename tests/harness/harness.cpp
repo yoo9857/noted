@@ -2,6 +2,8 @@
 
 #include <utility>
 
+#include "noted/engine/harness/harness.hpp"
+
 namespace noted::test {
 
 ErrorCapture::ErrorCapture() {
@@ -22,8 +24,7 @@ auto golden_image_diff(const std::string&, const std::string&) -> noted::Result<
 }
 
 void reset_global_state() {
-    // Placeholder: enumerating FeatureFlags via all_flags() and resetting
-    // them to their construction defaults is added once we record those.
+    noted::harness::reset_all();
 }
 
 }  // namespace noted::test

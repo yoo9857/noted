@@ -116,12 +116,19 @@ using Result = std::expected<T, Error>;
 }
 
 // Propagate an error from a Result-returning expression. Equivalent to Rust's `?`.
-// Usage:
-//   auto value = NOTED_TRY(some_call());
+// Usage (GCC/Clang only — relies on the statement-expression extension):
 //
-// Implementation note: uses a statement-expression on GCC/Clang and an immediately
-// invoked lambda on MSVC. Both forms preserve the inner value's move semantics.
-#if defined(__GNUC__) && !defined(__clang__) || defined(__clang__)
+//     auto value = NOTED_TRY(some_call());
+//
+// On MSVC the macro is intentionally not defined. Use std::expected's monadic
+// API instead:
+//
+//     return some_call()
+//         .and_then([](auto v) -> Result<U> { return next(v); });
+//
+// We prefer the monadic form everywhere for portable code; NOTED_TRY exists
+// only because it makes deeply nested call chains tolerable on Linux.
+#if defined(__GNUC__) || defined(__clang__)
     #define NOTED_TRY(expr)                                                  \
         ({                                                                   \
             auto&& _noted_r = (expr);                                        \
@@ -130,14 +137,6 @@ using Result = std::expected<T, Error>;
             }                                                                \
             ::std::move(_noted_r).value();                                   \
         })
-#else
-    // MSVC fallback: the macro expands to an expression that must be assigned
-    // immediately. Wrap in a do/while-like immediately-invoked lambda.
-    #define NOTED_TRY(expr)                                                  \
-        ([&]() -> decltype(auto) {                                           \
-            auto&& _noted_r = (expr);                                        \
-            return _noted_r;                                                 \
-        }()).value() /* caller must check; prefer .and_then on MSVC */
 #endif
 
 }  // namespace noted

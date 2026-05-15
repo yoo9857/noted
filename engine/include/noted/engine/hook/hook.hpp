@@ -26,6 +26,8 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -191,6 +193,16 @@ struct ErrorObserved {
 
 struct CommandExecuted {
     const char* name = nullptr;
+};
+
+struct TimerSpan {
+    std::string_view label;
+    double           ms = 0.0;
+};
+
+struct FlagChanged {
+    std::string_view name;
+    bool             new_value = false;
 };
 
 }  // namespace noted::hook

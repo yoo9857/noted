@@ -14,6 +14,5 @@ noted_add_module(
         glfw
 )
 
-if(NOTED_BUILD_TESTS)
-    add_subdirectory(tests)
-endif()
+# Module-local tests live under //tests/unit (shared with other modules).
+# When the engine grows GPU integration tests, this is where they slot in.
