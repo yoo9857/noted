@@ -225,6 +225,166 @@ auto Renderer::render_frame(
     return {};
 }
 
+auto Renderer::render_frame_with(
+    const Device&       device,
+    const Swapchain&    swapchain,
+    VkClearColorValue   clear_color,
+    const DrawCallback& draw_callback) -> Result<void> {
+    const auto slot_idx = frame_counter_ % frames_.size();
+    auto& slot          = frames_[slot_idx];
+
+    const VkFence       fence_h   = slot.sync.in_flight();
+    const VkSemaphore   acquire_h = slot.sync.image_available();
+    const VkSemaphore   present_h = slot.sync.render_finished();
+    const VkSwapchainKHR sc_h     = swapchain.handle();
+    const auto          extent    = swapchain.summary().extent;
+
+    if (auto vr = vkWaitForFences(owner_, 1, &fence_h, VK_TRUE, UINT64_MAX);
+        vr != VK_SUCCESS) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::gpu_validation_failed,
+            std::string{"vkWaitForFences: "} + std::to_string(static_cast<int>(vr))));
+    }
+
+    std::uint32_t image_index = 0;
+    auto acq = vkAcquireNextImageKHR(owner_, sc_h, UINT64_MAX,
+                                     acquire_h, VK_NULL_HANDLE, &image_index);
+    if (acq == VK_ERROR_OUT_OF_DATE_KHR) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::gpu_swapchain_out_of_date,
+            "vkAcquireNextImageKHR: VK_ERROR_OUT_OF_DATE_KHR"));
+    }
+    if (acq != VK_SUCCESS && acq != VK_SUBOPTIMAL_KHR) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::gpu_validation_failed,
+            std::string{"vkAcquireNextImageKHR: "} + std::to_string(static_cast<int>(acq))));
+    }
+    const bool suboptimal_acq = (acq == VK_SUBOPTIMAL_KHR);
+
+    vkResetFences(owner_, 1, &fence_h);
+
+    slot.cb.reset();
+    if (auto r = slot.cb.begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+
+    const auto image = swapchain.images()[image_index];
+    const auto view  = swapchain.views()[image_index];
+
+    // UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL for rendering.
+    image_layout_transition(slot.cb.handle(), image,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        0, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+
+    // vkCmdBeginRendering with load-op CLEAR (no separate ClearColorImage).
+    VkRenderingAttachmentInfo color_attach{};
+    color_attach.sType         = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    color_attach.imageView     = view;
+    color_attach.imageLayout   = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    color_attach.loadOp        = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    color_attach.storeOp       = VK_ATTACHMENT_STORE_OP_STORE;
+    color_attach.clearValue.color = clear_color;
+
+    VkRenderingInfo ri{};
+    ri.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    ri.renderArea.extent    = extent;
+    ri.layerCount           = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments    = &color_attach;
+    vkCmdBeginRendering(slot.cb.handle(), &ri);
+
+    // Default viewport + scissor matching the full framebuffer; the pipeline
+    // is built with dynamic VIEWPORT + SCISSOR per ADR 0010.
+    VkViewport vp{};
+    vp.x        = 0.0F;
+    vp.y        = 0.0F;
+    vp.width    = static_cast<float>(extent.width);
+    vp.height   = static_cast<float>(extent.height);
+    vp.minDepth = 0.0F;
+    vp.maxDepth = 1.0F;
+    vkCmdSetViewport(slot.cb.handle(), 0, 1, &vp);
+    VkRect2D scissor{};
+    scissor.offset = {0, 0};
+    scissor.extent = extent;
+    vkCmdSetScissor(slot.cb.handle(), 0, 1, &scissor);
+
+    if (draw_callback) {
+        draw_callback(slot.cb.handle(), extent);
+    }
+
+    vkCmdEndRendering(slot.cb.handle());
+
+    image_layout_transition(slot.cb.handle(), image,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, 0,
+        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT);
+
+    if (auto r = slot.cb.end(); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+
+    VkSemaphoreSubmitInfo wait_info{};
+    wait_info.sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+    wait_info.semaphore = acquire_h;
+    wait_info.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+    VkSemaphoreSubmitInfo signal_info{};
+    signal_info.sType     = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
+    signal_info.semaphore = present_h;
+    signal_info.stageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+
+    VkCommandBufferSubmitInfo cb_info{};
+    cb_info.sType         = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+    cb_info.commandBuffer = slot.cb.handle();
+
+    VkSubmitInfo2 si{};
+    si.sType                    = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+    si.waitSemaphoreInfoCount   = 1;
+    si.pWaitSemaphoreInfos      = &wait_info;
+    si.commandBufferInfoCount   = 1;
+    si.pCommandBufferInfos      = &cb_info;
+    si.signalSemaphoreInfoCount = 1;
+    si.pSignalSemaphoreInfos    = &signal_info;
+
+    if (auto vr = vkQueueSubmit2(device.graphics_queue(), 1, &si, fence_h);
+        vr != VK_SUCCESS) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::gpu_validation_failed,
+            std::string{"vkQueueSubmit2: "} + std::to_string(static_cast<int>(vr))));
+    }
+
+    VkPresentInfoKHR pi{};
+    pi.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    pi.waitSemaphoreCount = 1;
+    pi.pWaitSemaphores    = &present_h;
+    pi.swapchainCount     = 1;
+    pi.pSwapchains        = &sc_h;
+    pi.pImageIndices      = &image_index;
+
+    const auto pres = vkQueuePresentKHR(device.present_queue(), &pi);
+    ++frame_counter_;
+
+    if (pres == VK_ERROR_OUT_OF_DATE_KHR) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::gpu_swapchain_out_of_date,
+            "vkQueuePresentKHR: VK_ERROR_OUT_OF_DATE_KHR"));
+    }
+    if (pres == VK_SUBOPTIMAL_KHR || suboptimal_acq) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::gpu_swapchain_suboptimal,
+            "vkQueuePresentKHR: VK_SUBOPTIMAL_KHR"));
+    }
+    if (pres != VK_SUCCESS) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::gpu_validation_failed,
+            std::string{"vkQueuePresentKHR: "} + std::to_string(static_cast<int>(pres))));
+    }
+    return {};
+}
+
 Renderer::Renderer(Renderer&& other) noexcept
     : owner_(other.owner_),
       frames_(std::move(other.frames_)),

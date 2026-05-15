@@ -1,7 +1,6 @@
-// Application entry. Wires Engine + Window + GPU stack and runs the
-// clear-color frame loop. Resize is handled by reacting to OUT_OF_DATE /
-// SUBOPTIMAL from the renderer: device wait_idle, swapchain.recreate,
-// renderer.rebind_swapchain, then re-issue the frame next iteration.
+// Application entry. Wires Engine + Window + GPU stack and runs the frame
+// loop. Renders a fullscreen triangle each frame to prove the pipeline
+// path end-to-end (shader load → pipeline build → draw → present).
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -10,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <span>
 #include <string>
@@ -17,14 +17,22 @@
 #include "noted/engine/engine.hpp"
 #include "noted/engine/error/error.hpp"
 #include "noted/engine/gpu/device.hpp"
+#include "noted/engine/gpu/graphics_pipeline.hpp"
 #include "noted/engine/gpu/instance.hpp"
 #include "noted/engine/gpu/physical_device.hpp"
+#include "noted/engine/gpu/pipeline_layout.hpp"
 #include "noted/engine/gpu/renderer.hpp"
+#include "noted/engine/gpu/shader_module.hpp"
 #include "noted/engine/gpu/surface.hpp"
 #include "noted/engine/gpu/swapchain.hpp"
 #include "noted/engine/harness/harness.hpp"
 #include "noted/engine/hook/registry.hpp"
+#include "noted/platform/fs/fs.hpp"
 #include "noted/platform/window/window.hpp"
+
+#ifndef NOTED_SHADER_DIR
+#  define NOTED_SHADER_DIR "shaders"
+#endif
 
 namespace {
 
@@ -60,9 +68,20 @@ void install_default_observers() {
                                           nullptr, &raw); vr != VK_SUCCESS) {
         return std::unexpected(noted::make_error(
             noted::ErrorCode::gpu_surface_lost,
-            std::string{"glfwCreateWindowSurface failed: VkResult="} + std::to_string(static_cast<int>(vr))));
+            std::string{"glfwCreateWindowSurface failed: VkResult="} +
+                std::to_string(static_cast<int>(vr))));
     }
     return raw;
+}
+
+[[nodiscard]] auto load_shader(
+    const noted::gpu::Device& device,
+    const std::filesystem::path& path) -> noted::Result<noted::gpu::ShaderModule> {
+    auto spv = noted::platform::fs::read_spirv(path);
+    if (!spv) {
+        return std::unexpected(std::move(spv).error());
+    }
+    return noted::gpu::ShaderModule::create(device, *spv);
 }
 
 }  // namespace
@@ -140,12 +159,44 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    std::cout << "swapchain: " << swapchain->summary().image_count
-              << " images | "
-              << swapchain->summary().extent.width << 'x'
-              << swapchain->summary().extent.height
-              << " | format=" << swapchain->summary().color_format
-              << " | mode="   << swapchain->summary().present_mode << '\n';
+    // Shaders + pipeline.
+    const std::filesystem::path shader_dir{NOTED_SHADER_DIR};
+    auto vert = load_shader(*device, shader_dir / "fullscreen_triangle.vert.spv");
+    if (!vert) {
+        std::cerr << vert.error().format() << '\n';
+        device->wait_idle();
+        (void)engine.shutdown();
+        return EXIT_FAILURE;
+    }
+    auto frag = load_shader(*device, shader_dir / "fullscreen_triangle.frag.spv");
+    if (!frag) {
+        std::cerr << frag.error().format() << '\n';
+        device->wait_idle();
+        (void)engine.shutdown();
+        return EXIT_FAILURE;
+    }
+
+    auto layout = noted::gpu::PipelineLayout::create(*device, {}, {});
+    if (!layout) {
+        std::cerr << layout.error().format() << '\n';
+        device->wait_idle();
+        (void)engine.shutdown();
+        return EXIT_FAILURE;
+    }
+
+    auto pipeline = noted::gpu::GraphicsPipelineBuilder{}
+        .add_stage(VK_SHADER_STAGE_VERTEX_BIT,   *vert)
+        .add_stage(VK_SHADER_STAGE_FRAGMENT_BIT, *frag)
+        .rasterization(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE,
+                       VK_FRONT_FACE_COUNTER_CLOCKWISE)
+        .color_format(swapchain->summary().color_format)
+        .build(*device, *layout);
+    if (!pipeline) {
+        std::cerr << pipeline.error().format() << '\n';
+        device->wait_idle();
+        (void)engine.shutdown();
+        return EXIT_FAILURE;
+    }
 
     auto renderer = noted::gpu::Renderer::create(*device, *swapchain);
     if (!renderer) {
@@ -159,7 +210,6 @@ int main() {
         device->wait_idle();
         const auto [w, h] = window->framebuffer_size();
         if (w == 0 || h == 0) {
-            // Window is minimized; skip recreate this iteration.
             return {};
         }
         if (auto r = swapchain->recreate(*physical, surface, VkExtent2D{w, h},
@@ -174,20 +224,26 @@ int main() {
         return renderer->rebind_swapchain(*device, *swapchain);
     };
 
+    const VkPipeline pipeline_h = pipeline->handle();
+    noted::gpu::Renderer::DrawCallback draw =
+        [pipeline_h](VkCommandBuffer cb, VkExtent2D /*extent*/) {
+            vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_h);
+            vkCmdDraw(cb, /*vertexCount=*/3, /*instanceCount=*/1,
+                      /*firstVertex=*/0, /*firstInstance=*/0);
+        };
+
     while (!window->should_close()) {
         engine.begin_frame();
         window->poll_events();
 
-        // Animate the clear color so we can see frames advancing without a
-        // FPS overlay. Will be replaced with real rendering in feat/triangle.
-        const auto t = static_cast<float>(engine.frame_index()) * 0.005F;
-        VkClearColorValue color{};
-        color.float32[0] = 0.5F + 0.5F * std::sin(t);
-        color.float32[1] = 0.5F + 0.5F * std::sin(t + 2.094F);  // +120°
-        color.float32[2] = 0.5F + 0.5F * std::sin(t + 4.188F);  // +240°
-        color.float32[3] = 1.0F;
+        const auto t = static_cast<float>(engine.frame_index()) * 0.003F;
+        VkClearColorValue clear{};
+        clear.float32[0] = 0.05F + 0.05F * std::sin(t);
+        clear.float32[1] = 0.05F + 0.05F * std::sin(t + 2.094F);
+        clear.float32[2] = 0.10F + 0.05F * std::sin(t + 4.188F);
+        clear.float32[3] = 1.0F;
 
-        auto rr = renderer->render_frame(*device, *swapchain, color);
+        auto rr = renderer->render_frame_with(*device, *swapchain, clear, draw);
         if (!rr) {
             const auto code = rr.error().code;
             if (code == noted::ErrorCode::gpu_swapchain_out_of_date ||
