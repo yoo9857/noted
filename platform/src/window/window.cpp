@@ -6,9 +6,94 @@
 #include <mutex>
 #include <string>
 
+#include "noted/engine/hook/hook.hpp"
 #include "noted/engine/hook/registry.hpp"
 
 namespace noted::platform {
+
+namespace {
+
+[[nodiscard]] auto map_button(int glfw_button) -> noted::hook::PointerButton {
+    switch (glfw_button) {
+        case GLFW_MOUSE_BUTTON_LEFT:   return noted::hook::PointerButton::left;
+        case GLFW_MOUSE_BUTTON_RIGHT:  return noted::hook::PointerButton::right;
+        case GLFW_MOUSE_BUTTON_MIDDLE: return noted::hook::PointerButton::middle;
+        default:                       return noted::hook::PointerButton::other;
+    }
+}
+
+// Convert window-space coords (where GLFW reports cursor) to framebuffer-space
+// coords. On HiDPI displays the two differ by the content scale.
+[[nodiscard]] auto window_to_framebuffer(GLFWwindow* w, double xw, double yw)
+    -> std::pair<double, double> {
+    int ww = 0;
+    int wh = 0;
+    int fw = 0;
+    int fh = 0;
+    glfwGetWindowSize(w, &ww, &wh);
+    glfwGetFramebufferSize(w, &fw, &fh);
+    if (ww <= 0 || wh <= 0) {
+        return {xw, yw};
+    }
+    const double sx = static_cast<double>(fw) / static_cast<double>(ww);
+    const double sy = static_cast<double>(fh) / static_cast<double>(wh);
+    return {xw * sx, yw * sy};
+}
+
+void on_cursor_pos(GLFWwindow* w, double xw, double yw) {
+    const auto [x, y] = window_to_framebuffer(w, xw, yw);
+    noted::hook::registry().on_pointer_moved.publish(noted::hook::PointerMoved{
+        .x = x, .y = y,
+    });
+}
+
+void on_mouse_button(GLFWwindow* w, int button, int action, int /*mods*/) {
+    double xw = 0.0;
+    double yw = 0.0;
+    glfwGetCursorPos(w, &xw, &yw);
+    const auto [x, y] = window_to_framebuffer(w, xw, yw);
+    if (action == GLFW_PRESS) {
+        noted::hook::registry().on_pointer_pressed.publish(noted::hook::PointerPressed{
+            .x = x, .y = y,
+            .button = map_button(button),
+        });
+    } else if (action == GLFW_RELEASE) {
+        noted::hook::registry().on_pointer_released.publish(noted::hook::PointerReleased{
+            .x = x, .y = y,
+            .button = map_button(button),
+        });
+    }
+}
+
+void on_scroll(GLFWwindow* /*w*/, double dx, double dy) {
+    noted::hook::registry().on_scrolled.publish(noted::hook::Scrolled{.dx = dx, .dy = dy});
+}
+
+void on_key(GLFWwindow* /*w*/, int key, int scancode, int action, int mods) {
+    if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+        noted::hook::registry().on_key_pressed.publish(noted::hook::KeyPressed{
+            .glfw_key  = key,
+            .scancode  = scancode,
+            .mods      = mods,
+            .is_repeat = (action == GLFW_REPEAT),
+        });
+    } else if (action == GLFW_RELEASE) {
+        noted::hook::registry().on_key_released.publish(noted::hook::KeyReleased{
+            .glfw_key = key,
+            .scancode = scancode,
+            .mods     = mods,
+        });
+    }
+}
+
+void on_framebuffer_size(GLFWwindow* /*w*/, int width, int height) {
+    noted::hook::registry().on_framebuffer_resized.publish(noted::hook::FramebufferResized{
+        .width  = static_cast<std::uint32_t>(width),
+        .height = static_cast<std::uint32_t>(height),
+    });
+}
+
+}  // namespace
 
 namespace {
 
@@ -65,6 +150,16 @@ auto Window::create(const WindowDesc& desc) -> Result<Window> {
             noted::ErrorCode::invalid_state,
             std::string{"glfwCreateWindow failed: "} + (err != nullptr ? err : "unknown")));
     }
+
+    // Wire input callbacks. Events are published to the global hook registry;
+    // listeners subscribe there. We do not stash a per-window user pointer
+    // because the registry is process-global today (see ADR 0002).
+    glfwSetCursorPosCallback(h,       &on_cursor_pos);
+    glfwSetMouseButtonCallback(h,     &on_mouse_button);
+    glfwSetScrollCallback(h,          &on_scroll);
+    glfwSetKeyCallback(h,             &on_key);
+    glfwSetFramebufferSizeCallback(h, &on_framebuffer_size);
+
     return Window{h};
 }
 

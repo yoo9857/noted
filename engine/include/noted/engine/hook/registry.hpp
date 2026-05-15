@@ -23,6 +23,15 @@ public:
     Channel<CommandExecuted>  on_command_executed;
     Channel<TimerSpan>        on_timer_span;
     Channel<FlagChanged>      on_flag_changed;
+
+    // Input.
+    Channel<PointerMoved>       on_pointer_moved;
+    Channel<PointerPressed>     on_pointer_pressed;
+    Channel<PointerReleased>    on_pointer_released;
+    Channel<Scrolled>           on_scrolled;
+    Channel<KeyPressed>         on_key_pressed;
+    Channel<KeyReleased>        on_key_released;
+    Channel<FramebufferResized> on_framebuffer_resized;
 };
 
 // Access the process-wide Registry. App owns its lifetime via construct/destroy.
