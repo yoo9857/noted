@@ -102,7 +102,7 @@ auto Device::create(
     if (auto vr = vkCreateDevice(physical.handle(), &dci, nullptr, &raw); vr != VK_SUCCESS) {
         return std::unexpected(noted::make_error(
             noted::ErrorCode::gpu_validation_failed,
-            std::string{"vkCreateDevice failed: VkResult="} + std::to_string(vr)));
+            std::string{"vkCreateDevice failed: VkResult="} + std::to_string(static_cast<int>(vr))));
     }
 
     Device out;
