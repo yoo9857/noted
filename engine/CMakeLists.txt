@@ -18,6 +18,7 @@ noted_add_module(
         src/gpu/allocator.cpp
         src/gpu/buffer.cpp
         src/gpu/image.cpp
+        src/gpu/upload.cpp
         src/tile/tile.cpp
         src/color/color.cpp
         src/job/job.cpp
