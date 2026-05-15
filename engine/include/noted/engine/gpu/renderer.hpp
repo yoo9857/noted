@@ -91,9 +91,20 @@ private:
     Renderer() = default;
     void destroy() noexcept;
 
-    VkDevice              owner_         = VK_NULL_HANDLE;
-    std::vector<FrameSlot> frames_;
-    std::uint64_t          frame_counter_ = 0;
+    // Tear down + rebuild the per-image render_finished semaphore array
+    // to match the current swapchain's image count.
+    [[nodiscard]] auto rebuild_present_semaphores(
+        const Device&    device,
+        const Swapchain& swapchain) -> Result<void>;
+
+    VkDevice                 owner_           = VK_NULL_HANDLE;
+    std::vector<FrameSlot>   frames_;
+    // One render_finished semaphore per swapchain image. Indexed by the
+    // image index returned from vkAcquireNextImageKHR. Per-image (not
+    // per-frame-in-flight) so the present queue never re-signals a
+    // semaphore that's still in use — see ADR 0008 follow-up.
+    std::vector<VkSemaphore> render_finished_per_image_;
+    std::uint64_t            frame_counter_   = 0;
 };
 
 }  // namespace noted::gpu
