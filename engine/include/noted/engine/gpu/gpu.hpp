@@ -13,6 +13,7 @@
 #include "noted/engine/gpu/command_pool.hpp"
 #include "noted/engine/gpu/device.hpp"
 #include "noted/engine/gpu/frame_sync.hpp"
+#include "noted/engine/gpu/image.hpp"
 #include "noted/engine/gpu/instance.hpp"
 #include "noted/engine/gpu/physical_device.hpp"
 #include "noted/engine/gpu/renderer.hpp"
