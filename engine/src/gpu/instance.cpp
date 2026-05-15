@@ -101,7 +101,7 @@ auto Instance::create(const InstanceCreateInfo& info) -> Result<Instance> {
     if (auto vr = vkCreateInstance(&ci, nullptr, &handle); vr != VK_SUCCESS) {
         return std::unexpected(noted::make_error(
             noted::ErrorCode::gpu_validation_failed,
-            std::string{"vkCreateInstance failed: VkResult="} + std::to_string(vr)));
+            std::string{"vkCreateInstance failed: VkResult="} + std::to_string(static_cast<int>(vr))));
     }
 
     Instance out;
