@@ -18,6 +18,7 @@ noted_add_module(
         src/gpu/allocator.cpp
         src/gpu/buffer.cpp
         src/gpu/image.cpp
+        src/gpu/canvas_render_target.cpp
         src/gpu/upload.cpp
         src/gpu/sampler.cpp
         src/gpu/shader_module.cpp

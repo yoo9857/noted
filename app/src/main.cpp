@@ -19,6 +19,7 @@
 #include "noted/engine/engine.hpp"
 #include "noted/engine/error/error.hpp"
 #include "noted/engine/gpu/allocator.hpp"
+#include "noted/engine/gpu/canvas_render_target.hpp"
 #include "noted/engine/gpu/descriptor_pool.hpp"
 #include "noted/engine/gpu/descriptor_set.hpp"
 #include "noted/engine/gpu/descriptor_set_layout.hpp"
@@ -254,7 +255,8 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    // -------- Descriptor set with combined image sampler at (set=0, binding=0).
+    // -------- Descriptor layout shared by both passes:
+    // (set=0, binding=0) = combined image sampler in fragment shader.
     const std::array<noted::gpu::DescriptorBinding, 1> bindings{{{
         .binding = 0,
         .type    = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -269,13 +271,16 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    // Pool holds two sets — one for the source texture (canvas pass) and
+    // one for the canvas itself (composite pass). The canvas set is
+    // rewritten on every swapchain recreate because canvas.view() changes.
     const std::array<noted::gpu::DescriptorPoolSize, 1> pool_sizes{{{
         .type  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .count = 1,
+        .count = 2,
     }}};
     auto pool = noted::gpu::DescriptorPool::create(*device,
         noted::gpu::DescriptorPoolCreateInfo{
-            .max_sets   = 1,
+            .max_sets   = 2,
             .pool_sizes = pool_sizes,
         });
     if (!pool) {
@@ -285,19 +290,49 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    auto raw_set = pool->allocate(*set_layout);
-    if (!raw_set) {
-        std::cerr << raw_set.error().format() << '\n';
+    auto raw_texture_set = pool->allocate(*set_layout);
+    if (!raw_texture_set) {
+        std::cerr << raw_texture_set.error().format() << '\n';
         device->wait_idle();
         (void)engine.shutdown();
         return EXIT_FAILURE;
     }
-    noted::gpu::DescriptorSet descriptor_set{device->handle(), *raw_set};
-    noted::gpu::DescriptorWriter{descriptor_set}
+    noted::gpu::DescriptorSet texture_set{device->handle(), *raw_texture_set};
+    noted::gpu::DescriptorWriter{texture_set}
         .write_combined_image_sampler(0, texture->view(), sampler->handle())
         .commit();
 
-    // -------- Pipeline: textured quad.
+    auto raw_canvas_set = pool->allocate(*set_layout);
+    if (!raw_canvas_set) {
+        std::cerr << raw_canvas_set.error().format() << '\n';
+        device->wait_idle();
+        (void)engine.shutdown();
+        return EXIT_FAILURE;
+    }
+    noted::gpu::DescriptorSet canvas_set{device->handle(), *raw_canvas_set};
+
+    // -------- Canvas render target (offscreen image both passes share).
+    constexpr VkFormat kCanvasFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    auto canvas = noted::gpu::CanvasRenderTarget::create(*allocator,
+        noted::gpu::CanvasCreateInfo{
+            .extent = swapchain->summary().extent,
+            .format = kCanvasFormat,
+        });
+    if (!canvas) {
+        std::cerr << canvas.error().format() << '\n';
+        device->wait_idle();
+        (void)engine.shutdown();
+        return EXIT_FAILURE;
+    }
+    noted::gpu::DescriptorWriter{canvas_set}
+        .write_combined_image_sampler(0, canvas->view(), sampler->handle())
+        .commit();
+
+    // -------- Pipelines: same shader, two color formats.
+    //   pipeline_to_canvas    — outputs to kCanvasFormat
+    //   pipeline_to_swapchain — outputs to swapchain.color_format()
+    // Sharing the shader keeps the demo small; later layers/strokes will
+    // grow their own pipelines.
     const std::filesystem::path shader_dir{NOTED_SHADER_DIR};
     auto vert = load_shader(*device, shader_dir / "fullscreen.vs_main.spv");
     auto frag = load_shader(*device, shader_dir / "fullscreen.ps_textured.spv");
@@ -319,18 +354,21 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    // Slang renames every entry point to "main" in SPIR-V output (matches
-    // the convention every other shading language uses). The .slang
-    // function name is only used to select which entry slangc compiles.
-    auto pipeline = noted::gpu::GraphicsPipelineBuilder{}
-        .add_stage(VK_SHADER_STAGE_VERTEX_BIT,   *vert, "main")
-        .add_stage(VK_SHADER_STAGE_FRAGMENT_BIT, *frag, "main")
-        .rasterization(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE,
-                       VK_FRONT_FACE_COUNTER_CLOCKWISE)
-        .color_format(swapchain->summary().color_format)
-        .build(*device, *pipeline_layout);
-    if (!pipeline) {
-        std::cerr << pipeline.error().format() << '\n';
+    auto build_pipeline = [&](VkFormat color_format) {
+        return noted::gpu::GraphicsPipelineBuilder{}
+            .add_stage(VK_SHADER_STAGE_VERTEX_BIT,   *vert, "main")
+            .add_stage(VK_SHADER_STAGE_FRAGMENT_BIT, *frag, "main")
+            .rasterization(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE,
+                           VK_FRONT_FACE_COUNTER_CLOCKWISE)
+            .color_format(color_format)
+            .build(*device, *pipeline_layout);
+    };
+
+    auto pipeline_to_canvas = build_pipeline(kCanvasFormat);
+    auto pipeline_to_swapchain = build_pipeline(swapchain->summary().color_format);
+    if (!pipeline_to_canvas || !pipeline_to_swapchain) {
+        std::cerr << (!pipeline_to_canvas ? pipeline_to_canvas.error().format()
+                                          : pipeline_to_swapchain.error().format()) << '\n';
         device->wait_idle();
         (void)engine.shutdown();
         return EXIT_FAILURE;
@@ -359,18 +397,40 @@ int main() {
                 }); !r) {
             return std::unexpected(std::move(r).error());
         }
-        return renderer->rebind_swapchain(*device, *swapchain);
+        if (auto r = renderer->rebind_swapchain(*device, *swapchain); !r) {
+            return std::unexpected(std::move(r).error());
+        }
+        if (auto r = canvas->resize(*allocator, swapchain->summary().extent); !r) {
+            return std::unexpected(std::move(r).error());
+        }
+        // canvas->view() is now a fresh handle — re-point the descriptor.
+        noted::gpu::DescriptorWriter{canvas_set}
+            .write_combined_image_sampler(0, canvas->view(), sampler->handle())
+            .commit();
+        return {};
     };
 
-    const VkPipeline        pipeline_h = pipeline->handle();
-    const VkPipelineLayout  layout_h   = pipeline_layout->handle();
-    const VkDescriptorSet   set_h      = descriptor_set.handle();
-    noted::gpu::Renderer::DrawCallback draw =
-        [pipeline_h, layout_h, set_h](VkCommandBuffer cb, VkExtent2D /*ext*/) {
-            vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_h);
+    const VkPipeline       canvas_pipeline_h    = pipeline_to_canvas->handle();
+    const VkPipeline       composite_pipeline_h = pipeline_to_swapchain->handle();
+    const VkPipelineLayout layout_h             = pipeline_layout->handle();
+    const VkDescriptorSet  texture_set_h        = texture_set.handle();
+    const VkDescriptorSet  canvas_set_h         = canvas_set.handle();
+
+    noted::gpu::Renderer::DrawCallback canvas_draw =
+        [canvas_pipeline_h, layout_h, texture_set_h](VkCommandBuffer cb, VkExtent2D /*ext*/) {
+            vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, canvas_pipeline_h);
             vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                     layout_h, /*firstSet=*/0,
-                                    /*setCount=*/1, &set_h,
+                                    /*setCount=*/1, &texture_set_h,
+                                    /*dynamicOffsetCount=*/0, nullptr);
+            vkCmdDraw(cb, /*vertexCount=*/3, /*instanceCount=*/1, 0, 0);
+        };
+    noted::gpu::Renderer::DrawCallback composite_draw =
+        [composite_pipeline_h, layout_h, canvas_set_h](VkCommandBuffer cb, VkExtent2D /*ext*/) {
+            vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, composite_pipeline_h);
+            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                    layout_h, /*firstSet=*/0,
+                                    /*setCount=*/1, &canvas_set_h,
                                     /*dynamicOffsetCount=*/0, nullptr);
             vkCmdDraw(cb, /*vertexCount=*/3, /*instanceCount=*/1, 0, 0);
         };
@@ -382,13 +442,28 @@ int main() {
             window->poll_events();
         }
 
-        VkClearColorValue clear{};
-        clear.float32[0] = 0.05F;
-        clear.float32[1] = 0.05F;
-        clear.float32[2] = 0.10F;
-        clear.float32[3] = 1.0F;
+        // Canvas pass clears to opaque black — the source texture will
+        // overdraw the whole surface, but defending against pipeline-state
+        // surprises is cheap.
+        VkClearColorValue canvas_clear{};
+        canvas_clear.float32[0] = 0.0F;
+        canvas_clear.float32[1] = 0.0F;
+        canvas_clear.float32[2] = 0.0F;
+        canvas_clear.float32[3] = 1.0F;
 
-        auto rr = renderer->render_frame_with(*device, *swapchain, clear, draw);
+        // Swapchain pass clears to the previous demo's dark teal — what
+        // shows through if the composite quad ever leaves edges blank
+        // (it doesn't today, but it's a useful regression tell).
+        VkClearColorValue swapchain_clear{};
+        swapchain_clear.float32[0] = 0.05F;
+        swapchain_clear.float32[1] = 0.05F;
+        swapchain_clear.float32[2] = 0.10F;
+        swapchain_clear.float32[3] = 1.0F;
+
+        auto rr = renderer->render_with_canvas(
+            *device, *swapchain, *canvas,
+            noted::gpu::Renderer::CanvasPassDesc{ canvas_clear, canvas_draw },
+            noted::gpu::Renderer::SwapchainPassDesc{ swapchain_clear, composite_draw });
         if (!rr) {
             const auto code = rr.error().code;
             if (code == noted::ErrorCode::gpu_swapchain_out_of_date ||
