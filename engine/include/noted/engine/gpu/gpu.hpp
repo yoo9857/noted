@@ -19,6 +19,7 @@
 #include "noted/engine/gpu/renderer.hpp"
 #include "noted/engine/gpu/surface.hpp"
 #include "noted/engine/gpu/swapchain.hpp"
+#include "noted/engine/gpu/upload.hpp"
 
 namespace noted::gpu {
 
