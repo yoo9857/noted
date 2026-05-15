@@ -61,13 +61,16 @@ public:
         return static_cast<std::uint32_t>(frames_.size());
     }
 
-private:
+    // Public so the implementation-file factory build_slot() (anonymous
+    // namespace in renderer.cpp) can name the type. Treat as an
+    // implementation detail; no API guarantees on the field layout.
     struct FrameSlot {
         CommandPool   pool;
         CommandBuffer cb;
         FrameSync     sync;
     };
 
+private:
     Renderer() = default;
     void destroy() noexcept;
 
