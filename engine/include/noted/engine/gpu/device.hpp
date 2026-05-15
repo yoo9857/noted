@@ -37,6 +37,14 @@ struct DeviceCreateInfo {
     bool enable_descriptor_indexing  = true;
     bool enable_buffer_device_address = true;
     bool enable_timeline_semaphore   = true;
+
+    // ---- Vulkan 1.1 features the engine relies on ----
+    // shader_draw_parameters     — exposes SV_VertexID / SV_InstanceID
+    //                              (gl_VertexIndex / gl_InstanceIndex) to
+    //                              shaders. Required by every vertex shader
+    //                              that draws without a vertex buffer
+    //                              (fullscreen quad, instanced sprites).
+    bool enable_shader_draw_parameters = true;
 };
 
 // Logical device + queue handles.

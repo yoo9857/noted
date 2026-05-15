@@ -87,12 +87,19 @@ auto Device::create(
     vk13.dynamicRendering = info.enable_dynamic_rendering ? VK_TRUE : VK_FALSE;
     vk13.synchronization2 = info.enable_synchronization2  ? VK_TRUE : VK_FALSE;
 
+    // 1.1 features the engine relies on. shaderDrawParameters is what
+    // exposes SV_VertexID / gl_VertexIndex to vertex shaders.
+    VkPhysicalDeviceVulkan11Features vk11{};
+    vk11.sType                 = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    vk11.pNext                 = &vk13;
+    vk11.shaderDrawParameters  = info.enable_shader_draw_parameters ? VK_TRUE : VK_FALSE;
+
     // 1.2 features: the 2026 baseline — descriptor indexing for bindless,
     // buffer device address for pointer-as-uniform shader code, timeline
     // semaphores as the canonical multi-queue sync primitive.
     VkPhysicalDeviceVulkan12Features vk12{};
     vk12.sType                                       = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    vk12.pNext                                       = &vk13;
+    vk12.pNext                                       = &vk11;
     if (info.enable_descriptor_indexing) {
         vk12.descriptorIndexing                              = VK_TRUE;
         vk12.shaderSampledImageArrayNonUniformIndexing       = VK_TRUE;
