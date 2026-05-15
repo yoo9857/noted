@@ -13,6 +13,7 @@ noted_add_module(
         src/gpu/swapchain.cpp
         src/gpu/command_pool.cpp
         src/gpu/command_buffer.cpp
+        src/gpu/frame_sync.cpp
         src/tile/tile.cpp
         src/color/color.cpp
         src/job/job.cpp
