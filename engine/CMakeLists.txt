@@ -15,6 +15,7 @@ noted_add_module(
         src/gpu/command_buffer.cpp
         src/gpu/frame_sync.cpp
         src/gpu/renderer.cpp
+        src/gpu/allocator.cpp
         src/tile/tile.cpp
         src/color/color.cpp
         src/job/job.cpp
@@ -22,6 +23,7 @@ noted_add_module(
     PUBLIC_DEPS
         Vulkan::Vulkan
         glfw
+        VulkanMemoryAllocator
 )
 
 # Module-local tests live under //tests/unit (shared with other modules).
