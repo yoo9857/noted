@@ -1,0 +1,10 @@
+# Default owner — every PR pulls @yoo9857 in for review until specific
+# subsystem owners are assigned.
+*                       @yoo9857
+
+# Cross-cutting docs/decisions should be reviewed by the project lead.
+/docs/architecture/     @yoo9857
+/CMakeLists.txt         @yoo9857
+/cmake/                 @yoo9857
+/.github/               @yoo9857
+/.githooks/             @yoo9857

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Light pre-push sanity check. Avoid heavy builds here — that's CI's job.
+# Bail out if we're pushing the protected branch directly.
+set -euo pipefail
+
+protected="refs/heads/main"
+while read -r local_ref local_sha remote_ref remote_sha; do
+    if [[ "$remote_ref" == "$protected" ]]; then
+        echo "pre-push: direct push to $protected is blocked. Open a PR." >&2
+        exit 1
+    fi
+done
+
+exit 0

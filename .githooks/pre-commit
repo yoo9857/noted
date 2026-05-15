@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Local pre-commit gate. Runs against staged changes only; refuses commits
+# that would fail CI's lint job.
+set -euo pipefail
+
+# 1. Reject committing common secrets.
+if git diff --cached --name-only -z | xargs -0 -I{} grep -lE \
+    -e 'AKIA[0-9A-Z]{16}' \
+    -e 'AIza[0-9A-Za-z_-]{35}' \
+    -e 'ghp_[0-9A-Za-z]{36}' \
+    -e 'sk-[a-zA-Z0-9]{32,}' \
+    -e 'BEGIN [A-Z ]*PRIVATE KEY' \
+    {} 2>/dev/null | head -n1 | grep -q .; then
+    echo "pre-commit: refusing to commit — possible secret detected." >&2
+    echo "Inspect with: git diff --cached" >&2
+    exit 1
+fi
+
+# 2. clang-format check on staged C++.
+if command -v clang-format >/dev/null 2>&1; then
+    mapfile -t files < <(git diff --cached --name-only --diff-filter=ACMR \
+        | grep -E '\.(c|cc|cpp|cxx|h|hh|hpp|hxx)$' || true)
+    if (( ${#files[@]} > 0 )); then
+        bad=0
+        for f in "${files[@]}"; do
+            [[ -f "$f" ]] || continue
+            if ! diff -q <(clang-format "$f") "$f" >/dev/null; then
+                echo "pre-commit: clang-format would change $f" >&2
+                bad=1
+            fi
+        done
+        if (( bad )); then
+            echo "Run: clang-format -i <files> and re-stage." >&2
+            exit 1
+        fi
+    fi
+else
+    echo "pre-commit: clang-format not found, skipping format check." >&2
+fi
+
+exit 0

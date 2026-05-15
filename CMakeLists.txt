@@ -11,13 +11,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-if(MSVC)
-    add_compile_options(/W4 /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8 /EHsc)
-    add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
-else()
-    add_compile_options(-Wall -Wextra -Wpedantic -Wconversion)
-endif()
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+include(CompilerWarnings)
+include(Hardening)
+include(NotedModule)
 
+# ---- Project options ----------------------------------------------------
+option(NOTED_BUILD_TESTS         "Build unit/integration/bench tests"  ON)
+option(NOTED_WARNINGS_AS_ERRORS  "Treat warnings as errors"           OFF)
+option(NOTED_ENABLE_ASAN         "Enable AddressSanitizer"            OFF)
+option(NOTED_ENABLE_UBSAN        "Enable UndefinedBehaviorSanitizer"  OFF)
+option(NOTED_ENABLE_TSAN         "Enable ThreadSanitizer"             OFF)
+
+# ---- External dependencies ----------------------------------------------
 find_package(Vulkan 1.3 REQUIRED)
 
 include(FetchContent)
@@ -33,4 +39,26 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glfw)
 
+if(NOTED_BUILD_TESTS)
+    FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG v1.15.2
+        GIT_SHALLOW TRUE
+    )
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(googletest)
+    enable_testing()
+endif()
+
+# ---- Modules (order: leaves first) --------------------------------------
 add_subdirectory(engine)
+add_subdirectory(domain)
+add_subdirectory(plugin)
+add_subdirectory(platform)
+add_subdirectory(ui)
+add_subdirectory(app)
+
+if(NOTED_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()

@@ -1,12 +1,19 @@
-add_executable(noted_app src/main.cpp)
-
-target_link_libraries(noted_app PRIVATE
-    Vulkan::Vulkan
-    glfw
+noted_add_module(
+    NAME    engine
+    SOURCES
+        src/hook/registry.cpp
+        src/error/error.cpp
+        src/harness/harness.cpp
+        src/gpu/gpu.cpp
+        src/tile/tile.cpp
+        src/color/color.cpp
+        src/job/job.cpp
+        src/memory/memory.cpp
+    PUBLIC_DEPS
+        Vulkan::Vulkan
+        glfw
 )
 
-target_compile_features(noted_app PRIVATE cxx_std_23)
-
-set_target_properties(noted_app PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-)
+if(NOTED_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
