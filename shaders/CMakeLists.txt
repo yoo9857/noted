@@ -2,28 +2,32 @@ include(Shaders)
 
 set(NOTED_SHADER_OUTPUT_DIR "${CMAKE_BINARY_DIR}/shaders")
 
-noted_compile_shader(
-    SOURCE  "${CMAKE_CURRENT_SOURCE_DIR}/fullscreen_triangle.vert"
-    STAGE   vertex
-    OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/fullscreen_triangle.vert.spv"
+# Single Slang file, three entries: vs_main, ps_gradient, ps_textured.
+# Each entry is compiled to its own SPIR-V module so the app can pick
+# the fragment shader it needs at pipeline-build time.
+set(_slang_src "${CMAKE_CURRENT_SOURCE_DIR}/fullscreen.slang")
+
+noted_compile_slang_entry(
+    SOURCE  "${_slang_src}"
+    ENTRY   vs_main
+    OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.vs_main.spv"
 )
-noted_compile_shader(
-    SOURCE  "${CMAKE_CURRENT_SOURCE_DIR}/fullscreen_triangle.frag"
-    STAGE   fragment
-    OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/fullscreen_triangle.frag.spv"
+noted_compile_slang_entry(
+    SOURCE  "${_slang_src}"
+    ENTRY   ps_gradient
+    OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.ps_gradient.spv"
 )
-noted_compile_shader(
-    SOURCE  "${CMAKE_CURRENT_SOURCE_DIR}/textured_quad.frag"
-    STAGE   fragment
-    OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/textured_quad.frag.spv"
+noted_compile_slang_entry(
+    SOURCE  "${_slang_src}"
+    ENTRY   ps_textured
+    OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.ps_textured.spv"
 )
 
 add_custom_target(noted_shaders ALL
     DEPENDS
-        "${NOTED_SHADER_OUTPUT_DIR}/fullscreen_triangle.vert.spv"
-        "${NOTED_SHADER_OUTPUT_DIR}/fullscreen_triangle.frag.spv"
-        "${NOTED_SHADER_OUTPUT_DIR}/textured_quad.frag.spv"
+        "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.vs_main.spv"
+        "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.ps_gradient.spv"
+        "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.ps_textured.spv"
 )
 
-# Export the directory so the app can find SPIR-V at runtime.
 set(NOTED_SHADER_OUTPUT_DIR "${NOTED_SHADER_OUTPUT_DIR}" PARENT_SCOPE)

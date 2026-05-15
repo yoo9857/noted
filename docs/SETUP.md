@@ -9,9 +9,12 @@ Target host for this guide: Windows 10/11 x64. Linux and macOS notes inline.
 | Visual Studio Build Tools 2022 | 17.10+ | MSVC C++23 compiler |
 | CMake        | >= 3.28    | Build generator (project requires 3.28) |
 | Ninja        | >= 1.11    | Fast build driver                    |
-| Vulkan SDK   | >= 1.3.290 | Headers, loader, validation layers   |
+| **Vulkan SDK** | **>= 1.4.309** | Headers, loader, validation layers, **slangc** (Slang shader compiler) |
 | Git          | >= 2.40    | Already installed                    |
 | Git LFS      | >= 3.7     | Already installed                    |
+
+Slang is the only shader language. `slangc` ships with the Vulkan SDK 1.4+;
+no separate install. See [ADR 0012](architecture/0012-slang-shaders.md).
 
 ## Windows install (winget)
 
@@ -32,7 +35,7 @@ Verify:
 cmake --version
 ninja --version
 $env:VULKAN_SDK
-& "$env:VULKAN_SDK\Bin\glslangValidator.exe" --version
+& "$env:VULKAN_SDK\Bin\slangc.exe" -v
 ```
 
 ## Linux install (Ubuntu 24.04)
@@ -64,9 +67,11 @@ cmake --build build --parallel
 
 Expected output:
 ```
-noted bootstrap: N Vulkan device(s)
-  [0] <GPU name> | API 1.3.x | driver ...
+selected GPU: <GPU name>
+swapchain: 3 images | 1600x1000 | format=43 | mode=1
 ```
+A 1600x1000 window opens showing the textured fullscreen quad
+(checkerboard if `sample.png` is not next to the binary).
 
 ## Common issues
 
