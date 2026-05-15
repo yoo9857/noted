@@ -1,0 +1,93 @@
+# Build outputs
+build/
+out/
+bin/
+obj/
+dist/
+target/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.pdb
+*.idb
+*.ilk
+*.exp
+
+# Compiled shaders
+*.spv
+
+# Package managers
+vcpkg_installed/
+.vcpkg/
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Rust (if any subproject)
+Cargo.lock
+**/*.rs.bk
+
+# IDE / editors
+.vs/
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*.user
+*.suo
+*.ncb
+*.sdf
+*.aps
+*.sln.docstates
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Profiling / debug
+*.trace
+*.tracy
+RenderDoc*
+NsightCache/
+
+# Generated docs
+docs/_build/
+docs/html/
+docs/xml/
+
+# Secrets
+.env
+.env.local
+*.pem
+*.key
+secrets/
+
+# OS
+$RECYCLE.BIN/
+ehthumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+coverage/
+*.gcov
+*.gcda
+*.gcno
+.coverage

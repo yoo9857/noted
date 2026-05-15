@@ -1,0 +1,52 @@
+# Default
+* text=auto eol=lf
+
+# Windows scripts
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Source files (LF)
+*.c    text eol=lf
+*.cc   text eol=lf
+*.cpp  text eol=lf
+*.cxx  text eol=lf
+*.h    text eol=lf
+*.hpp  text eol=lf
+*.hxx  text eol=lf
+*.inl  text eol=lf
+*.rs   text eol=lf
+*.glsl text eol=lf
+*.hlsl text eol=lf
+*.slang text eol=lf
+*.metal text eol=lf
+*.wgsl text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+
+# Binary assets via Git LFS
+*.png   filter=lfs diff=lfs merge=lfs -text
+*.jpg   filter=lfs diff=lfs merge=lfs -text
+*.jpeg  filter=lfs diff=lfs merge=lfs -text
+*.tiff  filter=lfs diff=lfs merge=lfs -text
+*.tif   filter=lfs diff=lfs merge=lfs -text
+*.psd   filter=lfs diff=lfs merge=lfs -text
+*.exr   filter=lfs diff=lfs merge=lfs -text
+*.hdr   filter=lfs diff=lfs merge=lfs -text
+*.icc   filter=lfs diff=lfs merge=lfs -text
+*.ttf   filter=lfs diff=lfs merge=lfs -text
+*.otf   filter=lfs diff=lfs merge=lfs -text
+*.woff  filter=lfs diff=lfs merge=lfs -text
+*.woff2 filter=lfs diff=lfs merge=lfs -text
+*.zip   filter=lfs diff=lfs merge=lfs -text
+*.7z    filter=lfs diff=lfs merge=lfs -text
+
+# Linguist hints (clean GitHub language stats)
+*.glsl  linguist-language=GLSL
+*.slang linguist-language=HLSL
+docs/*  linguist-documentation
