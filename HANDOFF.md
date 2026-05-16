@@ -3,7 +3,11 @@
 <<<<<<< HEAD
 **Last updated:** 2026-05-16 · **main HEAD:** `867fc99` (+ `feat/tracy-integration`, + `feat/canvas-render-target`, + `feat/stroke-engine-mvp`)
 =======
+<<<<<<< HEAD
+**Last updated:** 2026-05-16 · **main HEAD:** `867fc99` (+ `feat/tracy-integration`, + `feat/canvas-render-target`, + `feat/stroke-engine-mvp`)
+=======
 **Last updated:** 2026-05-16 · **main HEAD:** `867fc99` (+ `feat/tracy-integration`, + `feat/canvas-render-target`)
+>>>>>>> origin/main
 >>>>>>> origin/main
 
 Goal: a professional note-taking + raster image editor that exceeds
@@ -82,6 +86,12 @@ tests/        Unit + integration + bench + fuzz scaffolds
    into the canvas via a push-constant pipeline. Heap-allocated, RAII
    hook subscriptions. See ADR 0015.
 =======
+<<<<<<< HEAD
+✅ Stroke engine (MVP): mouse drag draws anti-aliased SDF-disk stamps
+   into the canvas via a push-constant pipeline. Heap-allocated, RAII
+   hook subscriptions. See ADR 0015.
+=======
+>>>>>>> origin/main
 >>>>>>> origin/main
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
@@ -168,12 +178,18 @@ The product's note-taking half. Each PR builds on the previous.
 | 3 | ~~`feat/canvas-render-target`~~ ✅ **landed** | — | — | `CanvasRenderTarget` (R8G8B8A8_UNORM, COLOR_ATTACHMENT\|SAMPLED\|TRANSFER_DST) + `Renderer::render_with_canvas` two-pass flow. Internal layout tracking via sync2 barriers. See ADR 0014. |
 <<<<<<< HEAD
 | 4 | ~~`feat/stroke-engine-mvp`~~ ✅ **landed** | — | — | SDF disk-stamp pipeline (`stamp.slang`) + `noted::stroke::StrokeEngine` (heap-allocated, non-movable, RAII hook subscriptions). Mouse drag → anti-aliased disks layered over the textured background. See ADR 0015. |
+| 5 | ~~`feat/pen-input`~~ ✅ **landed** | — | — | Win32 `WM_POINTER` subclass over GLFW. Real pressure (0..1024 → [0, 1]) + tilt (degrees) flow through existing hook events. See ADR 0017. |
+| 6 | ~~`feat/stroke-engine-pressure`~~ ✅ **landed** | — | — | `BrushStyle` (min/max radius, gamma alpha curve, softness ratio) + pure `stamp_from_pressure()` mapping. Live-tunable via `set_brush()`. See ADR 0018. |
+=======
+<<<<<<< HEAD
+| 4 | ~~`feat/stroke-engine-mvp`~~ ✅ **landed** | — | — | SDF disk-stamp pipeline (`stamp.slang`) + `noted::stroke::StrokeEngine` (heap-allocated, non-movable, RAII hook subscriptions). Mouse drag → anti-aliased disks layered over the textured background. See ADR 0015. |
 | 5 | `feat/pen-input` | 6h | — | Replace GLFW mouse with Windows Pointer Input API (pressure + tilt). NSEvent / libinput equivalents for mac/Linux later. |
 =======
 | 4 | `feat/stroke-engine-mvp` | 6h | #3 | Drag the mouse → draw a circle stamp at the cursor into the canvas render target. Crude but proves the input-→-pixel path. |
 | 5 | ~~`feat/pen-input`~~ ✅ **landed** | — | — | Win32 `WM_POINTER` subclass over GLFW. Real pressure (0..1024 → [0, 1]) + tilt (degrees) flow through existing hook events. Synthetic mouse-from-pen messages swallowed via `MI_WP_SIGNATURE`. Cross-platform stub everywhere else. See ADR 0017. |
 >>>>>>> origin/main
 | 6 | `feat/stroke-engine-pressure` | 4h | #4, #5 | Brush width / opacity respond to pressure. First time the app feels like a real note-taking tool. |
+>>>>>>> origin/main
 
 ### 🖼️ Priority 3 — Layers + blend (Photoshop side)
 

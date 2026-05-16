@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <utility>
 
@@ -33,12 +34,55 @@ static_assert(offsetof(StampPush, center_px)   == 24);
 static_assert(offsetof(StampPush, radius_px)   == 32);
 static_assert(offsetof(StampPush, softness_px) == 36);
 
-// MVP brush: medium black tip.
-constexpr float kDefaultRadius   = 4.0F;
-constexpr float kDefaultSoftness = 1.0F;
-constexpr float kDefaultColor[4] = {0.0F, 0.0F, 0.0F, 1.0F};
+[[nodiscard]] auto clamp01(float v) noexcept -> float {
+    if (std::isnan(v)) {
+        return 0.0F;
+    }
+    if (v < 0.0F) {
+        return 0.0F;
+    }
+    if (v > 1.0F) {
+        return 1.0F;
+    }
+    return v;
+}
 
 }  // namespace
+
+// Pure pressure-to-stamp mapping. Lives in the source TU so the header
+// stays light, but is declared in the public header so unit tests get to
+// poke at it directly.
+auto stamp_from_pressure(const BrushStyle& style, float pressure) noexcept
+    -> Stamp {
+    const float p   = clamp01(pressure);
+    // Linear lerp on radius — easy to reason about, matches Photoshop's
+    // "pen pressure controls size" default.
+    const float lo  = std::max(0.0F, style.min_radius_px);
+    const float hi  = std::max(lo, style.max_radius_px);
+    const float r   = lo + (hi - lo) * p;
+
+    // Gamma curve on alpha. The shader's smoothstep already gives a soft
+    // edge, so the gamma's job is purely "light touch → low ink".
+    // alpha_gamma <= 0 is treated as 1 (linear) to keep the call safe.
+    const float gamma = (style.alpha_gamma > 0.0F) ? style.alpha_gamma : 1.0F;
+    const float a     = clamp01(style.a * std::pow(p, gamma));
+
+    // Softness in pixels: a fraction of the current radius, with a 1 px
+    // floor so tiny stamps still anti-alias on the disk edge.
+    const float ratio    = clamp01(style.softness_ratio);
+    const float softness = std::max(1.0F, r * ratio);
+
+    return Stamp{
+        .x_px        = 0.0F,
+        .y_px        = 0.0F,
+        .radius_px   = r,
+        .softness_px = softness,
+        .r = style.r,
+        .g = style.g,
+        .b = style.b,
+        .a = a,
+    };
+}
 
 auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
     -> Result<std::unique_ptr<StrokeEngine>> {
@@ -105,6 +149,7 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
     auto eng = std::unique_ptr<StrokeEngine>(new StrokeEngine{});
     eng->layout_.emplace(std::move(*layout));
     eng->pipeline_.emplace(std::move(*pipeline));
+    eng->brush_ = info.brush;
 
     auto* self = eng.get();
     auto& reg  = *info.hook_registry;
@@ -173,28 +218,20 @@ void StrokeEngine::on_pressed(const noted::hook::PointerPressed& e) noexcept {
         return;
     }
     drawing_ = true;
-    stamps_.push_back(Stamp{
-        .x_px        = static_cast<float>(e.x),
-        .y_px        = static_cast<float>(e.y),
-        .radius_px   = kDefaultRadius,
-        .softness_px = kDefaultSoftness,
-        .r = kDefaultColor[0], .g = kDefaultColor[1],
-        .b = kDefaultColor[2], .a = kDefaultColor[3] * e.pressure,
-    });
+    auto s   = stamp_from_pressure(brush_, e.pressure);
+    s.x_px   = static_cast<float>(e.x);
+    s.y_px   = static_cast<float>(e.y);
+    stamps_.push_back(s);
 }
 
 void StrokeEngine::on_moved(const noted::hook::PointerMoved& e) noexcept {
     if (!drawing_) {
         return;
     }
-    stamps_.push_back(Stamp{
-        .x_px        = static_cast<float>(e.x),
-        .y_px        = static_cast<float>(e.y),
-        .radius_px   = kDefaultRadius,
-        .softness_px = kDefaultSoftness,
-        .r = kDefaultColor[0], .g = kDefaultColor[1],
-        .b = kDefaultColor[2], .a = kDefaultColor[3] * e.pressure,
-    });
+    auto s = stamp_from_pressure(brush_, e.pressure);
+    s.x_px = static_cast<float>(e.x);
+    s.y_px = static_cast<float>(e.y);
+    stamps_.push_back(s);
 }
 
 void StrokeEngine::on_released(const noted::hook::PointerReleased& e) noexcept {
@@ -210,11 +247,12 @@ void StrokeEngine::on_resized(const noted::hook::FramebufferResized& e) noexcept
 
 // ---- Test injection helpers (mirror the hook callbacks) ---------------------
 
-void StrokeEngine::inject_press_(double x, double y, noted::hook::PointerButton b) noexcept {
-    on_pressed({.x = x, .y = y, .button = b, .pressure = 1.0F});
+void StrokeEngine::inject_press_(
+    double x, double y, noted::hook::PointerButton b, float pressure) noexcept {
+    on_pressed({.x = x, .y = y, .button = b, .pressure = pressure});
 }
-void StrokeEngine::inject_move_(double x, double y) noexcept {
-    on_moved({.x = x, .y = y});
+void StrokeEngine::inject_move_(double x, double y, float pressure) noexcept {
+    on_moved({.x = x, .y = y, .pressure = pressure});
 }
 void StrokeEngine::inject_release_(double x, double y, noted::hook::PointerButton b) noexcept {
     on_released({.x = x, .y = y, .button = b});

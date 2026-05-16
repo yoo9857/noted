@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
+
 #include "noted/engine/hook/hook.hpp"
 #include "noted/engine/stroke/stroke_engine.hpp"
 
@@ -7,6 +9,8 @@ namespace {
 
 using PB = noted::hook::PointerButton;
 using StrokeEngine = noted::stroke::StrokeEngine;
+using BrushStyle   = noted::stroke::BrushStyle;
+using noted::stroke::stamp_from_pressure;
 
 // Build an engine that has no pipeline / no subscriptions — pure event
 // processing. Pointer events are fed through inject_* helpers which
@@ -98,13 +102,94 @@ TEST(StrokeEngine, ResizeUpdatesCanvasSize) {
     SUCCEED();
 }
 
-TEST(StrokeEngine, StampPressureModulatesAlpha) {
+TEST(StrokeEngine, StampPressureFullScale) {
     auto eng = make_test_engine();
-    // inject_press_ uses pressure = 1.0; default color alpha is 1.0,
-    // so the resulting stamp's alpha is 1.0. We don't expose an
-    // injection variant with custom pressure (yet) — when feat/pen-input
-    // lands, extend this.
-    eng.inject_press_(0.0, 0.0, PB::left);
+    eng.inject_press_(0.0, 0.0, PB::left, /*pressure=*/1.0F);
     ASSERT_EQ(eng.stamp_count(), 1U);
     EXPECT_FLOAT_EQ(eng.stamps()[0].a, 1.0F);
+    // Default brush max radius is 10px; pressure=1 → r = 10.
+    EXPECT_FLOAT_EQ(eng.stamps()[0].radius_px, 10.0F);
+}
+
+// ---- stamp_from_pressure: pure mapping coverage ----
+
+TEST(StrokeEnginePressure, RadiusLerpsLinearly) {
+    BrushStyle style{};
+    style.min_radius_px = 2.0F;
+    style.max_radius_px = 10.0F;
+    EXPECT_FLOAT_EQ(stamp_from_pressure(style, 0.0F).radius_px,  2.0F);
+    EXPECT_FLOAT_EQ(stamp_from_pressure(style, 1.0F).radius_px, 10.0F);
+    EXPECT_FLOAT_EQ(stamp_from_pressure(style, 0.5F).radius_px,  6.0F);
+}
+
+TEST(StrokeEnginePressure, AlphaUsesGammaCurve) {
+    BrushStyle style{};
+    style.a           = 1.0F;
+    style.alpha_gamma = 2.0F;
+    // pressure = 0.5, gamma = 2 → alpha = 0.5^2 = 0.25.
+    EXPECT_NEAR(stamp_from_pressure(style, 0.5F).a, 0.25F, 1e-5F);
+}
+
+TEST(StrokeEnginePressure, AlphaGammaOneIsLinear) {
+    BrushStyle style{};
+    style.alpha_gamma = 1.0F;
+    EXPECT_NEAR(stamp_from_pressure(style, 0.7F).a, 0.7F, 1e-5F);
+}
+
+TEST(StrokeEnginePressure, SoftnessTracksRadiusWithFloor) {
+    BrushStyle style{};
+    style.min_radius_px  = 0.5F;
+    style.max_radius_px  = 50.0F;
+    style.softness_ratio = 0.20F;
+    // Tiny radius (0.5px) → floor of 1px kicks in.
+    EXPECT_FLOAT_EQ(stamp_from_pressure(style, 0.0F).softness_px, 1.0F);
+    // Big radius → 20% of 50 = 10px.
+    EXPECT_FLOAT_EQ(stamp_from_pressure(style, 1.0F).softness_px, 10.0F);
+}
+
+TEST(StrokeEnginePressure, PressureClampedToZeroOne) {
+    BrushStyle style{};
+    EXPECT_FLOAT_EQ(stamp_from_pressure(style, -0.5F).radius_px,
+                    style.min_radius_px);
+    EXPECT_FLOAT_EQ(stamp_from_pressure(style,  2.0F).radius_px,
+                    style.max_radius_px);
+    EXPECT_FLOAT_EQ(stamp_from_pressure(style, std::nanf("")).radius_px,
+                    style.min_radius_px);
+}
+
+TEST(StrokeEnginePressure, ColorPassesThrough) {
+    BrushStyle style{};
+    style.r = 0.7F; style.g = 0.3F; style.b = 0.1F; style.a = 1.0F;
+    const auto s = stamp_from_pressure(style, 0.8F);
+    EXPECT_FLOAT_EQ(s.r, 0.7F);
+    EXPECT_FLOAT_EQ(s.g, 0.3F);
+    EXPECT_FLOAT_EQ(s.b, 0.1F);
+}
+
+TEST(StrokeEnginePressure, EngineAppliesBrushOnPress) {
+    BrushStyle style{};
+    style.min_radius_px = 1.0F;
+    style.max_radius_px = 20.0F;
+    style.alpha_gamma   = 1.0F;
+    StrokeEngine eng{StrokeEngine::TestingTag{}, style};
+    eng.inject_press_(50.0, 60.0, PB::left, /*pressure=*/0.5F);
+    eng.inject_move_(51.0, 61.0, /*pressure=*/0.75F);
+    ASSERT_EQ(eng.stamp_count(), 2U);
+    EXPECT_FLOAT_EQ(eng.stamps()[0].x_px,        50.0F);
+    EXPECT_FLOAT_EQ(eng.stamps()[0].radius_px,   10.5F);  // 1 + (20-1)*0.5
+    EXPECT_NEAR    (eng.stamps()[0].a,           0.5F, 1e-5F);
+    EXPECT_FLOAT_EQ(eng.stamps()[1].radius_px,   1.0F + 19.0F * 0.75F);
+}
+
+TEST(StrokeEnginePressure, SetBrushMutatesLiveStyle) {
+    StrokeEngine eng{StrokeEngine::TestingTag{}};
+    BrushStyle s{};
+    s.min_radius_px = 5.0F;
+    s.max_radius_px = 5.0F;  // constant 5px regardless of pressure
+    eng.set_brush(s);
+    eng.inject_press_(0.0, 0.0, PB::left, 0.1F);
+    eng.inject_move_(1.0, 1.0, 1.0F);
+    ASSERT_EQ(eng.stamp_count(), 2U);
+    EXPECT_FLOAT_EQ(eng.stamps()[0].radius_px, 5.0F);
+    EXPECT_FLOAT_EQ(eng.stamps()[1].radius_px, 5.0F);
 }
