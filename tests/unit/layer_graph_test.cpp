@@ -1,21 +1,21 @@
-#include <gtest/gtest.h>
-
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <unordered_map>
+
+#include <gtest/gtest.h>
 
 #include "noted/domain/layer/layer.hpp"
 #include "noted/engine/error/error.hpp"
 
 namespace {
 
+using noted::ErrorCode;
 using noted::domain::BlendMode;
 using noted::domain::invalid_layer_id;
 using noted::domain::LayerGraph;
 using noted::domain::LayerId;
 using noted::domain::LayerKind;
-using noted::ErrorCode;
 
 // Helper: order-of-appearance lookup for asserting that one id comes
 // before another in a topological_order() result.
@@ -117,9 +117,9 @@ TEST(LayerGraph, TopologicalOrderHonorsEdges) {
     auto order = g.topological_order();
     ASSERT_TRUE(order);
     EXPECT_EQ(order->size(), 4U);
-    EXPECT_LT(index_of(*order, a),    index_of(*order, b));
-    EXPECT_LT(index_of(*order, b),    index_of(*order, c));
-    EXPECT_LT(index_of(*order, c),    index_of(*order, root));
+    EXPECT_LT(index_of(*order, a), index_of(*order, b));
+    EXPECT_LT(index_of(*order, b), index_of(*order, c));
+    EXPECT_LT(index_of(*order, c), index_of(*order, root));
 }
 
 TEST(LayerGraph, RemoveLayerFailsIfReferenced) {

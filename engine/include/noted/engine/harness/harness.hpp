@@ -49,8 +49,8 @@ public:
     void reset_to_default() { set(default_); }
 
 private:
-    std::string_view  name_;
-    bool              default_;
+    std::string_view name_;
+    bool default_;
     std::atomic<bool> value_;
 };
 
@@ -85,7 +85,7 @@ public:
     [[nodiscard]] auto name() const noexcept -> std::string_view { return name_; }
 
 private:
-    std::string_view       name_;
+    std::string_view name_;
     std::atomic<std::uint64_t> value_{0};
 };
 
@@ -118,7 +118,7 @@ private:
 // NOTED_TIMED(label) — wall-clock RAII scope publishing a TimerSpan AND a
 // Tracy zone when NOTED_ENABLE_TRACY=ON. `label` MUST be a string literal —
 // Tracy zone names are stored by pointer and assumed to be immortal.
-#define NOTED_TIMED(label)                                                          \
+#define NOTED_TIMED(label)                                                            \
     ::noted::harness::ScopedTimer NOTED_TIMED_CONCAT(_noted_timer_, __LINE__)(label); \
     NOTED_PROFILE_ZONE_N(label)
 
@@ -126,20 +126,19 @@ private:
 
 // In all builds. Use sparingly — it's hot-path acceptable but emits an
 // ErrorObserved event when the condition fails.
-void validate(
-    bool cond,
-    std::string_view msg,
-    std::source_location loc = std::source_location::current());
+void validate(bool cond,
+              std::string_view msg,
+              std::source_location loc = std::source_location::current());
 
 // Stripped in NDEBUG builds. Use freely.
 #ifdef NDEBUG
-inline void debug_validate(bool, std::string_view,
+inline void debug_validate(bool,
+                           std::string_view,
                            std::source_location = std::source_location::current()) noexcept {}
 #else
-inline void debug_validate(
-    bool cond,
-    std::string_view msg,
-    std::source_location loc = std::source_location::current()) {
+inline void debug_validate(bool cond,
+                           std::string_view msg,
+                           std::source_location loc = std::source_location::current()) {
     validate(cond, msg, loc);
 }
 #endif
@@ -154,9 +153,11 @@ public:
     auto set_string(std::string key, std::string value) -> void;
 
     [[nodiscard]] auto get_bool(std::string_view key, bool fallback = false) const -> bool;
-    [[nodiscard]] auto get_int(std::string_view key, std::int64_t fallback = 0) const -> std::int64_t;
+    [[nodiscard]] auto get_int(std::string_view key,
+                               std::int64_t fallback = 0) const -> std::int64_t;
     [[nodiscard]] auto get_double(std::string_view key, double fallback = 0.0) const -> double;
-    [[nodiscard]] auto get_string(std::string_view key, std::string_view fallback = {}) const -> std::string;
+    [[nodiscard]] auto get_string(std::string_view key,
+                                  std::string_view fallback = {}) const -> std::string;
 
     // Replace every entry; intended for hot-reload from a config file.
     void replace_all(Config other);
@@ -165,8 +166,8 @@ public:
 
 private:
     using Value = std::variant<bool, std::int64_t, double, std::string>;
-    mutable std::mutex                       mutex_;
-    std::unordered_map<std::string, Value>   entries_;
+    mutable std::mutex mutex_;
+    std::unordered_map<std::string, Value> entries_;
 };
 
 }  // namespace noted::harness

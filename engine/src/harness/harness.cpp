@@ -44,7 +44,7 @@ void FeatureFlag::set(bool v) {
     const bool prev = value_.exchange(v, std::memory_order_relaxed);
     if (prev != v) {
         hook::registry().on_flag_changed.publish(hook::FlagChanged{
-            .name      = name_,
+            .name = name_,
             .new_value = v,
         });
     }
@@ -111,7 +111,7 @@ ScopedTimer::~ScopedTimer() {
     const auto ms = std::chrono::duration<double, std::milli>(end - start_).count();
     hook::registry().on_timer_span.publish(hook::TimerSpan{
         .label = label_,
-        .ms    = ms,
+        .ms = ms,
     });
 }
 
@@ -122,12 +122,13 @@ void validate(bool cond, std::string_view msg, std::source_location loc) {
         return;
     }
     hook::registry().on_error.publish(hook::ErrorObserved{
-        .error = Error{
-            .code    = ErrorCode::invalid_state,
-            .message = std::string{msg},
-            .where   = loc,
-            .cause   = nullptr,
-        },
+        .error =
+            Error{
+                .code = ErrorCode::invalid_state,
+                .message = std::string{msg},
+                .where = loc,
+                .cause = nullptr,
+            },
         .recoverable = true,
     });
 }

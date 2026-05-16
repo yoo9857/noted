@@ -54,9 +54,9 @@ namespace noted::stroke {
 // events. Color is straight-alpha RGBA; the pipeline blends it onto the
 // canvas with SRC_ALPHA / ONE_MINUS_SRC_ALPHA.
 struct Stamp {
-    float x_px       = 0.0F;
-    float y_px       = 0.0F;
-    float radius_px  = 4.0F;
+    float x_px = 0.0F;
+    float y_px = 0.0F;
+    float radius_px = 4.0F;
     float softness_px = 1.0F;
     float r = 0.0F;
     float g = 0.0F;
@@ -79,16 +79,16 @@ struct Stamp {
 //   - Brushes need runtime tuning (debug UI sliders, brush presets).
 //   - A template would force one StrokeEngine type per brush.
 struct BrushStyle {
-    float min_radius_px  {2.0F};
-    float max_radius_px  {10.0F};
+    float min_radius_px{2.0F};
+    float max_radius_px{10.0F};
     // Softness band as a fraction of the current radius. 0.2F means
     // "the outer 20% of the disk fades from opaque to transparent".
     // Anti-aliasing always uses at least 1 px so very small stamps
     // don't alias.
-    float softness_ratio {0.20F};
+    float softness_ratio{0.20F};
     // pow(pressure, alpha_gamma). 1.0 = linear, >1 emphasizes high
     // pressure, <1 emphasizes light touches.
-    float alpha_gamma    {1.8F};
+    float alpha_gamma{1.8F};
     // Straight-alpha color. Alpha is multiplied by the pressure curve;
     // r/g/b pass through unchanged.
     float r{0.0F};
@@ -99,16 +99,15 @@ struct BrushStyle {
 
 // Pure mapping: (BrushStyle, pressure) → Stamp template (without x/y).
 // Exposed so tests can verify the curve independent of the event path.
-[[nodiscard]] auto stamp_from_pressure(
-    const BrushStyle& style, float pressure) noexcept -> Stamp;
+[[nodiscard]] auto stamp_from_pressure(const BrushStyle& style, float pressure) noexcept -> Stamp;
 
 struct StrokeEngineCreateInfo {
-    const noted::gpu::Device*         device          = nullptr;
-    const noted::gpu::ShaderModule*   vs_module       = nullptr;
-    const noted::gpu::ShaderModule*   ps_module       = nullptr;
-    VkFormat                          canvas_format   = VK_FORMAT_R8G8B8A8_UNORM;
-    noted::hook::Registry*            hook_registry   = nullptr;
-    BrushStyle                        brush           {};
+    const noted::gpu::Device* device = nullptr;
+    const noted::gpu::ShaderModule* vs_module = nullptr;
+    const noted::gpu::ShaderModule* ps_module = nullptr;
+    VkFormat canvas_format = VK_FORMAT_R8G8B8A8_UNORM;
+    noted::hook::Registry* hook_registry = nullptr;
+    BrushStyle brush{};
 };
 
 class StrokeEngine {
@@ -140,13 +139,9 @@ public:
     void record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept;
 
     // Inspect / control state — used by tests and the future debug UI.
-    [[nodiscard]] auto stamp_count() const noexcept -> std::size_t {
-        return stamps_.size();
-    }
+    [[nodiscard]] auto stamp_count() const noexcept -> std::size_t { return stamps_.size(); }
     [[nodiscard]] auto is_drawing() const noexcept -> bool { return drawing_; }
-    [[nodiscard]] auto stamps() const noexcept -> const std::vector<Stamp>& {
-        return stamps_;
-    }
+    [[nodiscard]] auto stamps() const noexcept -> const std::vector<Stamp>& { return stamps_; }
     void clear_stamps() noexcept { stamps_.clear(); }
 
     // Live brush style — read freely; mutate when the user changes brush
@@ -164,7 +159,9 @@ public:
     StrokeEngine(TestingTag, const BrushStyle& b) noexcept : brush_{b} {}
 
     // Test-only event-injection helpers — mirror what the hook callbacks do.
-    void inject_press_(double x, double y, noted::hook::PointerButton b,
+    void inject_press_(double x,
+                       double y,
+                       noted::hook::PointerButton b,
                        float pressure = 1.0F) noexcept;
     void inject_move_(double x, double y, float pressure = 1.0F) noexcept;
     void inject_release_(double x, double y, noted::hook::PointerButton b) noexcept;
@@ -181,20 +178,20 @@ private:
     // Pipeline + layout — engaged after create() succeeds; disengaged
     // for TestingTag instances that never touch the GPU. The optional
     // wrapping side-steps PipelineLayout's private default constructor.
-    std::optional<noted::gpu::PipelineLayout>   layout_;
+    std::optional<noted::gpu::PipelineLayout> layout_;
     std::optional<noted::gpu::GraphicsPipeline> pipeline_;
 
     // Accumulation state.
-    bool                drawing_     = false;
-    float               canvas_w_    = 1.0F;
-    float               canvas_h_    = 1.0F;
-    std::vector<Stamp>  stamps_;
-    BrushStyle          brush_{};
+    bool drawing_ = false;
+    float canvas_w_ = 1.0F;
+    float canvas_h_ = 1.0F;
+    std::vector<Stamp> stamps_;
+    BrushStyle brush_{};
 
     // RAII subscriptions — released when the engine goes out of scope.
-    noted::hook::Subscription<noted::hook::PointerPressed>     sub_pressed_;
-    noted::hook::Subscription<noted::hook::PointerMoved>       sub_moved_;
-    noted::hook::Subscription<noted::hook::PointerReleased>    sub_released_;
+    noted::hook::Subscription<noted::hook::PointerPressed> sub_pressed_;
+    noted::hook::Subscription<noted::hook::PointerMoved> sub_moved_;
+    noted::hook::Subscription<noted::hook::PointerReleased> sub_released_;
     noted::hook::Subscription<noted::hook::FramebufferResized> sub_resized_;
 };
 

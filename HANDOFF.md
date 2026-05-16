@@ -39,21 +39,22 @@ Vulkan validation errors**.
 | Linux | g++-13 | Debug, Release |
 | Linux | g++-13 + ASan + UBSan | Debug |
 
-All green except `clang-format` (intentionally `continue-on-error` until
-`feat/format-sweep` lands — see Known Debt).
+All checks block PRs. `clang-format-18` enforces the project style on
+every push (see `.clang-format`, `.github/workflows/lint.yml`).
 
 ### Repo layout
 
 ```
 engine/       Core: Vulkan, allocator, hooks, error model, harness
 domain/       Pure logic: document, layer DAG, commands, CRDT (stubs)
+compositor/   GPU layer compositor (engine + domain bridge)
 plugin/       WASM plugin host (stubs)
 platform/     Windowing, input, fs, image_io
 ui/           View layer (stubs — UI tech TBD)
 app/          Executable entry (src/main.cpp)
-shaders/      Slang sources (fullscreen.slang)
+shaders/      Slang sources (fullscreen, stamp, layer)
 cmake/        CMake modules (CompilerWarnings, Hardening, NotedModule, Shaders)
-docs/architecture/  12 ADRs documenting every cross-cutting decision
+docs/architecture/  19 ADRs documenting every cross-cutting decision
 tests/        Unit + integration + bench + fuzz scaffolds
 ```
 
@@ -129,7 +130,7 @@ real image.
 ### Read first
 
 1. [`docs/architecture/README.md`](docs/architecture/README.md) — the
-   12 ADRs. **Read all of them** before changing cross-cutting code.
+   19 ADRs. **Read all of them** before changing cross-cutting code.
    They explain *why* each decision was made and what alternatives were
    rejected.
 2. [`CONTRIBUTING.md`](CONTRIBUTING.md) — branch protocol, commit
@@ -149,7 +150,7 @@ These unblock everything else. Do them before adding new features.
 
 | # | PR | Effort | Why |
 |---|---|---|---|
-| 1 | `feat/format-sweep` | 1h | Apply `clang-format-18` across the repo, flip CI lint job back to `continue-on-error: false`. Every PR since #10 has format drift; clean it up. |
+| 1 | ~~`feat/format-sweep`~~ ✅ **landed** | — | `clang-format-18` applied across all 118 `.hpp/.cpp` files (engine/domain/compositor/plugin/platform/ui/app/tests). CI lint job is now blocking. Local install via `uv tool install clang-format==18.1.8` or `pip install clang-format==18.1.8`. |
 | 2 | ~~`feat/tracy-integration`~~ ✅ **landed** | — | Tracy via FetchContent + `NOTED_ENABLE_TRACY` option. `harness::ScopedTimer` → Tracy zones, `Counter` → Tracy plots. See ADR 0013. |
 
 ### 🎨 Priority 2 — Canvas + stroke (Goodnotes side)
@@ -204,9 +205,11 @@ the product has actual content.
 
 ## Known debt and gotchas
 
-### Format drift
-clang-format-18 would change most `.hpp/.cpp` files. CI shows the
-warnings but doesn't block (intentional). Fix in `feat/format-sweep`.
+### Format drift — resolved
+clang-format-18 is mandatory on every PR. Local setup:
+`uv tool install clang-format==18.1.8` (or `pip install clang-format==18.1.8`).
+The lint CI job blocks merges on drift; run
+`clang-format-18 -i path/to/file.cpp` to fix.
 
 ### `scripts/build_and_run.cmd` was a local helper
 Hardcoded paths for a specific machine. **Not committed** — recreate per

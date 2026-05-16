@@ -1,10 +1,12 @@
-#include <gtest/gtest.h>
+#include "noted/engine/engine.hpp"
 
 #include <atomic>
 
-#include "harness.hpp"
-#include "noted/engine/engine.hpp"
+#include <gtest/gtest.h>
+
 #include "noted/engine/hook/registry.hpp"
+
+#include "harness.hpp"
 
 TEST(Engine, InitShutdownIsIdempotent) {
     noted::engine::Engine eng;
@@ -39,11 +41,11 @@ TEST(Engine, StartupAndShutdownHooksFire) {
 TEST(Engine, FrameLifecyclePublishesHooks) {
     std::atomic<int> begins{0};
     std::atomic<int> ends{0};
-    std::uint64_t    last_end_index = 0;
+    std::uint64_t last_end_index = 0;
     const auto t1 = noted::hook::registry().on_frame_begin.subscribe(
         [&](const noted::hook::FrameBegin&) { begins.fetch_add(1); });
-    const auto t2 = noted::hook::registry().on_frame_end.subscribe(
-        [&](const noted::hook::FrameEnd& f) {
+    const auto t2 =
+        noted::hook::registry().on_frame_end.subscribe([&](const noted::hook::FrameEnd& f) {
             ends.fetch_add(1);
             last_end_index = f.frame_index;
         });
@@ -58,8 +60,8 @@ TEST(Engine, FrameLifecyclePublishesHooks) {
 
     EXPECT_EQ(begins.load(), 5);
     EXPECT_EQ(ends.load(), 5);
-    EXPECT_EQ(last_end_index, 4U);          // 0-indexed final frame
-    EXPECT_EQ(eng.frame_index(), 5U);       // post-increment final state
+    EXPECT_EQ(last_end_index, 4U);     // 0-indexed final frame
+    EXPECT_EQ(eng.frame_index(), 5U);  // post-increment final state
 
     noted::hook::registry().on_frame_begin.unsubscribe(t1);
     noted::hook::registry().on_frame_end.unsubscribe(t2);

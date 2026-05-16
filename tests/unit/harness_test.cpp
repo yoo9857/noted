@@ -1,8 +1,9 @@
-#include <gtest/gtest.h>
+#include "harness.hpp"
 
 #include <atomic>
 
-#include "harness.hpp"
+#include <gtest/gtest.h>
+
 #include "noted/engine/harness/harness.hpp"
 #include "noted/engine/hook/registry.hpp"
 
@@ -51,16 +52,14 @@ TEST(Harness, ConfigRoundTrip) {
 TEST(Harness, ScopedTimerPublishesSpan) {
     std::atomic<int> spans{0};
     double captured_ms = -1.0;
-    const auto t = noted::hook::registry().on_timer_span.subscribe(
-        [&](const noted::hook::TimerSpan& s) {
+    const auto t =
+        noted::hook::registry().on_timer_span.subscribe([&](const noted::hook::TimerSpan& s) {
             if (s.label == "test.scoped_timer") {
                 spans.fetch_add(1);
                 captured_ms = s.ms;
             }
         });
-    {
-        NOTED_TIMED("test.scoped_timer");
-    }
+    { NOTED_TIMED("test.scoped_timer"); }
     EXPECT_EQ(spans.load(), 1);
     EXPECT_GE(captured_ms, 0.0);
     noted::hook::registry().on_timer_span.unsubscribe(t);
@@ -72,8 +71,8 @@ TEST(Harness, FlagChangePublishesEvent) {
 
     std::atomic<int> events{0};
     bool last_value = false;
-    const auto t = noted::hook::registry().on_flag_changed.subscribe(
-        [&](const noted::hook::FlagChanged& e) {
+    const auto t =
+        noted::hook::registry().on_flag_changed.subscribe([&](const noted::hook::FlagChanged& e) {
             if (e.name == "test.observed_flag") {
                 events.fetch_add(1);
                 last_value = e.new_value;
@@ -81,7 +80,7 @@ TEST(Harness, FlagChangePublishesEvent) {
         });
 
     flag.set(true);
-    flag.set(true);   // same value: no event
+    flag.set(true);  // same value: no event
     flag.set(false);
 
     EXPECT_EQ(events.load(), 2);

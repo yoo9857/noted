@@ -8,9 +8,7 @@ namespace noted::test {
 
 ErrorCapture::ErrorCapture() {
     token_ = noted::hook::registry().on_error.subscribe(
-        [this](const noted::hook::ErrorObserved& e) {
-            errors_.push_back(e.error);
-        });
+        [this](const noted::hook::ErrorObserved& e) { errors_.push_back(e.error); });
 }
 
 ErrorCapture::~ErrorCapture() {
@@ -18,9 +16,8 @@ ErrorCapture::~ErrorCapture() {
 }
 
 auto golden_image_diff(const std::string&, const std::string&) -> noted::Result<GoldenDiff> {
-    return std::unexpected(noted::make_error(
-        noted::ErrorCode::not_implemented,
-        "golden_image_diff: stub — wired in feat/gpu-vulkan"));
+    return std::unexpected(noted::make_error(noted::ErrorCode::not_implemented,
+                                             "golden_image_diff: stub — wired in feat/gpu-vulkan"));
 }
 
 void reset_global_state() {

@@ -6,9 +6,9 @@ namespace noted::gpu {
 
 auto CommandBuffer::allocate(const CommandPool& pool) -> Result<CommandBuffer> {
     VkCommandBufferAllocateInfo ai{};
-    ai.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    ai.commandPool        = pool.handle();
-    ai.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    ai.commandPool = pool.handle();
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     ai.commandBufferCount = 1;
 
     VkCommandBuffer raw = VK_NULL_HANDLE;
@@ -20,7 +20,7 @@ auto CommandBuffer::allocate(const CommandPool& pool) -> Result<CommandBuffer> {
 
     CommandBuffer cb;
     cb.device_ = pool.device();
-    cb.pool_   = pool.handle();
+    cb.pool_ = pool.handle();
     cb.handle_ = raw;
     return cb;
 }
@@ -28,7 +28,7 @@ auto CommandBuffer::allocate(const CommandPool& pool) -> Result<CommandBuffer> {
 CommandBuffer::CommandBuffer(CommandBuffer&& other) noexcept
     : device_(other.device_), pool_(other.pool_), handle_(other.handle_) {
     other.device_ = VK_NULL_HANDLE;
-    other.pool_   = VK_NULL_HANDLE;
+    other.pool_ = VK_NULL_HANDLE;
     other.handle_ = VK_NULL_HANDLE;
 }
 
@@ -36,23 +36,25 @@ auto CommandBuffer::operator=(CommandBuffer&& other) noexcept -> CommandBuffer& 
     if (this != &other) {
         destroy();
         device_ = other.device_;
-        pool_   = other.pool_;
+        pool_ = other.pool_;
         handle_ = other.handle_;
         other.device_ = VK_NULL_HANDLE;
-        other.pool_   = VK_NULL_HANDLE;
+        other.pool_ = VK_NULL_HANDLE;
         other.handle_ = VK_NULL_HANDLE;
     }
     return *this;
 }
 
-CommandBuffer::~CommandBuffer() { destroy(); }
+CommandBuffer::~CommandBuffer() {
+    destroy();
+}
 
 void CommandBuffer::destroy() noexcept {
     if (device_ != VK_NULL_HANDLE && pool_ != VK_NULL_HANDLE && handle_ != VK_NULL_HANDLE) {
         vkFreeCommandBuffers(device_, pool_, 1, &handle_);
     }
     device_ = VK_NULL_HANDLE;
-    pool_   = VK_NULL_HANDLE;
+    pool_ = VK_NULL_HANDLE;
     handle_ = VK_NULL_HANDLE;
 }
 
@@ -79,7 +81,7 @@ auto CommandBuffer::end() -> Result<void> {
 
 void CommandBuffer::reset(VkCommandBufferResetFlags flags) noexcept {
     if (handle_ != VK_NULL_HANDLE) {
-        (void)vkResetCommandBuffer(handle_, flags);
+        (void) vkResetCommandBuffer(handle_, flags);
     }
 }
 

@@ -36,15 +36,15 @@ public:
     ~FrameSync();
 
     [[nodiscard]] auto image_available() const noexcept -> VkSemaphore { return image_available_; }
-    [[nodiscard]] auto in_flight() const noexcept -> VkFence         { return in_flight_; }
+    [[nodiscard]] auto in_flight() const noexcept -> VkFence { return in_flight_; }
 
 private:
     FrameSync() = default;
     void destroy() noexcept;
 
-    VkDevice    owner_           = VK_NULL_HANDLE;
+    VkDevice owner_ = VK_NULL_HANDLE;
     VkSemaphore image_available_ = VK_NULL_HANDLE;
-    VkFence     in_flight_       = VK_NULL_HANDLE;
+    VkFence in_flight_ = VK_NULL_HANDLE;
 };
 
 }  // namespace noted::gpu

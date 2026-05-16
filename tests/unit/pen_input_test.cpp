@@ -1,22 +1,23 @@
+#include "noted/platform/window/pen_input.hpp"
+
 #include <gtest/gtest.h>
 
 #include "noted/engine/hook/hook.hpp"
-#include "noted/platform/window/pen_input.hpp"
 
 using noted::platform::pen::normalize;
 using noted::platform::pen::RawPenSample;
 
 TEST(PenInput, NormalizePressureZero) {
     const auto e = normalize(RawPenSample{
-        .client_x        = 0.0,
-        .client_y        = 0.0,
+        .client_x = 0.0,
+        .client_y = 0.0,
         .pressure_0_1024 = 0,
-        .tilt_x_deg      = 0,
-        .tilt_y_deg      = 0,
+        .tilt_x_deg = 0,
+        .tilt_y_deg = 0,
     });
     EXPECT_FLOAT_EQ(e.pressure, 0.0F);
-    EXPECT_FLOAT_EQ(e.tilt_x,   0.0F);
-    EXPECT_FLOAT_EQ(e.tilt_y,   0.0F);
+    EXPECT_FLOAT_EQ(e.tilt_x, 0.0F);
+    EXPECT_FLOAT_EQ(e.tilt_y, 0.0F);
 }
 
 TEST(PenInput, NormalizePressureFullScale) {

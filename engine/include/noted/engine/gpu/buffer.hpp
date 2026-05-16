@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <span>
 
-#include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
+#include <vulkan/vulkan.h>
 
 #include "noted/engine/error/error.hpp"
 #include "noted/engine/gpu/allocator.hpp"
@@ -22,12 +22,12 @@ enum class MemoryUsage : std::uint8_t {
 };
 
 struct BufferCreateInfo {
-    VkDeviceSize       size  = 0;
+    VkDeviceSize size = 0;
     VkBufferUsageFlags usage = 0;
-    MemoryUsage        memory = MemoryUsage::gpu_only;
+    MemoryUsage memory = MemoryUsage::gpu_only;
     // When true, the allocation is forced to be HOST_VISIBLE + HOST_COHERENT
     // and permanently mapped; map() returns the cached pointer.
-    bool               persistent_map = false;
+    bool persistent_map = false;
 };
 
 // VkBuffer + VmaAllocation. Move-only RAII.
@@ -56,11 +56,11 @@ private:
     Buffer() = default;
     void destroy() noexcept;
 
-    VmaAllocator   owner_      = nullptr;
-    VkBuffer       handle_     = VK_NULL_HANDLE;
-    VmaAllocation  allocation_ = nullptr;
-    VkDeviceSize   size_       = 0;
-    void*          mapped_     = nullptr;
+    VmaAllocator owner_ = nullptr;
+    VkBuffer handle_ = VK_NULL_HANDLE;
+    VmaAllocation allocation_ = nullptr;
+    VkDeviceSize size_ = 0;
+    void* mapped_ = nullptr;
 };
 
 }  // namespace noted::gpu

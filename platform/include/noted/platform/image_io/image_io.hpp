@@ -9,8 +9,8 @@
 namespace noted::platform::image_io {
 
 struct LoadedImage {
-    std::uint32_t          width  = 0;
-    std::uint32_t          height = 0;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
     // Always 4 channels, RGBA, 8 bits per channel, top-left origin.
     std::vector<std::byte> pixels;
 };
@@ -21,7 +21,6 @@ struct LoadedImage {
 // On success, .pixels.size() == width * height * 4. On failure, returns
 // invalid_image_format / file_not_found with the stb_image reason in
 // the message.
-[[nodiscard]] auto load_rgba8(const std::filesystem::path& p)
-    -> noted::Result<LoadedImage>;
+[[nodiscard]] auto load_rgba8(const std::filesystem::path& p) -> noted::Result<LoadedImage>;
 
 }  // namespace noted::platform::image_io

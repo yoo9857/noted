@@ -15,13 +15,12 @@ enum class Mark : std::uint8_t { white, gray, black };
 // Walks the DAG starting at `start` and returns true if any node already
 // `gray` is encountered (= back-edge = cycle). Uses an explicit stack so
 // deep graphs don't blow the C++ stack.
-auto has_cycle_from(
-    const std::unordered_map<LayerId, LayerNode>& nodes,
-    LayerId                                       start,
-    std::unordered_map<LayerId, Mark>&            marks) -> bool {
+auto has_cycle_from(const std::unordered_map<LayerId, LayerNode>& nodes,
+                    LayerId start,
+                    std::unordered_map<LayerId, Mark>& marks) -> bool {
     struct Frame {
-        LayerId      id;
-        std::size_t  next_input;  // index into nodes[id].inputs
+        LayerId id;
+        std::size_t next_input;  // index into nodes[id].inputs
     };
     std::vector<Frame> stack;
     stack.push_back({start, 0});
@@ -76,7 +75,7 @@ auto has_cycle_from(
 auto LayerGraph::add_layer(LayerKind kind, std::string name) -> LayerId {
     const auto id = next_id_++;
     LayerNode n{};
-    n.id   = id;
+    n.id = id;
     n.kind = kind;
     n.name = std::move(name);
     nodes_.emplace(id, std::move(n));
@@ -85,18 +84,17 @@ auto LayerGraph::add_layer(LayerKind kind, std::string name) -> LayerId {
 
 auto LayerGraph::remove_layer(LayerId id) -> Result<void> {
     if (id == invalid_layer_id || nodes_.find(id) == nodes_.end()) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::invalid_argument,
-            "LayerGraph::remove_layer: unknown id " + std::to_string(id)));
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument,
+                              "LayerGraph::remove_layer: unknown id " + std::to_string(id)));
     }
     // Reject if anyone still points at it.
     for (const auto& [_, node] : nodes_) {
-        if (std::find(node.inputs.begin(), node.inputs.end(), id) !=
-            node.inputs.end()) {
-            return std::unexpected(noted::make_error(
-                noted::ErrorCode::invalid_state,
-                "LayerGraph::remove_layer: " + std::to_string(id) +
-                " still referenced as input by " + std::to_string(node.id)));
+        if (std::find(node.inputs.begin(), node.inputs.end(), id) != node.inputs.end()) {
+            return std::unexpected(
+                noted::make_error(noted::ErrorCode::invalid_state,
+                                  "LayerGraph::remove_layer: " + std::to_string(id) +
+                                      " still referenced as input by " + std::to_string(node.id)));
         }
     }
     nodes_.erase(id);
@@ -106,21 +104,19 @@ auto LayerGraph::remove_layer(LayerId id) -> Result<void> {
     return {};
 }
 
-auto LayerGraph::set_inputs(LayerId id, std::span<const LayerId> inputs)
-    -> Result<void> {
+auto LayerGraph::set_inputs(LayerId id, std::span<const LayerId> inputs) -> Result<void> {
     auto it = nodes_.find(id);
     if (id == invalid_layer_id || it == nodes_.end()) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::invalid_argument,
-            "LayerGraph::set_inputs: unknown id " + std::to_string(id)));
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument,
+                              "LayerGraph::set_inputs: unknown id " + std::to_string(id)));
     }
     // Validate every input first so we never mutate on partial failure.
     for (const auto in : inputs) {
         if (in == invalid_layer_id || nodes_.find(in) == nodes_.end()) {
             return std::unexpected(noted::make_error(
                 noted::ErrorCode::invalid_argument,
-                "LayerGraph::set_inputs: input " + std::to_string(in) +
-                " is unknown / invalid"));
+                "LayerGraph::set_inputs: input " + std::to_string(in) + " is unknown / invalid"));
         }
         if (in == id) {
             return std::unexpected(noted::make_error(
@@ -141,8 +137,7 @@ auto LayerGraph::set_inputs(LayerId id, std::span<const LayerId> inputs)
         node.inputs = std::move(previous);
         return std::unexpected(noted::make_error(
             noted::ErrorCode::invalid_state,
-            "LayerGraph::set_inputs: would create a cycle through " +
-            std::to_string(id)));
+            "LayerGraph::set_inputs: would create a cycle through " + std::to_string(id)));
     }
     return {};
 }
@@ -150,9 +145,9 @@ auto LayerGraph::set_inputs(LayerId id, std::span<const LayerId> inputs)
 auto LayerGraph::set_blend(LayerId id, BlendMode mode) -> Result<void> {
     auto it = nodes_.find(id);
     if (it == nodes_.end()) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::invalid_argument,
-            "LayerGraph::set_blend: unknown id " + std::to_string(id)));
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument,
+                              "LayerGraph::set_blend: unknown id " + std::to_string(id)));
     }
     it->second.blend = mode;
     return {};
@@ -161,9 +156,9 @@ auto LayerGraph::set_blend(LayerId id, BlendMode mode) -> Result<void> {
 auto LayerGraph::set_opacity(LayerId id, float value) -> Result<void> {
     auto it = nodes_.find(id);
     if (it == nodes_.end()) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::invalid_argument,
-            "LayerGraph::set_opacity: unknown id " + std::to_string(id)));
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument,
+                              "LayerGraph::set_opacity: unknown id " + std::to_string(id)));
     }
     it->second.opacity = sanitize_opacity(value);
     return {};
@@ -172,9 +167,9 @@ auto LayerGraph::set_opacity(LayerId id, float value) -> Result<void> {
 auto LayerGraph::set_visible(LayerId id, bool v) -> Result<void> {
     auto it = nodes_.find(id);
     if (it == nodes_.end()) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::invalid_argument,
-            "LayerGraph::set_visible: unknown id " + std::to_string(id)));
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument,
+                              "LayerGraph::set_visible: unknown id " + std::to_string(id)));
     }
     it->second.visible = v;
     return {};
@@ -183,9 +178,9 @@ auto LayerGraph::set_visible(LayerId id, bool v) -> Result<void> {
 auto LayerGraph::set_name(LayerId id, std::string name) -> Result<void> {
     auto it = nodes_.find(id);
     if (it == nodes_.end()) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::invalid_argument,
-            "LayerGraph::set_name: unknown id " + std::to_string(id)));
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument,
+                              "LayerGraph::set_name: unknown id " + std::to_string(id)));
     }
     it->second.name = std::move(name);
     return {};
@@ -197,9 +192,9 @@ auto LayerGraph::set_root(LayerId id) -> Result<void> {
         return {};
     }
     if (nodes_.find(id) == nodes_.end()) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::invalid_argument,
-            "LayerGraph::set_root: unknown id " + std::to_string(id)));
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument,
+                              "LayerGraph::set_root: unknown id " + std::to_string(id)));
     }
     root_ = id;
     return {};
@@ -232,8 +227,8 @@ auto LayerGraph::topological_order() const -> Result<std::vector<LayerId>> {
     out.reserve(nodes_.size());
 
     struct Frame {
-        LayerId      id;
-        std::size_t  next_input;
+        LayerId id;
+        std::size_t next_input;
     };
     std::vector<Frame> stack;
 
@@ -257,8 +252,7 @@ auto LayerGraph::topological_order() const -> Result<std::vector<LayerId>> {
             if (m == Mark::gray) {
                 return std::unexpected(noted::make_error(
                     noted::ErrorCode::invalid_state,
-                    "LayerGraph::topological_order: cycle at " +
-                    std::to_string(child)));
+                    "LayerGraph::topological_order: cycle at " + std::to_string(child)));
             }
             if (m == Mark::white) {
                 marks[child] = Mark::gray;
@@ -274,10 +268,10 @@ auto LayerGraph::validate() const -> Result<void> {
     for (const auto& [_, node] : nodes_) {
         for (const auto in : node.inputs) {
             if (in == invalid_layer_id || nodes_.find(in) == nodes_.end()) {
-                return std::unexpected(noted::make_error(
-                    noted::ErrorCode::invalid_state,
-                    "LayerGraph::validate: node " + std::to_string(node.id) +
-                    " references unknown input " + std::to_string(in)));
+                return std::unexpected(
+                    noted::make_error(noted::ErrorCode::invalid_state,
+                                      "LayerGraph::validate: node " + std::to_string(node.id) +
+                                          " references unknown input " + std::to_string(in)));
             }
         }
     }
@@ -285,8 +279,7 @@ auto LayerGraph::validate() const -> Result<void> {
     if (root_ != invalid_layer_id && nodes_.find(root_) == nodes_.end()) {
         return std::unexpected(noted::make_error(
             noted::ErrorCode::invalid_state,
-            "LayerGraph::validate: root " + std::to_string(root_) +
-            " is not in the graph"));
+            "LayerGraph::validate: root " + std::to_string(root_) + " is not in the graph"));
     }
     // Cycles — DFS every connected component.
     std::unordered_map<LayerId, Mark> marks;
@@ -297,8 +290,7 @@ auto LayerGraph::validate() const -> Result<void> {
         if (has_cycle_from(nodes_, id, marks)) {
             return std::unexpected(noted::make_error(
                 noted::ErrorCode::invalid_state,
-                "LayerGraph::validate: cycle reachable from " +
-                std::to_string(id)));
+                "LayerGraph::validate: cycle reachable from " + std::to_string(id)));
         }
     }
     return {};

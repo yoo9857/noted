@@ -12,11 +12,11 @@
 namespace noted::gpu {
 
 struct DescriptorBinding {
-    std::uint32_t       binding            = 0;
-    VkDescriptorType    type               = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    std::uint32_t       count              = 1;
-    VkShaderStageFlags  stages             = VK_SHADER_STAGE_ALL_GRAPHICS;
-    const VkSampler*    immutable_samplers = nullptr;
+    std::uint32_t binding = 0;
+    VkDescriptorType type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    std::uint32_t count = 1;
+    VkShaderStageFlags stages = VK_SHADER_STAGE_ALL_GRAPHICS;
+    const VkSampler* immutable_samplers = nullptr;
     // Per-binding flags (Vulkan 1.2 core: VkDescriptorBindingFlags).
     // Set this to VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
     // VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT to make the binding
@@ -42,13 +42,12 @@ public:
     };
 
     [[nodiscard]] static auto create(const Device& device,
-                                     const CreateInfo& info)
-        -> Result<DescriptorSetLayout>;
+                                     const CreateInfo& info) -> Result<DescriptorSetLayout>;
 
     // Convenience overload for the common simple case.
-    [[nodiscard]] static auto create(
-        const Device&                  device,
-        std::span<const DescriptorBinding> bindings) -> Result<DescriptorSetLayout> {
+    [[nodiscard]] static auto create(const Device& device,
+                                     std::span<const DescriptorBinding> bindings)
+        -> Result<DescriptorSetLayout> {
         return create(device, CreateInfo{.bindings = bindings});
     }
 
@@ -67,8 +66,8 @@ private:
     DescriptorSetLayout() = default;
     void destroy() noexcept;
 
-    VkDevice                       owner_   = VK_NULL_HANDLE;
-    VkDescriptorSetLayout          handle_  = VK_NULL_HANDLE;
+    VkDevice owner_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout handle_ = VK_NULL_HANDLE;
     std::vector<DescriptorBinding> bindings_;
 };
 

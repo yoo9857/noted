@@ -3,6 +3,10 @@
 // Umbrella header for the noted engine module. Pulls in the public API
 // surface for downstream consumers (app, plugin host, UI layer).
 
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+
 #include "noted/engine/color/color.hpp"
 #include "noted/engine/error/error.hpp"
 #include "noted/engine/gpu/gpu.hpp"
@@ -12,10 +16,6 @@
 #include "noted/engine/job/job.hpp"
 #include "noted/engine/memory/memory.hpp"
 #include "noted/engine/tile/tile.hpp"
-
-#include <atomic>
-#include <chrono>
-#include <cstdint>
 
 namespace noted::engine {
 
@@ -64,10 +64,10 @@ public:
     }
 
 private:
-    std::atomic<bool>                       initialized_{false};
-    std::atomic<std::uint64_t>              frame_index_{0};
-    std::chrono::steady_clock::time_point   frame_start_{};
-    bool                                    in_frame_ = false;
+    std::atomic<bool> initialized_{false};
+    std::atomic<std::uint64_t> frame_index_{0};
+    std::chrono::steady_clock::time_point frame_start_{};
+    bool in_frame_ = false;
 };
 
 }  // namespace noted::engine

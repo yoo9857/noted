@@ -14,31 +14,25 @@ jobs:
   clang-format:
     name: clang-format check
     runs-on: ubuntu-latest
-    # Non-blocking until the dedicated format-sweep PR lands. CI still
-    # surfaces drift as warnings in the action log.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - name: Install clang-format
+      - name: Install clang-format-18
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-format-18
       - name: Run clang-format
         run: |
           set -euo pipefail
-          mapfile -t files < <(find engine domain plugin platform ui app tests \
+          mapfile -t files < <(find engine domain compositor plugin platform ui app tests \
               -type f \( -name '*.hpp' -o -name '*.h' -o -name '*.cpp' -o -name '*.cc' \) \
               -not -path '*/build/*')
           bad=0
           for f in "${files[@]}"; do
               if ! diff -q <(clang-format-18 "$f") "$f" >/dev/null; then
-                  echo "::warning file=$f::clang-format would change this file"
+                  echo "::error file=$f::clang-format-18 would change this file. Run \`clang-format-18 -i $f\` locally and commit."
                   bad=1
               fi
           done
-          if (( bad )); then
-              echo "::warning::Format drift detected. A format-sweep PR will normalize the codebase."
-          fi
           exit $bad
 
   commit-lint:

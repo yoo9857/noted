@@ -10,7 +10,7 @@ namespace noted::domain {
 class Command {
 public:
     virtual ~Command() = default;
-    virtual auto apply()  -> noted::Result<void> = 0;
+    virtual auto apply() -> noted::Result<void> = 0;
     virtual auto revert() -> noted::Result<void> = 0;
     virtual auto name() const -> const char* = 0;
 };

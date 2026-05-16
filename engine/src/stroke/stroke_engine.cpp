@@ -27,11 +27,12 @@ struct StampPush {
     float radius_px;       // offset 32
     float softness_px;     // offset 36
 };
-static_assert(sizeof(StampPush) == 40, "StampPush must be 40 bytes — check std430 layout vs stamp.slang");
-static_assert(offsetof(StampPush, color)       ==  0);
+static_assert(sizeof(StampPush) == 40,
+              "StampPush must be 40 bytes — check std430 layout vs stamp.slang");
+static_assert(offsetof(StampPush, color) == 0);
 static_assert(offsetof(StampPush, canvas_size) == 16);
-static_assert(offsetof(StampPush, center_px)   == 24);
-static_assert(offsetof(StampPush, radius_px)   == 32);
+static_assert(offsetof(StampPush, center_px) == 24);
+static_assert(offsetof(StampPush, radius_px) == 32);
 static_assert(offsetof(StampPush, softness_px) == 36);
 
 [[nodiscard]] auto clamp01(float v) noexcept -> float {
@@ -52,30 +53,29 @@ static_assert(offsetof(StampPush, softness_px) == 36);
 // Pure pressure-to-stamp mapping. Lives in the source TU so the header
 // stays light, but is declared in the public header so unit tests get to
 // poke at it directly.
-auto stamp_from_pressure(const BrushStyle& style, float pressure) noexcept
-    -> Stamp {
-    const float p   = clamp01(pressure);
+auto stamp_from_pressure(const BrushStyle& style, float pressure) noexcept -> Stamp {
+    const float p = clamp01(pressure);
     // Linear lerp on radius — easy to reason about, matches Photoshop's
     // "pen pressure controls size" default.
-    const float lo  = std::max(0.0F, style.min_radius_px);
-    const float hi  = std::max(lo, style.max_radius_px);
-    const float r   = lo + (hi - lo) * p;
+    const float lo = std::max(0.0F, style.min_radius_px);
+    const float hi = std::max(lo, style.max_radius_px);
+    const float r = lo + (hi - lo) * p;
 
     // Gamma curve on alpha. The shader's smoothstep already gives a soft
     // edge, so the gamma's job is purely "light touch → low ink".
     // alpha_gamma <= 0 is treated as 1 (linear) to keep the call safe.
     const float gamma = (style.alpha_gamma > 0.0F) ? style.alpha_gamma : 1.0F;
-    const float a     = clamp01(style.a * std::pow(p, gamma));
+    const float a = clamp01(style.a * std::pow(p, gamma));
 
     // Softness in pixels: a fraction of the current radius, with a 1 px
     // floor so tiny stamps still anti-alias on the disk edge.
-    const float ratio    = clamp01(style.softness_ratio);
+    const float ratio = clamp01(style.softness_ratio);
     const float softness = std::max(1.0F, r * ratio);
 
     return Stamp{
-        .x_px        = 0.0F,
-        .y_px        = 0.0F,
-        .radius_px   = r,
+        .x_px = 0.0F,
+        .y_px = 0.0F,
+        .radius_px = r,
         .softness_px = softness,
         .r = style.r,
         .g = style.g,
@@ -87,27 +87,24 @@ auto stamp_from_pressure(const BrushStyle& style, float pressure) noexcept
 auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
     -> Result<std::unique_ptr<StrokeEngine>> {
     if (info.device == nullptr) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::invalid_argument,
-            "StrokeEngine::create: device is null"));
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                 "StrokeEngine::create: device is null"));
     }
     if (info.vs_module == nullptr || info.ps_module == nullptr) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::invalid_argument,
-            "StrokeEngine::create: shader modules are null"));
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                 "StrokeEngine::create: shader modules are null"));
     }
     if (info.hook_registry == nullptr) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::invalid_argument,
-            "StrokeEngine::create: hook_registry is null"));
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                 "StrokeEngine::create: hook_registry is null"));
     }
 
     // Pipeline layout: no descriptor sets, one push-constant range covering
     // both stages (vertex needs position math, fragment needs color/SDF).
     VkPushConstantRange push_range{};
     push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    push_range.offset     = 0;
-    push_range.size       = sizeof(StampPush);
+    push_range.offset = 0;
+    push_range.size = sizeof(StampPush);
 
     auto layout = noted::gpu::PipelineLayout::create(
         *info.device,
@@ -121,24 +118,24 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
     // culling, alpha blend (SRC_ALPHA / ONE_MINUS_SRC_ALPHA). Dynamic
     // viewport + scissor inherited from the builder defaults.
     VkPipelineColorBlendAttachmentState blend{};
-    blend.blendEnable         = VK_TRUE;
+    blend.blendEnable = VK_TRUE;
     blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
     blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    blend.colorBlendOp        = VK_BLEND_OP_ADD;
+    blend.colorBlendOp = VK_BLEND_OP_ADD;
     blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
     blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    blend.alphaBlendOp        = VK_BLEND_OP_ADD;
-    blend.colorWriteMask      = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                                VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    blend.alphaBlendOp = VK_BLEND_OP_ADD;
+    blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                           VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
-    auto pipeline = noted::gpu::GraphicsPipelineBuilder{}
-        .add_stage(VK_SHADER_STAGE_VERTEX_BIT,   *info.vs_module, "main")
-        .add_stage(VK_SHADER_STAGE_FRAGMENT_BIT, *info.ps_module, "main")
-        .rasterization(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE,
-                       VK_FRONT_FACE_COUNTER_CLOCKWISE)
-        .color_blend_attachment(blend)
-        .color_format(info.canvas_format)
-        .build(*info.device, *layout);
+    auto pipeline =
+        noted::gpu::GraphicsPipelineBuilder{}
+            .add_stage(VK_SHADER_STAGE_VERTEX_BIT, *info.vs_module, "main")
+            .add_stage(VK_SHADER_STAGE_FRAGMENT_BIT, *info.ps_module, "main")
+            .rasterization(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
+            .color_blend_attachment(blend)
+            .color_format(info.canvas_format)
+            .build(*info.device, *layout);
     if (!pipeline) {
         return std::unexpected(std::move(pipeline).error());
     }
@@ -152,7 +149,7 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
     eng->brush_ = info.brush;
 
     auto* self = eng.get();
-    auto& reg  = *info.hook_registry;
+    auto& reg = *info.hook_registry;
     self->sub_pressed_ = noted::hook::Subscription<noted::hook::PointerPressed>{
         reg.on_pointer_pressed,
         reg.on_pointer_pressed.subscribe(
@@ -174,7 +171,7 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
 }
 
 void StrokeEngine::set_canvas_size(VkExtent2D extent) noexcept {
-    canvas_w_ = static_cast<float>(extent.width  == 0 ? 1U : extent.width);
+    canvas_w_ = static_cast<float>(extent.width == 0 ? 1U : extent.width);
     canvas_h_ = static_cast<float>(extent.height == 0 ? 1U : extent.height);
 }
 
@@ -184,7 +181,7 @@ void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept
         return;
     }
 
-    const float cw = static_cast<float>(canvas_extent.width  == 0 ? 1U : canvas_extent.width);
+    const float cw = static_cast<float>(canvas_extent.width == 0 ? 1U : canvas_extent.width);
     const float ch = static_cast<float>(canvas_extent.height == 0 ? 1U : canvas_extent.height);
 
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_->handle());
@@ -195,16 +192,16 @@ void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept
 
     for (const auto& s : stamps_) {
         StampPush p{};
-        p.color[0]       = s.r;
-        p.color[1]       = s.g;
-        p.color[2]       = s.b;
-        p.color[3]       = s.a;
+        p.color[0] = s.r;
+        p.color[1] = s.g;
+        p.color[2] = s.b;
+        p.color[3] = s.a;
         p.canvas_size[0] = cw;
         p.canvas_size[1] = ch;
-        p.center_px[0]   = s.x_px;
-        p.center_px[1]   = s.y_px;
-        p.radius_px      = s.radius_px;
-        p.softness_px    = s.softness_px;
+        p.center_px[0] = s.x_px;
+        p.center_px[1] = s.y_px;
+        p.radius_px = s.radius_px;
+        p.softness_px = s.softness_px;
 
         vkCmdPushConstants(cb, layout_h, kStages, 0, sizeof(StampPush), &p);
         vkCmdDraw(cb, /*vertexCount=*/6, /*instanceCount=*/1, 0, 0);
@@ -218,9 +215,9 @@ void StrokeEngine::on_pressed(const noted::hook::PointerPressed& e) noexcept {
         return;
     }
     drawing_ = true;
-    auto s   = stamp_from_pressure(brush_, e.pressure);
-    s.x_px   = static_cast<float>(e.x);
-    s.y_px   = static_cast<float>(e.y);
+    auto s = stamp_from_pressure(brush_, e.pressure);
+    s.x_px = static_cast<float>(e.x);
+    s.y_px = static_cast<float>(e.y);
     stamps_.push_back(s);
 }
 
@@ -247,8 +244,10 @@ void StrokeEngine::on_resized(const noted::hook::FramebufferResized& e) noexcept
 
 // ---- Test injection helpers (mirror the hook callbacks) ---------------------
 
-void StrokeEngine::inject_press_(
-    double x, double y, noted::hook::PointerButton b, float pressure) noexcept {
+void StrokeEngine::inject_press_(double x,
+                                 double y,
+                                 noted::hook::PointerButton b,
+                                 float pressure) noexcept {
     on_pressed({.x = x, .y = y, .button = b, .pressure = pressure});
 }
 void StrokeEngine::inject_move_(double x, double y, float pressure) noexcept {

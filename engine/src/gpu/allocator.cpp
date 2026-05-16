@@ -11,15 +11,14 @@
 
 namespace noted::gpu {
 
-auto Allocator::create(
-    const Instance&       instance,
-    const PhysicalDevice& physical,
-    const Device&         device,
-    std::uint32_t         api_version) -> Result<Allocator> {
+auto Allocator::create(const Instance& instance,
+                       const PhysicalDevice& physical,
+                       const Device& device,
+                       std::uint32_t api_version) -> Result<Allocator> {
     VmaAllocatorCreateInfo ci{};
     ci.physicalDevice = physical.handle();
-    ci.device         = device.handle();
-    ci.instance       = instance.handle();
+    ci.device = device.handle();
+    ci.instance = instance.handle();
     ci.vulkanApiVersion = api_version;
 
     VmaAllocator raw = nullptr;
@@ -35,8 +34,7 @@ auto Allocator::create(
     return a;
 }
 
-Allocator::Allocator(Allocator&& other) noexcept
-    : device_(other.device_), handle_(other.handle_) {
+Allocator::Allocator(Allocator&& other) noexcept : device_(other.device_), handle_(other.handle_) {
     other.device_ = VK_NULL_HANDLE;
     other.handle_ = nullptr;
 }
@@ -44,15 +42,17 @@ Allocator::Allocator(Allocator&& other) noexcept
 auto Allocator::operator=(Allocator&& other) noexcept -> Allocator& {
     if (this != &other) {
         destroy();
-        device_       = other.device_;
-        handle_       = other.handle_;
+        device_ = other.device_;
+        handle_ = other.handle_;
         other.device_ = VK_NULL_HANDLE;
         other.handle_ = nullptr;
     }
     return *this;
 }
 
-Allocator::~Allocator() { destroy(); }
+Allocator::~Allocator() {
+    destroy();
+}
 
 void Allocator::destroy() noexcept {
     if (handle_ != nullptr) {

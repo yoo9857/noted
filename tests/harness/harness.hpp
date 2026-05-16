@@ -32,19 +32,18 @@ public:
 
 private:
     std::vector<noted::Error> errors_;
-    noted::hook::Token        token_ = noted::hook::invalid_token;
+    noted::hook::Token token_ = noted::hook::invalid_token;
 };
 
 struct GoldenDiff {
-    double    max_delta = 0.0;
-    double    mean_delta = 0.0;
+    double max_delta = 0.0;
+    double mean_delta = 0.0;
     std::uint64_t pixels_changed = 0;
 };
 
 // Real PNG diff lands when feat/gpu-vulkan provides actual rendered output.
-auto golden_image_diff(
-    const std::string& candidate_path,
-    const std::string& golden_path) -> noted::Result<GoldenDiff>;
+auto golden_image_diff(const std::string& candidate_path,
+                       const std::string& golden_path) -> noted::Result<GoldenDiff>;
 
 void reset_global_state();
 

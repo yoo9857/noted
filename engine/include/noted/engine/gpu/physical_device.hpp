@@ -12,7 +12,7 @@ namespace noted::gpu {
 
 struct QueueFamilyIndices {
     std::uint32_t graphics = UINT32_MAX;
-    std::uint32_t compute  = UINT32_MAX;
+    std::uint32_t compute = UINT32_MAX;
     std::uint32_t transfer = UINT32_MAX;
 
     [[nodiscard]] auto is_complete() const noexcept -> bool {
@@ -33,7 +33,7 @@ struct QueueFamilyIndices {
 class PhysicalDevice {
 public:
     [[nodiscard]] static auto select(const Instance& instance,
-                                     std::uint32_t   min_api_version = VK_API_VERSION_1_3)
+                                     std::uint32_t min_api_version = VK_API_VERSION_1_3)
         -> Result<PhysicalDevice>;
 
     [[nodiscard]] auto handle() const noexcept -> VkPhysicalDevice { return handle_; }
@@ -47,9 +47,9 @@ public:
 private:
     PhysicalDevice() = default;
 
-    VkPhysicalDevice            handle_ = VK_NULL_HANDLE;
-    VkPhysicalDeviceProperties  props_{};
-    QueueFamilyIndices          queues_{};
+    VkPhysicalDevice handle_ = VK_NULL_HANDLE;
+    VkPhysicalDeviceProperties props_{};
+    QueueFamilyIndices queues_{};
 };
 
 }  // namespace noted::gpu

@@ -18,9 +18,8 @@ namespace noted::gpu {
 // runtime via the future feat/shader-compile path.
 class ShaderModule {
 public:
-    [[nodiscard]] static auto create(
-        const Device&                 device,
-        std::span<const std::uint32_t> spirv) -> Result<ShaderModule>;
+    [[nodiscard]] static auto create(const Device& device,
+                                     std::span<const std::uint32_t> spirv) -> Result<ShaderModule>;
 
     ShaderModule(ShaderModule&& other) noexcept;
     auto operator=(ShaderModule&& other) noexcept -> ShaderModule&;
@@ -34,7 +33,7 @@ private:
     ShaderModule() = default;
     void destroy() noexcept;
 
-    VkDevice       owner_  = VK_NULL_HANDLE;
+    VkDevice owner_ = VK_NULL_HANDLE;
     VkShaderModule handle_ = VK_NULL_HANDLE;
 };
 

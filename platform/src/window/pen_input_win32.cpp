@@ -24,7 +24,7 @@
 // (CompilerWarnings.cmake adds it as a compile_definition); guard the
 // local define to avoid C4005 "macro redefinition".
 #ifndef WIN32_LEAN_AND_MEAN
-#  define WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
 #endif
 
 // clang-format off
@@ -47,22 +47,20 @@ namespace {
 // We use a single mask + match to swallow all such synthetic mouse
 // messages — pen events are delivered through WM_POINTER* instead, touch
 // is currently ignored.
-constexpr LONG_PTR kMiWpSignature     = 0xFF515700;
+constexpr LONG_PTR kMiWpSignature = 0xFF515700;
 constexpr LONG_PTR kMiWpSignatureMask = 0xFFFFFF80;
 
 // Sub-class ID for SetWindowSubclass. Any uint we own; 0xA001 ("Pen 1")
 // won't collide with GLFW's internal subclass.
 constexpr UINT_PTR kSubclassId = 0xA001U;
 
-[[nodiscard]] auto map_pen_button(const POINTER_PEN_INFO& pi)
-    -> noted::hook::PointerButton {
+[[nodiscard]] auto map_pen_button(const POINTER_PEN_INFO& pi) -> noted::hook::PointerButton {
     // Eraser-end touching the tablet → "right button" today. Inks the
     // background color in most apps; for our MVP that maps cleanly to
     // the existing right-button semantics. The barrel button is a more
     // app-defined gesture and we leave it as "other" until ADR 0017's
     // pen-button-mapping section gets concrete UX.
-    if ((pi.penFlags & PEN_FLAG_ERASER) != 0 ||
-        (pi.penFlags & PEN_FLAG_INVERTED) != 0) {
+    if ((pi.penFlags & PEN_FLAG_ERASER) != 0 || (pi.penFlags & PEN_FLAG_INVERTED) != 0) {
         return noted::hook::PointerButton::right;
     }
     if ((pi.penFlags & PEN_FLAG_BARREL) != 0) {
@@ -71,28 +69,26 @@ constexpr UINT_PTR kSubclassId = 0xA001U;
     return noted::hook::PointerButton::left;
 }
 
-[[nodiscard]] auto extract_pen_sample(HWND hwnd, const POINTER_PEN_INFO& pi)
-    -> RawPenSample {
+[[nodiscard]] auto extract_pen_sample(HWND hwnd, const POINTER_PEN_INFO& pi) -> RawPenSample {
     POINT pt = pi.pointerInfo.ptPixelLocation;
     ::ScreenToClient(hwnd, &pt);
     return RawPenSample{
-        .client_x        = static_cast<double>(pt.x),
-        .client_y        = static_cast<double>(pt.y),
+        .client_x = static_cast<double>(pt.x),
+        .client_y = static_cast<double>(pt.y),
         .pressure_0_1024 = pi.pressure,
-        .tilt_x_deg      = pi.tiltX,
-        .tilt_y_deg      = pi.tiltY,
+        .tilt_x_deg = pi.tiltX,
+        .tilt_y_deg = pi.tiltY,
     };
 }
 
 void publish_pen_pressed(const POINTER_PEN_INFO& pi, const RawPenSample& s) {
     const auto m = normalize(s);
-    noted::hook::registry().on_pointer_pressed.publish(
-        noted::hook::PointerPressed{
-            .x        = m.x,
-            .y        = m.y,
-            .button   = map_pen_button(pi),
-            .pressure = m.pressure,
-        });
+    noted::hook::registry().on_pointer_pressed.publish(noted::hook::PointerPressed{
+        .x = m.x,
+        .y = m.y,
+        .button = map_pen_button(pi),
+        .pressure = m.pressure,
+    });
 }
 
 void publish_pen_moved(const RawPenSample& s) {
@@ -101,21 +97,23 @@ void publish_pen_moved(const RawPenSample& s) {
 
 void publish_pen_released(const POINTER_PEN_INFO& pi, const RawPenSample& s) {
     const auto m = normalize(s);
-    noted::hook::registry().on_pointer_released.publish(
-        noted::hook::PointerReleased{
-            .x      = m.x,
-            .y      = m.y,
-            .button = map_pen_button(pi),
-        });
+    noted::hook::registry().on_pointer_released.publish(noted::hook::PointerReleased{
+        .x = m.x,
+        .y = m.y,
+        .button = map_pen_button(pi),
+    });
 }
 
 [[nodiscard]] auto is_synthetic_mouse_from_pen_or_touch() noexcept -> bool {
     return (::GetMessageExtraInfo() & kMiWpSignatureMask) == kMiWpSignature;
 }
 
-LRESULT CALLBACK subclass_proc(
-    HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam,
-    UINT_PTR /*uIdSubclass*/, DWORD_PTR /*dwRefData*/) {
+LRESULT CALLBACK subclass_proc(HWND hwnd,
+                               UINT msg,
+                               WPARAM wparam,
+                               LPARAM lparam,
+                               UINT_PTR /*uIdSubclass*/,
+                               DWORD_PTR /*dwRefData*/) {
     switch (msg) {
         case WM_POINTERDOWN:
         case WM_POINTERUPDATE:
@@ -131,10 +129,17 @@ LRESULT CALLBACK subclass_proc(
             }
             const auto sample = extract_pen_sample(hwnd, pi);
             switch (msg) {
-                case WM_POINTERDOWN:   publish_pen_pressed (pi, sample); break;
-                case WM_POINTERUPDATE: publish_pen_moved   (    sample); break;
-                case WM_POINTERUP:     publish_pen_released(pi, sample); break;
-                default: break;  // unreachable; outer switch already filtered
+                case WM_POINTERDOWN:
+                    publish_pen_pressed(pi, sample);
+                    break;
+                case WM_POINTERUPDATE:
+                    publish_pen_moved(sample);
+                    break;
+                case WM_POINTERUP:
+                    publish_pen_released(pi, sample);
+                    break;
+                default:
+                    break;  // unreachable; outer switch already filtered
             }
             return 0;  // handled — do not forward to GLFW
         }
@@ -171,16 +176,16 @@ LRESULT CALLBACK subclass_proc(
 auto install_pen_input(void* native_handle) -> Result<void> {
     auto* hwnd = static_cast<HWND>(native_handle);
     if (hwnd == nullptr || ::IsWindow(hwnd) == 0) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::invalid_argument,
-            "pen::install_pen_input: native_handle is not a valid HWND"));
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument,
+                              "pen::install_pen_input: native_handle is not a valid HWND"));
     }
     if (::SetWindowSubclass(hwnd, &subclass_proc, kSubclassId, 0) == 0) {
         const auto code = ::GetLastError();
         return std::unexpected(noted::make_error(
             noted::ErrorCode::invalid_state,
             std::string{"pen::install_pen_input: SetWindowSubclass failed (GetLastError="} +
-            std::to_string(code) + ")"));
+                std::to_string(code) + ")"));
     }
     return {};
 }
@@ -192,7 +197,7 @@ void uninstall_pen_input(void* native_handle) noexcept {
     }
     // Idempotent — RemoveWindowSubclass returns FALSE if the subclass was
     // never installed, which we treat as success.
-    (void)::RemoveWindowSubclass(hwnd, &subclass_proc, kSubclassId);
+    (void) ::RemoveWindowSubclass(hwnd, &subclass_proc, kSubclassId);
 }
 
 }  // namespace noted::platform::pen

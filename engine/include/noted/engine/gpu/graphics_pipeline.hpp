@@ -16,15 +16,15 @@ namespace noted::gpu {
 
 struct VertexInputAttribute {
     std::uint32_t location = 0;
-    std::uint32_t binding  = 0;
-    VkFormat      format   = VK_FORMAT_R32G32B32_SFLOAT;
-    std::uint32_t offset   = 0;
+    std::uint32_t binding = 0;
+    VkFormat format = VK_FORMAT_R32G32B32_SFLOAT;
+    std::uint32_t offset = 0;
 };
 
 struct VertexInputBinding {
-    std::uint32_t   binding   = 0;
-    std::uint32_t   stride    = 0;
-    VkVertexInputRate rate    = VK_VERTEX_INPUT_RATE_VERTEX;
+    std::uint32_t binding = 0;
+    std::uint32_t stride = 0;
+    VkVertexInputRate rate = VK_VERTEX_INPUT_RATE_VERTEX;
 };
 
 // Move-only RAII over VkPipeline (graphics bind point).
@@ -42,7 +42,7 @@ public:
     // Used by the builder. Not part of the public surface.
     static auto adopt(VkDevice device, VkPipeline raw) noexcept -> GraphicsPipeline {
         GraphicsPipeline p;
-        p.owner_  = device;
+        p.owner_ = device;
         p.handle_ = raw;
         return p;
     }
@@ -50,7 +50,7 @@ public:
 private:
     void destroy() noexcept;
 
-    VkDevice   owner_  = VK_NULL_HANDLE;
+    VkDevice owner_ = VK_NULL_HANDLE;
     VkPipeline handle_ = VK_NULL_HANDLE;
 };
 
@@ -68,25 +68,24 @@ public:
     GraphicsPipelineBuilder();
 
     auto add_stage(VkShaderStageFlagBits stage,
-                   const ShaderModule&   module,
-                   const char*           entry = "main") -> GraphicsPipelineBuilder&;
+                   const ShaderModule& module,
+                   const char* entry = "main") -> GraphicsPipelineBuilder&;
 
-    auto vertex_input(std::span<const VertexInputBinding>   bindings,
-                      std::span<const VertexInputAttribute> attributes)
-        -> GraphicsPipelineBuilder&;
+    auto vertex_input(std::span<const VertexInputBinding> bindings,
+                      std::span<const VertexInputAttribute> attributes) -> GraphicsPipelineBuilder&;
 
     auto topology(VkPrimitiveTopology t) -> GraphicsPipelineBuilder&;
 
-    auto rasterization(VkPolygonMode    polygon = VK_POLYGON_MODE_FILL,
-                       VkCullModeFlags  cull    = VK_CULL_MODE_BACK_BIT,
-                       VkFrontFace      front   = VK_FRONT_FACE_COUNTER_CLOCKWISE)
+    auto rasterization(VkPolygonMode polygon = VK_POLYGON_MODE_FILL,
+                       VkCullModeFlags cull = VK_CULL_MODE_BACK_BIT,
+                       VkFrontFace front = VK_FRONT_FACE_COUNTER_CLOCKWISE)
         -> GraphicsPipelineBuilder&;
 
     auto multisample(VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT)
         -> GraphicsPipelineBuilder&;
 
-    auto depth_test(bool enable, VkCompareOp op = VK_COMPARE_OP_LESS_OR_EQUAL)
-        -> GraphicsPipelineBuilder&;
+    auto depth_test(bool enable,
+                    VkCompareOp op = VK_COMPARE_OP_LESS_OR_EQUAL) -> GraphicsPipelineBuilder&;
     auto depth_write(bool enable) -> GraphicsPipelineBuilder&;
 
     // Replace the single default color attachment with the caller's blend
@@ -101,36 +100,34 @@ public:
     auto depth_format(VkFormat f) -> GraphicsPipelineBuilder&;
     auto stencil_format(VkFormat f) -> GraphicsPipelineBuilder&;
 
-    auto dynamic_states(std::span<const VkDynamicState> states)
-        -> GraphicsPipelineBuilder&;
+    auto dynamic_states(std::span<const VkDynamicState> states) -> GraphicsPipelineBuilder&;
 
-    [[nodiscard]] auto build(const Device&         device,
-                             const PipelineLayout& layout)
-        -> Result<GraphicsPipeline>;
+    [[nodiscard]] auto build(const Device& device,
+                             const PipelineLayout& layout) -> Result<GraphicsPipeline>;
 
 private:
     struct Stage {
         VkShaderStageFlagBits stage{};
-        VkShaderModule        module{};
-        std::string           entry;
+        VkShaderModule module{};
+        std::string entry;
     };
 
-    std::vector<Stage>                       stages_;
-    std::vector<VertexInputBinding>          vertex_bindings_;
-    std::vector<VertexInputAttribute>        vertex_attributes_;
-    VkPrimitiveTopology                      topology_     = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    VkPolygonMode                            polygon_      = VK_POLYGON_MODE_FILL;
-    VkCullModeFlags                          cull_         = VK_CULL_MODE_BACK_BIT;
-    VkFrontFace                              front_        = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    VkSampleCountFlagBits                    samples_      = VK_SAMPLE_COUNT_1_BIT;
-    bool                                     depth_test_   = false;
-    bool                                     depth_write_  = false;
-    VkCompareOp                              depth_op_     = VK_COMPARE_OP_LESS_OR_EQUAL;
-    VkPipelineColorBlendAttachmentState      color_blend_{};
-    VkFormat                                 color_fmt_    = VK_FORMAT_B8G8R8A8_SRGB;
-    VkFormat                                 depth_fmt_    = VK_FORMAT_UNDEFINED;
-    VkFormat                                 stencil_fmt_  = VK_FORMAT_UNDEFINED;
-    std::vector<VkDynamicState>              dynamic_;
+    std::vector<Stage> stages_;
+    std::vector<VertexInputBinding> vertex_bindings_;
+    std::vector<VertexInputAttribute> vertex_attributes_;
+    VkPrimitiveTopology topology_ = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    VkPolygonMode polygon_ = VK_POLYGON_MODE_FILL;
+    VkCullModeFlags cull_ = VK_CULL_MODE_BACK_BIT;
+    VkFrontFace front_ = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    VkSampleCountFlagBits samples_ = VK_SAMPLE_COUNT_1_BIT;
+    bool depth_test_ = false;
+    bool depth_write_ = false;
+    VkCompareOp depth_op_ = VK_COMPARE_OP_LESS_OR_EQUAL;
+    VkPipelineColorBlendAttachmentState color_blend_{};
+    VkFormat color_fmt_ = VK_FORMAT_B8G8R8A8_SRGB;
+    VkFormat depth_fmt_ = VK_FORMAT_UNDEFINED;
+    VkFormat stencil_fmt_ = VK_FORMAT_UNDEFINED;
+    std::vector<VkDynamicState> dynamic_;
 };
 
 }  // namespace noted::gpu

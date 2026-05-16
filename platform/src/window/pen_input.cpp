@@ -15,15 +15,14 @@ auto normalize(const RawPenSample& s) noexcept -> noted::hook::PointerMoved {
     // drivers that report 1025 on hard pressure.
     constexpr std::uint32_t kFullScale = 1024U;
     const auto pressure_raw = std::min(s.pressure_0_1024, kFullScale);
-    const float pressure = static_cast<float>(pressure_raw) /
-                           static_cast<float>(kFullScale);
+    const float pressure = static_cast<float>(pressure_raw) / static_cast<float>(kFullScale);
 
     return noted::hook::PointerMoved{
-        .x        = s.client_x,
-        .y        = s.client_y,
+        .x = s.client_x,
+        .y = s.client_y,
         .pressure = pressure,
-        .tilt_x   = static_cast<float>(s.tilt_x_deg),
-        .tilt_y   = static_cast<float>(s.tilt_y_deg),
+        .tilt_x = static_cast<float>(s.tilt_x_deg),
+        .tilt_y = static_cast<float>(s.tilt_y_deg),
     };
 }
 

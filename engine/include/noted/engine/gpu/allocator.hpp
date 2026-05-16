@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
+#include <vulkan/vulkan.h>
 
 #include "noted/engine/error/error.hpp"
 #include "noted/engine/gpu/device.hpp"
@@ -21,11 +21,11 @@ namespace noted::gpu {
 // One Allocator per Device. Move-only.
 class Allocator {
 public:
-    [[nodiscard]] static auto create(
-        const Instance&       instance,
-        const PhysicalDevice& physical,
-        const Device&         device,
-        std::uint32_t         api_version = VK_API_VERSION_1_3) -> Result<Allocator>;
+    [[nodiscard]] static auto create(const Instance& instance,
+                                     const PhysicalDevice& physical,
+                                     const Device& device,
+                                     std::uint32_t api_version = VK_API_VERSION_1_3)
+        -> Result<Allocator>;
 
     Allocator(Allocator&& other) noexcept;
     auto operator=(Allocator&& other) noexcept -> Allocator&;
@@ -40,7 +40,7 @@ private:
     Allocator() = default;
     void destroy() noexcept;
 
-    VkDevice     device_ = VK_NULL_HANDLE;
+    VkDevice device_ = VK_NULL_HANDLE;
     VmaAllocator handle_ = nullptr;
 };
 

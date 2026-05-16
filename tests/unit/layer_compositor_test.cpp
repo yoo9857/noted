@@ -1,8 +1,9 @@
-#include <gtest/gtest.h>
+#include "noted/compositor/layer_compositor.hpp"
 
 #include <array>
 
-#include "noted/compositor/layer_compositor.hpp"
+#include <gtest/gtest.h>
+
 #include "noted/compositor/layer_payload.hpp"
 #include "noted/domain/layer/layer.hpp"
 
@@ -27,8 +28,8 @@ TEST(BlendState, NormalUsesSrcAlphaOverDst) {
     EXPECT_TRUE(supported);
     EXPECT_EQ(s.srcColorBlendFactor, VK_BLEND_FACTOR_ONE);
     EXPECT_EQ(s.dstColorBlendFactor, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
-    EXPECT_EQ(s.colorBlendOp,        VK_BLEND_OP_ADD);
-    EXPECT_EQ(s.blendEnable,         VK_TRUE);
+    EXPECT_EQ(s.colorBlendOp, VK_BLEND_OP_ADD);
+    EXPECT_EQ(s.blendEnable, VK_TRUE);
 }
 
 TEST(BlendState, ScreenIsInvertedMultiply) {
@@ -58,15 +59,23 @@ TEST(BlendState, MultiplyMultipliesSrcByDst) {
 TEST(BlendState, UnsupportedFallsBackToNormal) {
     // Overlay, difference, hue, etc. — not FF-expressible.
     constexpr std::array<BM, 12> kFallbacks{
-        BM::overlay, BM::soft_light, BM::hard_light, BM::color_dodge,
-        BM::color_burn, BM::linear_burn, BM::difference, BM::exclusion,
-        BM::hue, BM::saturation, BM::color, BM::luminosity,
+        BM::overlay,
+        BM::soft_light,
+        BM::hard_light,
+        BM::color_dodge,
+        BM::color_burn,
+        BM::linear_burn,
+        BM::difference,
+        BM::exclusion,
+        BM::hue,
+        BM::saturation,
+        BM::color,
+        BM::luminosity,
     };
     for (const auto mode : kFallbacks) {
         bool supported = true;
         const auto s = blend_state_for(mode, supported);
-        EXPECT_FALSE(supported) << "mode " << static_cast<int>(mode)
-                                << " claims FF support";
+        EXPECT_FALSE(supported) << "mode " << static_cast<int>(mode) << " claims FF support";
         // Fallback should be normal's blend.
         EXPECT_EQ(s.srcColorBlendFactor, VK_BLEND_FACTOR_ONE);
         EXPECT_EQ(s.dstColorBlendFactor, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
@@ -85,10 +94,10 @@ TEST(ResolveComposition, EmptyGraphYieldsEmptyList) {
 
 TEST(ResolveComposition, OnlyVisibleAndPayloadBearingNodesEmit) {
     LayerGraph g;
-    const auto a = g.add_layer(LayerKind::bitmap, "bg");      // visible + payload
+    const auto a = g.add_layer(LayerKind::bitmap, "bg");          // visible + payload
     const auto b = g.add_layer(LayerKind::adjustment, "hidden");  // invisible
-    (void)g.add_layer(LayerKind::group, "no_payload");            // no payload — id unused
-    const auto d = g.add_layer(LayerKind::bitmap, "fg");      // visible + payload
+    (void) g.add_layer(LayerKind::group, "no_payload");           // no payload — id unused
+    const auto d = g.add_layer(LayerKind::bitmap, "fg");          // visible + payload
 
     ASSERT_TRUE(g.set_visible(b, false));
 
@@ -161,7 +170,7 @@ TEST(ResolveComposition, CarriesBlendAndOpacity) {
     auto r = resolve_composition(g, store);
     ASSERT_TRUE(r);
     ASSERT_EQ(r->size(), 1U);
-    EXPECT_EQ((*r)[0].blend,   BM::multiply);
+    EXPECT_EQ((*r)[0].blend, BM::multiply);
     EXPECT_FLOAT_EQ((*r)[0].opacity, 0.42F);
     ASSERT_NE((*r)[0].payload, nullptr);
 }

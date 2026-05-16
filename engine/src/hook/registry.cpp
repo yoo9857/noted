@@ -6,6 +6,8 @@ namespace {
 Registry g_registry;
 }  // namespace
 
-auto registry() -> Registry& { return g_registry; }
+auto registry() -> Registry& {
+    return g_registry;
+}
 
 }  // namespace noted::hook

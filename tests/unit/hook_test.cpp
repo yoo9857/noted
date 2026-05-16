@@ -1,9 +1,9 @@
-#include <gtest/gtest.h>
+#include "noted/engine/hook/hook.hpp"
 
 #include <atomic>
 #include <vector>
 
-#include "noted/engine/hook/hook.hpp"
+#include <gtest/gtest.h>
 
 namespace {
 
@@ -46,8 +46,7 @@ TEST(Hook, PriorityOrderingLowFirst) {
 TEST(Hook, DeferredPublishWaitsForFlush) {
     noted::hook::Channel<Ping> ch;
     int n = 0;
-    const noted::hook::Subscription<Ping> sub(
-        ch, ch.subscribe([&](const Ping&) { ++n; }));
+    const noted::hook::Subscription<Ping> sub(ch, ch.subscribe([&](const Ping&) { ++n; }));
     ch.publish_deferred(Ping{});
     ch.publish_deferred(Ping{});
     EXPECT_EQ(n, 0);
@@ -59,8 +58,7 @@ TEST(Hook, RaiiSubscriptionAutoUnsubscribes) {
     noted::hook::Channel<Ping> ch;
     int n = 0;
     {
-        noted::hook::Subscription<Ping> sub(
-            ch, ch.subscribe([&](const Ping&) { ++n; }));
+        noted::hook::Subscription<Ping> sub(ch, ch.subscribe([&](const Ping&) { ++n; }));
         ch.publish({});
     }
     ch.publish({});
