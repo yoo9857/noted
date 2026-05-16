@@ -21,6 +21,7 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0013 | [Tracy for frame-grained profiling](0013-profiling.md) | Accepted |
 | 0014 | [Canvas render target — two-pass composition](0014-canvas-render-target.md) | Accepted |
 | 0016 | [Layer graph — the Photoshop side's data backbone](0016-layer-domain-model.md) | Accepted |
+| 0017 | [Pen / stylus input via Windows Pointer API](0017-pen-input.md) | Accepted |
 
 ## Format
 

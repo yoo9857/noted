@@ -4,9 +4,10 @@ add_executable(noted_unit_tests
     harness_test.cpp
     engine_test.cpp
     layer_graph_test.cpp
+    pen_input_test.cpp
 )
 
-target_link_libraries(noted_unit_tests PRIVATE noted_test_harness noted::domain)
+target_link_libraries(noted_unit_tests PRIVATE noted_test_harness noted::domain noted::platform)
 target_compile_features(noted_unit_tests PRIVATE cxx_std_23)
 noted_apply_warnings(noted_unit_tests)
 

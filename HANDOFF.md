@@ -157,7 +157,7 @@ The product's note-taking half. Each PR builds on the previous.
 |---|---|---|---|---|
 | 3 | ~~`feat/canvas-render-target`~~ ✅ **landed** | — | — | `CanvasRenderTarget` (R8G8B8A8_UNORM, COLOR_ATTACHMENT\|SAMPLED\|TRANSFER_DST) + `Renderer::render_with_canvas` two-pass flow. Internal layout tracking via sync2 barriers. See ADR 0014. |
 | 4 | `feat/stroke-engine-mvp` | 6h | #3 | Drag the mouse → draw a circle stamp at the cursor into the canvas render target. Crude but proves the input-→-pixel path. |
-| 5 | `feat/pen-input` | 6h | — | Replace GLFW mouse with Windows Pointer Input API (pressure + tilt). NSEvent / libinput equivalents for mac/Linux later. |
+| 5 | ~~`feat/pen-input`~~ ✅ **landed** | — | — | Win32 `WM_POINTER` subclass over GLFW. Real pressure (0..1024 → [0, 1]) + tilt (degrees) flow through existing hook events. Synthetic mouse-from-pen messages swallowed via `MI_WP_SIGNATURE`. Cross-platform stub everywhere else. See ADR 0017. |
 | 6 | `feat/stroke-engine-pressure` | 4h | #4, #5 | Brush width / opacity respond to pressure. First time the app feels like a real note-taking tool. |
 
 ### 🖼️ Priority 3 — Layers + blend (Photoshop side)
