@@ -23,6 +23,7 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0015 | [Stroke engine — MVP disk-stamp pipeline](0015-stroke-engine-mvp.md) | Accepted |
 | 0016 | [Layer graph — the Photoshop side's data backbone](0016-layer-domain-model.md) | Accepted |
 | 0018 | [Pressure-driven stamps in the stroke engine](0018-stroke-engine-pressure.md) | Accepted |
+| 0019 | [Layer compositor — GPU render of the layer graph](0019-layer-compositor.md) | Accepted |
 
 ## Format
 

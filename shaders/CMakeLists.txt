@@ -38,6 +38,20 @@ noted_compile_slang_entry(
     OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/stamp.ps_stamp.spv"
 )
 
+# Layer compositor shader — two entries (vs_layer + ps_layer). One
+# fullscreen triangle per layer; push-constant pre-multiplied RGBA.
+set(_layer_src "${CMAKE_CURRENT_SOURCE_DIR}/layer.slang")
+noted_compile_slang_entry(
+    SOURCE  "${_layer_src}"
+    ENTRY   vs_layer
+    OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/layer.vs_layer.spv"
+)
+noted_compile_slang_entry(
+    SOURCE  "${_layer_src}"
+    ENTRY   ps_layer
+    OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/layer.ps_layer.spv"
+)
+
 add_custom_target(noted_shaders ALL
     DEPENDS
         "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.vs_main.spv"
@@ -45,6 +59,8 @@ add_custom_target(noted_shaders ALL
         "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.ps_textured.spv"
         "${NOTED_SHADER_OUTPUT_DIR}/stamp.vs_stamp.spv"
         "${NOTED_SHADER_OUTPUT_DIR}/stamp.ps_stamp.spv"
+        "${NOTED_SHADER_OUTPUT_DIR}/layer.vs_layer.spv"
+        "${NOTED_SHADER_OUTPUT_DIR}/layer.ps_layer.spv"
 )
 
 set(NOTED_SHADER_OUTPUT_DIR "${NOTED_SHADER_OUTPUT_DIR}" PARENT_SCOPE)
