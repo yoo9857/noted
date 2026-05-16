@@ -38,6 +38,7 @@
 #include "noted/engine/harness/harness.hpp"
 #include "noted/engine/hook/registry.hpp"
 #include "noted/engine/profile.hpp"
+#include "noted/engine/stroke/stroke_engine.hpp"
 #include "noted/platform/fs/fs.hpp"
 #include "noted/platform/image_io/image_io.hpp"
 #include "noted/platform/window/window.hpp"
@@ -374,6 +375,33 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    // -------- Stroke engine: ink drawn into the canvas on top of the
+    // textured background. Subscribes to pointer + framebuffer-resize hooks.
+    auto stamp_vs = load_shader(*device, shader_dir / "stamp.vs_stamp.spv");
+    auto stamp_ps = load_shader(*device, shader_dir / "stamp.ps_stamp.spv");
+    if (!stamp_vs || !stamp_ps) {
+        std::cerr << (!stamp_vs ? stamp_vs.error().format()
+                                : stamp_ps.error().format()) << '\n';
+        device->wait_idle();
+        (void)engine.shutdown();
+        return EXIT_FAILURE;
+    }
+
+    auto stroke_engine = noted::stroke::StrokeEngine::create({
+        .device        = &*device,
+        .vs_module     = &*stamp_vs,
+        .ps_module     = &*stamp_ps,
+        .canvas_format = kCanvasFormat,
+        .hook_registry = &noted::hook::registry(),
+    });
+    if (!stroke_engine) {
+        std::cerr << stroke_engine.error().format() << '\n';
+        device->wait_idle();
+        (void)engine.shutdown();
+        return EXIT_FAILURE;
+    }
+    (*stroke_engine)->set_canvas_size(swapchain->summary().extent);
+
     auto renderer = noted::gpu::Renderer::create(*device, *swapchain);
     if (!renderer) {
         std::cerr << renderer.error().format() << '\n';
@@ -415,15 +443,24 @@ int main() {
     const VkPipelineLayout layout_h             = pipeline_layout->handle();
     const VkDescriptorSet  texture_set_h        = texture_set.handle();
     const VkDescriptorSet  canvas_set_h         = canvas_set.handle();
+    auto* const            stroke_h             = stroke_engine->get();
 
+    // The canvas pass:
+    //   1) draws the background image (textured fullscreen quad), then
+    //   2) overlays accumulated stamps on top via the stroke engine.
+    // Both happen inside one vkCmdBeginRendering — pipeline switches
+    // are cheap relative to a full pass barrier.
     noted::gpu::Renderer::DrawCallback canvas_draw =
-        [canvas_pipeline_h, layout_h, texture_set_h](VkCommandBuffer cb, VkExtent2D /*ext*/) {
+        [canvas_pipeline_h, layout_h, texture_set_h, stroke_h](
+            VkCommandBuffer cb, VkExtent2D ext) {
             vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, canvas_pipeline_h);
             vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                     layout_h, /*firstSet=*/0,
                                     /*setCount=*/1, &texture_set_h,
                                     /*dynamicOffsetCount=*/0, nullptr);
             vkCmdDraw(cb, /*vertexCount=*/3, /*instanceCount=*/1, 0, 0);
+
+            stroke_h->record(cb, ext);
         };
     noted::gpu::Renderer::DrawCallback composite_draw =
         [composite_pipeline_h, layout_h, canvas_set_h](VkCommandBuffer cb, VkExtent2D /*ext*/) {

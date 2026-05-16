@@ -3,6 +3,7 @@ add_executable(noted_unit_tests
     hook_test.cpp
     harness_test.cpp
     engine_test.cpp
+    stroke_engine_test.cpp
     layer_graph_test.cpp
     pen_input_test.cpp
 )
