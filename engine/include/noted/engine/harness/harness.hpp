@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "noted/engine/error/error.hpp"
+#include "noted/engine/profile.hpp"
 
 namespace noted::harness {
 
@@ -60,13 +61,24 @@ private:
 [[nodiscard]] auto all_flags() -> std::vector<FeatureFlag*>;
 
 // ---- Counters -----------------------------------------------------------
+//
+// Counter names MUST be string literals (or otherwise static, null-terminated
+// storage). The class stores the name as `string_view` and forwards it to the
+// profiler verbatim — both consumers assume immortal lifetime + null-termination.
 
 class Counter {
 public:
     explicit Counter(std::string_view name);
 
-    void add(std::uint64_t v = 1) noexcept { value_.fetch_add(v, std::memory_order_relaxed); }
-    void reset() noexcept { value_.store(0, std::memory_order_relaxed); }
+    void add(std::uint64_t v = 1) noexcept {
+        const auto next = value_.fetch_add(v, std::memory_order_relaxed) + v;
+        // Tracy plot of the new value. No-op when NOTED_ENABLE_TRACY=OFF.
+        NOTED_PROFILE_PLOT(name_.data(), static_cast<std::int64_t>(next));
+    }
+    void reset() noexcept {
+        value_.store(0, std::memory_order_relaxed);
+        NOTED_PROFILE_PLOT(name_.data(), static_cast<std::int64_t>(0));
+    }
     [[nodiscard]] auto value() const noexcept -> std::uint64_t {
         return value_.load(std::memory_order_relaxed);
     }
@@ -102,8 +114,13 @@ private:
 
 #define NOTED_TIMED_CONCAT_INNER(a, b) a##b
 #define NOTED_TIMED_CONCAT(a, b) NOTED_TIMED_CONCAT_INNER(a, b)
-#define NOTED_TIMED(label) \
-    ::noted::harness::ScopedTimer NOTED_TIMED_CONCAT(_noted_timer_, __LINE__)(label)
+
+// NOTED_TIMED(label) — wall-clock RAII scope publishing a TimerSpan AND a
+// Tracy zone when NOTED_ENABLE_TRACY=ON. `label` MUST be a string literal —
+// Tracy zone names are stored by pointer and assumed to be immortal.
+#define NOTED_TIMED(label)                                                          \
+    ::noted::harness::ScopedTimer NOTED_TIMED_CONCAT(_noted_timer_, __LINE__)(label); \
+    NOTED_PROFILE_ZONE_N(label)
 
 // ---- Validation gates --------------------------------------------------
 
