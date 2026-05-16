@@ -1,6 +1,10 @@
 # Handoff — where the project is and what's next
 
+<<<<<<< HEAD
 **Last updated:** 2026-05-16 · **main HEAD:** `867fc99` (+ `feat/tracy-integration`, + `feat/canvas-render-target`, + `feat/stroke-engine-mvp`)
+=======
+**Last updated:** 2026-05-16 · **main HEAD:** `867fc99` (+ `feat/tracy-integration`, + `feat/canvas-render-target`)
+>>>>>>> origin/main
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -73,9 +77,12 @@ tests/        Unit + integration + bench + fuzz scaffolds
    on-demand), ScopedTimer→zone and Counter→plot. See ADR 0013.
 ✅ Canvas pipeline: offscreen `CanvasRenderTarget` + two-pass renderer
    (canvas → composite). Foundation for strokes/layers. See ADR 0014.
+<<<<<<< HEAD
 ✅ Stroke engine (MVP): mouse drag draws anti-aliased SDF-disk stamps
    into the canvas via a push-constant pipeline. Heap-allocated, RAII
    hook subscriptions. See ADR 0015.
+=======
+>>>>>>> origin/main
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
    their warnings can't leak. `/Ob[0-9]` collisions removed at the
@@ -159,8 +166,13 @@ The product's note-taking half. Each PR builds on the previous.
 | # | PR | Effort | Depends on | Why |
 |---|---|---|---|---|
 | 3 | ~~`feat/canvas-render-target`~~ ✅ **landed** | — | — | `CanvasRenderTarget` (R8G8B8A8_UNORM, COLOR_ATTACHMENT\|SAMPLED\|TRANSFER_DST) + `Renderer::render_with_canvas` two-pass flow. Internal layout tracking via sync2 barriers. See ADR 0014. |
+<<<<<<< HEAD
 | 4 | ~~`feat/stroke-engine-mvp`~~ ✅ **landed** | — | — | SDF disk-stamp pipeline (`stamp.slang`) + `noted::stroke::StrokeEngine` (heap-allocated, non-movable, RAII hook subscriptions). Mouse drag → anti-aliased disks layered over the textured background. See ADR 0015. |
 | 5 | `feat/pen-input` | 6h | — | Replace GLFW mouse with Windows Pointer Input API (pressure + tilt). NSEvent / libinput equivalents for mac/Linux later. |
+=======
+| 4 | `feat/stroke-engine-mvp` | 6h | #3 | Drag the mouse → draw a circle stamp at the cursor into the canvas render target. Crude but proves the input-→-pixel path. |
+| 5 | ~~`feat/pen-input`~~ ✅ **landed** | — | — | Win32 `WM_POINTER` subclass over GLFW. Real pressure (0..1024 → [0, 1]) + tilt (degrees) flow through existing hook events. Synthetic mouse-from-pen messages swallowed via `MI_WP_SIGNATURE`. Cross-platform stub everywhere else. See ADR 0017. |
+>>>>>>> origin/main
 | 6 | `feat/stroke-engine-pressure` | 4h | #4, #5 | Brush width / opacity respond to pressure. First time the app feels like a real note-taking tool. |
 
 ### 🖼️ Priority 3 — Layers + blend (Photoshop side)
@@ -169,7 +181,7 @@ The image-editor half. Can be developed in parallel with strokes.
 
 | # | PR | Effort | Why |
 |---|---|---|---|
-| 7 | `feat/layer-domain-model` | 6h | Real `domain::Layer` implementation (currently a stub). Layer graph (DAG) with non-destructive operations. |
+| 7 | ~~`feat/layer-domain-model`~~ ✅ **landed** | — | `domain::LayerGraph` — DAG of `LayerNode` (id/kind/blend/opacity/visible/inputs). 16-mode Photoshop blend enum + 5-kind layer enum, both wire-stable. Monotonic IDs, validate-then-mutate, cycle detection via iterative DFS. See ADR 0016. |
 | 8 | `feat/layer-compositor` | 8h | GPU compositor that walks the layer DAG and renders to the canvas render target. Supports the standard 16 blend modes. |
 | 9 | `feat/selection-mask` | 6h | Marquee / lasso selection → 1-channel mask image. Mask gates compositor output per-pixel. |
 
