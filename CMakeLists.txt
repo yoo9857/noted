@@ -124,6 +124,7 @@ endif()
 # ---- Modules (order: leaves first) --------------------------------------
 add_subdirectory(engine)
 add_subdirectory(domain)
+add_subdirectory(compositor)
 add_subdirectory(plugin)
 add_subdirectory(platform)
 add_subdirectory(ui)
