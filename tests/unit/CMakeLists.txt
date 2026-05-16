@@ -6,9 +6,10 @@ add_executable(noted_unit_tests
     stroke_engine_test.cpp
     layer_graph_test.cpp
     layer_compositor_test.cpp
+    pen_input_test.cpp
 )
 
-target_link_libraries(noted_unit_tests PRIVATE noted_test_harness noted::domain noted::compositor)
+target_link_libraries(noted_unit_tests PRIVATE noted_test_harness noted::domain noted::compositor noted::platform)
 target_compile_features(noted_unit_tests PRIVATE cxx_std_23)
 noted_apply_warnings(noted_unit_tests)
 

@@ -1,6 +1,12 @@
 #include "noted/platform/window/window.hpp"
 
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
+
+#if defined(_WIN32)
+#  define GLFW_EXPOSE_NATIVE_WIN32
+#  include <GLFW/glfw3native.h>
+#endif
 
 #include <atomic>
 #include <mutex>
@@ -8,6 +14,7 @@
 
 #include "noted/engine/hook/hook.hpp"
 #include "noted/engine/hook/registry.hpp"
+#include "noted/platform/window/pen_input.hpp"
 
 namespace noted::platform {
 
@@ -160,6 +167,23 @@ auto Window::create(const WindowDesc& desc) -> Result<Window> {
     glfwSetKeyCallback(h,             &on_key);
     glfwSetFramebufferSizeCallback(h, &on_framebuffer_size);
 
+    // Attach the pen-input subsystem. On Windows this installs a WM_POINTER
+    // subclass that publishes events with real pressure / tilt. Everywhere
+    // else it's a documented no-op (see ADR 0017).
+#if defined(_WIN32)
+    void* native = glfwGetWin32Window(h);
+#else
+    void* native = nullptr;
+#endif
+    if (auto r = noted::platform::pen::install_pen_input(native); !r) {
+        // Pen input is an enhancement — failing to install should NOT
+        // abort window creation. Log via the hook channel and continue.
+        noted::hook::registry().on_error.publish(noted::hook::ErrorObserved{
+            .error       = std::move(r).error(),
+            .recoverable = true,
+        });
+    }
+
     return Window{h};
 }
 
@@ -180,6 +204,11 @@ Window::~Window() { destroy(); }
 
 void Window::destroy() noexcept {
     if (handle_ != nullptr) {
+#if defined(_WIN32)
+        // Remove the subclass first — the HWND is still valid here, but
+        // glfwDestroyWindow will retire it immediately after.
+        noted::platform::pen::uninstall_pen_input(glfwGetWin32Window(handle_));
+#endif
         glfwDestroyWindow(handle_);
         handle_ = nullptr;
         release_glfw();
