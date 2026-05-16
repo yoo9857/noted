@@ -1,6 +1,6 @@
-#include <gtest/gtest.h>
-
 #include "noted/engine/error/error.hpp"
+
+#include <gtest/gtest.h>
 
 TEST(Error, FormatIncludesCodeAndLocation) {
     auto e = noted::make_error(noted::ErrorCode::file_not_found, "missing.png");
@@ -12,8 +12,7 @@ TEST(Error, FormatIncludesCodeAndLocation) {
 TEST(Error, ChainPreservesCause) {
     auto inner = noted::make_error(noted::ErrorCode::io_failure, "read short");
     auto outer = noted::chain_error(
-        noted::make_error(noted::ErrorCode::document_corrupt, "header mismatch"),
-        std::move(inner));
+        noted::make_error(noted::ErrorCode::document_corrupt, "header mismatch"), std::move(inner));
     const auto s = outer.format();
     EXPECT_NE(s.find("document_corrupt"), std::string::npos);
     EXPECT_NE(s.find("caused by"), std::string::npos);
@@ -22,8 +21,8 @@ TEST(Error, ChainPreservesCause) {
 
 TEST(Result, UnexpectedCarriesError) {
     auto fail = []() -> noted::Result<int> {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::invalid_argument, "negative size"));
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument, "negative size"));
     };
     auto r = fail();
     ASSERT_FALSE(r.has_value());

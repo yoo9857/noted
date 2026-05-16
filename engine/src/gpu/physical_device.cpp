@@ -38,11 +38,20 @@ namespace {
 [[nodiscard]] auto score(const VkPhysicalDeviceProperties& props) -> std::uint64_t {
     std::uint64_t s = 0;
     switch (props.deviceType) {
-        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:   s += 1000; break;
-        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: s += 100;  break;
-        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:    s += 50;   break;
-        case VK_PHYSICAL_DEVICE_TYPE_CPU:            s += 10;   break;
-        default:                                                break;
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+            s += 1000;
+            break;
+        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+            s += 100;
+            break;
+        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+            s += 50;
+            break;
+        case VK_PHYSICAL_DEVICE_TYPE_CPU:
+            s += 10;
+            break;
+        default:
+            break;
     }
     s += props.limits.maxImageDimension2D / 1024U;
     return s;
@@ -50,31 +59,32 @@ namespace {
 
 }  // namespace
 
-auto PhysicalDevice::select(const Instance& instance, std::uint32_t min_api_version)
-    -> Result<PhysicalDevice> {
+auto PhysicalDevice::select(const Instance& instance,
+                            std::uint32_t min_api_version) -> Result<PhysicalDevice> {
     std::uint32_t count = 0;
     if (auto vr = vkEnumeratePhysicalDevices(instance.handle(), &count, nullptr);
         vr != VK_SUCCESS) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::gpu_validation_failed,
-            std::string{"vkEnumeratePhysicalDevices(count) failed: "} + std::to_string(static_cast<int>(vr))));
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::gpu_validation_failed,
+                              std::string{"vkEnumeratePhysicalDevices(count) failed: "} +
+                                  std::to_string(static_cast<int>(vr))));
     }
     if (count == 0) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::gpu_device_lost,
-            "no Vulkan physical devices present"));
+        return std::unexpected(noted::make_error(noted::ErrorCode::gpu_device_lost,
+                                                 "no Vulkan physical devices present"));
     }
 
     std::vector<VkPhysicalDevice> devices(count);
     if (auto vr = vkEnumeratePhysicalDevices(instance.handle(), &count, devices.data());
         vr != VK_SUCCESS) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::gpu_validation_failed,
-            std::string{"vkEnumeratePhysicalDevices failed: "} + std::to_string(static_cast<int>(vr))));
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::gpu_validation_failed,
+                              std::string{"vkEnumeratePhysicalDevices failed: "} +
+                                  std::to_string(static_cast<int>(vr))));
     }
 
     PhysicalDevice best;
-    std::uint64_t  best_score = 0;
+    std::uint64_t best_score = 0;
     for (auto d : devices) {
         VkPhysicalDeviceProperties p{};
         vkGetPhysicalDeviceProperties(d, &p);
@@ -87,17 +97,16 @@ auto PhysicalDevice::select(const Instance& instance, std::uint32_t min_api_vers
         }
         const auto s = score(p);
         if (s > best_score) {
-            best_score    = s;
-            best.handle_  = d;
-            best.props_   = p;
-            best.queues_  = q;
+            best_score = s;
+            best.handle_ = d;
+            best.props_ = p;
+            best.queues_ = q;
         }
     }
 
     if (best.handle_ == VK_NULL_HANDLE) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::gpu_device_lost,
-            "no Vulkan device meets API/queue requirements"));
+        return std::unexpected(noted::make_error(noted::ErrorCode::gpu_device_lost,
+                                                 "no Vulkan device meets API/queue requirements"));
     }
     return best;
 }

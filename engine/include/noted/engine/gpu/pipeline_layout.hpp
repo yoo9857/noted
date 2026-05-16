@@ -18,10 +18,9 @@ namespace noted::gpu {
 //   - push_ranges: one entry per VK_PUSH_CONSTANT range.
 class PipelineLayout {
 public:
-    [[nodiscard]] static auto create(
-        const Device&                                  device,
-        std::span<const DescriptorSetLayout* const>    set_layouts,
-        std::span<const VkPushConstantRange>           push_ranges = {})
+    [[nodiscard]] static auto create(const Device& device,
+                                     std::span<const DescriptorSetLayout* const> set_layouts,
+                                     std::span<const VkPushConstantRange> push_ranges = {})
         -> Result<PipelineLayout>;
 
     PipelineLayout(PipelineLayout&& other) noexcept;
@@ -36,7 +35,7 @@ private:
     PipelineLayout() = default;
     void destroy() noexcept;
 
-    VkDevice         owner_  = VK_NULL_HANDLE;
+    VkDevice owner_ = VK_NULL_HANDLE;
     VkPipelineLayout handle_ = VK_NULL_HANDLE;
 };
 

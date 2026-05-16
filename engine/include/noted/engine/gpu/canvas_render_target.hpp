@@ -46,7 +46,7 @@ class Allocator;
 
 struct CanvasCreateInfo {
     VkExtent2D extent;
-    VkFormat   format = VK_FORMAT_R8G8B8A8_UNORM;
+    VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
 };
 
 // Move-only RAII wrapper around a color render target.
@@ -58,9 +58,8 @@ struct CanvasCreateInfo {
 // thumbnails) the tracking stays local to each.
 class CanvasRenderTarget {
 public:
-    [[nodiscard]] static auto create(
-        const Allocator&        allocator,
-        const CanvasCreateInfo& info) -> Result<CanvasRenderTarget>;
+    [[nodiscard]] static auto create(const Allocator& allocator,
+                                     const CanvasCreateInfo& info) -> Result<CanvasRenderTarget>;
 
     CanvasRenderTarget(CanvasRenderTarget&& other) noexcept = default;
     auto operator=(CanvasRenderTarget&& other) noexcept -> CanvasRenderTarget& = default;
@@ -74,37 +73,33 @@ public:
     //
     // Must NOT be called while the GPU may still be reading or writing
     // the canvas — wait_idle, then resize.
-    [[nodiscard]] auto resize(
-        const Allocator& allocator,
-        VkExtent2D       new_extent) -> Result<void>;
+    [[nodiscard]] auto resize(const Allocator& allocator, VkExtent2D new_extent) -> Result<void>;
 
     // Emit a sync2 barrier from the cached state to the requested one,
     // then update the cache. No-op if already in the requested layout
     // AND the dst stage/access set is a superset of the cached source
     // (rare — usually one or the other changes between passes).
-    void transition_to(
-        VkCommandBuffer       cb,
-        VkImageLayout         new_layout,
-        VkAccessFlags2        dst_access,
-        VkPipelineStageFlags2 dst_stage) noexcept;
+    void transition_to(VkCommandBuffer cb,
+                       VkImageLayout new_layout,
+                       VkAccessFlags2 dst_access,
+                       VkPipelineStageFlags2 dst_stage) noexcept;
 
     // Build a VkRenderingAttachmentInfo for vkCmdBeginRendering. Caller
     // must have called transition_to(COLOR_ATTACHMENT_OPTIMAL, ...) first.
-    [[nodiscard]] auto color_attachment(
-        VkClearColorValue   clear,
-        VkAttachmentLoadOp  load_op  = VK_ATTACHMENT_LOAD_OP_CLEAR,
-        VkAttachmentStoreOp store_op = VK_ATTACHMENT_STORE_OP_STORE
-    ) const noexcept -> VkRenderingAttachmentInfo;
+    [[nodiscard]] auto color_attachment(VkClearColorValue clear,
+                                        VkAttachmentLoadOp load_op = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                        VkAttachmentStoreOp store_op = VK_ATTACHMENT_STORE_OP_STORE)
+        const noexcept -> VkRenderingAttachmentInfo;
 
     // Reset the cached layout state to UNDEFINED. Use after a resize()
     // or after the device has been wait_idle'd and any prior contents
     // are no longer needed.
     void reset_layout_tracking() noexcept;
 
-    [[nodiscard]] auto handle() const noexcept -> VkImage       { return image_->handle(); }
-    [[nodiscard]] auto view()   const noexcept -> VkImageView   { return image_->view(); }
-    [[nodiscard]] auto format() const noexcept -> VkFormat      { return image_->format(); }
-    [[nodiscard]] auto extent() const noexcept -> VkExtent2D    {
+    [[nodiscard]] auto handle() const noexcept -> VkImage { return image_->handle(); }
+    [[nodiscard]] auto view() const noexcept -> VkImageView { return image_->view(); }
+    [[nodiscard]] auto format() const noexcept -> VkFormat { return image_->format(); }
+    [[nodiscard]] auto extent() const noexcept -> VkExtent2D {
         return {image_->extent().width, image_->extent().height};
     }
     [[nodiscard]] auto current_layout() const noexcept -> VkImageLayout { return state_.layout; }
@@ -113,16 +108,16 @@ private:
     explicit CanvasRenderTarget(Image image) noexcept : image_{std::move(image)} {}
 
     struct State {
-        VkImageLayout         layout = VK_IMAGE_LAYOUT_UNDEFINED;
-        VkAccessFlags2        access = 0;
-        VkPipelineStageFlags2 stage  = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+        VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VkAccessFlags2 access = 0;
+        VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
     };
 
     // optional so the type stays default-move-constructible (Image's
     // own default ctor is private). After create() succeeds image_ is
     // always engaged; resize() re-engages it with a new Image.
     std::optional<Image> image_;
-    State                state_{};
+    State state_{};
 };
 
 }  // namespace noted::gpu

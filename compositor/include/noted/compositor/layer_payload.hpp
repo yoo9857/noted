@@ -34,10 +34,10 @@ namespace noted::compositor {
 // blend math is well-defined (the SRC_ALPHA factor is built into the
 // .r/.g/.b values).
 struct SolidColor {
-    float r {0.0F};
-    float g {0.0F};
-    float b {0.0F};
-    float a {1.0F};
+    float r{0.0F};
+    float g{0.0F};
+    float b{0.0F};
+    float a{1.0F};
 };
 
 // Variant over all supported kinds. New kinds add a struct and an entry;
@@ -48,14 +48,11 @@ using LayerPayload = std::variant<SolidColor>;
 // host (app / brush UI / etc.) writes.
 class LayerPayloadStore {
 public:
-    void set(noted::domain::LayerId id, LayerPayload p) {
-        store_[id] = std::move(p);
-    }
+    void set(noted::domain::LayerId id, LayerPayload p) { store_[id] = std::move(p); }
 
     // nullptr if no payload registered for this id. Compositor treats
     // that as "skip this layer" — a no-op pass-through to its inputs.
-    [[nodiscard]] auto find(noted::domain::LayerId id) const noexcept
-        -> const LayerPayload* {
+    [[nodiscard]] auto find(noted::domain::LayerId id) const noexcept -> const LayerPayload* {
         auto it = store_.find(id);
         return it == store_.end() ? nullptr : &it->second;
     }

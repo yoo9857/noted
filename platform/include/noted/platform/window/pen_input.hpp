@@ -38,11 +38,11 @@ namespace noted::platform::pen {
 // not report tilt, Windows reports zero — that's the same default the
 // hook payload uses, so callers see no jump when an old pen connects.
 struct RawPenSample {
-    double         client_x        {0.0};
-    double         client_y        {0.0};
-    std::uint32_t  pressure_0_1024 {0};
-    std::int32_t   tilt_x_deg      {0};
-    std::int32_t   tilt_y_deg      {0};
+    double client_x{0.0};
+    double client_y{0.0};
+    std::uint32_t pressure_0_1024{0};
+    std::int32_t tilt_x_deg{0};
+    std::int32_t tilt_y_deg{0};
 };
 
 // Pure translation — testable everywhere, no Win32 dependency.
@@ -50,8 +50,7 @@ struct RawPenSample {
 // Produces a PointerMoved with the digitizer's pressure normalized to
 // [0, 1] and tilt forwarded as float degrees. Out-of-range
 // `pressure_0_1024` values are clamped so the consumer never sees > 1.
-[[nodiscard]] auto normalize(const RawPenSample& s) noexcept
-    -> noted::hook::PointerMoved;
+[[nodiscard]] auto normalize(const RawPenSample& s) noexcept -> noted::hook::PointerMoved;
 
 // Attach the pen-input pipeline to the platform's native window handle.
 //

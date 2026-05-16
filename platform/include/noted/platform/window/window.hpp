@@ -15,10 +15,10 @@ namespace noted::platform {
 
 struct WindowDesc {
     std::string_view title{"noted"};
-    std::uint32_t    width  = 1600;
-    std::uint32_t    height = 1000;
-    bool             resizable = true;
-    bool             high_dpi  = true;
+    std::uint32_t width = 1600;
+    std::uint32_t height = 1000;
+    bool resizable = true;
+    bool high_dpi = true;
 };
 
 // RAII move-only handle around a GLFW window.
@@ -44,8 +44,7 @@ public:
     [[nodiscard]] auto should_close() const noexcept -> bool;
     void poll_events() noexcept;
 
-    [[nodiscard]] auto framebuffer_size() const noexcept
-        -> std::pair<std::uint32_t, std::uint32_t>;
+    [[nodiscard]] auto framebuffer_size() const noexcept -> std::pair<std::uint32_t, std::uint32_t>;
 
     // Raw handle for Vulkan surface creation. Stable for the lifetime of
     // this Window object.

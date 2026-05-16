@@ -42,8 +42,8 @@ enum class ErrorCode : std::uint16_t {
     gpu_surface_lost,
     gpu_shader_compile_failed,
     gpu_validation_failed,
-    gpu_swapchain_out_of_date,   // recoverable: rebuild swapchain
-    gpu_swapchain_suboptimal,    // recoverable: rebuild swapchain at convenience
+    gpu_swapchain_out_of_date,  // recoverable: rebuild swapchain
+    gpu_swapchain_suboptimal,   // recoverable: rebuild swapchain at convenience
 
     // Document / domain
     document_corrupt,
@@ -61,33 +61,60 @@ enum class ErrorCode : std::uint16_t {
 
 [[nodiscard]] constexpr auto to_string(ErrorCode c) noexcept -> const char* {
     switch (c) {
-        case ErrorCode::ok:                            return "ok";
-        case ErrorCode::unknown:                       return "unknown";
-        case ErrorCode::cancelled:                     return "cancelled";
-        case ErrorCode::not_implemented:               return "not_implemented";
-        case ErrorCode::invalid_argument:              return "invalid_argument";
-        case ErrorCode::invalid_state:                 return "invalid_state";
-        case ErrorCode::out_of_memory:                 return "out_of_memory";
-        case ErrorCode::timeout:                       return "timeout";
-        case ErrorCode::file_not_found:                return "file_not_found";
-        case ErrorCode::permission_denied:             return "permission_denied";
-        case ErrorCode::io_failure:                    return "io_failure";
-        case ErrorCode::gpu_device_lost:               return "gpu_device_lost";
-        case ErrorCode::gpu_out_of_memory:             return "gpu_out_of_memory";
-        case ErrorCode::gpu_surface_lost:              return "gpu_surface_lost";
-        case ErrorCode::gpu_shader_compile_failed:     return "gpu_shader_compile_failed";
-        case ErrorCode::gpu_validation_failed:         return "gpu_validation_failed";
-        case ErrorCode::gpu_swapchain_out_of_date:     return "gpu_swapchain_out_of_date";
-        case ErrorCode::gpu_swapchain_suboptimal:      return "gpu_swapchain_suboptimal";
-        case ErrorCode::document_corrupt:              return "document_corrupt";
-        case ErrorCode::document_version_unsupported:  return "document_version_unsupported";
-        case ErrorCode::invalid_image_format:          return "invalid_image_format";
-        case ErrorCode::color_profile_invalid:         return "color_profile_invalid";
-        case ErrorCode::command_failed:                return "command_failed";
-        case ErrorCode::crdt_merge_failed:             return "crdt_merge_failed";
-        case ErrorCode::plugin_load_failed:            return "plugin_load_failed";
-        case ErrorCode::plugin_sandbox_violation:      return "plugin_sandbox_violation";
-        case ErrorCode::plugin_budget_exceeded:        return "plugin_budget_exceeded";
+        case ErrorCode::ok:
+            return "ok";
+        case ErrorCode::unknown:
+            return "unknown";
+        case ErrorCode::cancelled:
+            return "cancelled";
+        case ErrorCode::not_implemented:
+            return "not_implemented";
+        case ErrorCode::invalid_argument:
+            return "invalid_argument";
+        case ErrorCode::invalid_state:
+            return "invalid_state";
+        case ErrorCode::out_of_memory:
+            return "out_of_memory";
+        case ErrorCode::timeout:
+            return "timeout";
+        case ErrorCode::file_not_found:
+            return "file_not_found";
+        case ErrorCode::permission_denied:
+            return "permission_denied";
+        case ErrorCode::io_failure:
+            return "io_failure";
+        case ErrorCode::gpu_device_lost:
+            return "gpu_device_lost";
+        case ErrorCode::gpu_out_of_memory:
+            return "gpu_out_of_memory";
+        case ErrorCode::gpu_surface_lost:
+            return "gpu_surface_lost";
+        case ErrorCode::gpu_shader_compile_failed:
+            return "gpu_shader_compile_failed";
+        case ErrorCode::gpu_validation_failed:
+            return "gpu_validation_failed";
+        case ErrorCode::gpu_swapchain_out_of_date:
+            return "gpu_swapchain_out_of_date";
+        case ErrorCode::gpu_swapchain_suboptimal:
+            return "gpu_swapchain_suboptimal";
+        case ErrorCode::document_corrupt:
+            return "document_corrupt";
+        case ErrorCode::document_version_unsupported:
+            return "document_version_unsupported";
+        case ErrorCode::invalid_image_format:
+            return "invalid_image_format";
+        case ErrorCode::color_profile_invalid:
+            return "color_profile_invalid";
+        case ErrorCode::command_failed:
+            return "command_failed";
+        case ErrorCode::crdt_merge_failed:
+            return "crdt_merge_failed";
+        case ErrorCode::plugin_load_failed:
+            return "plugin_load_failed";
+        case ErrorCode::plugin_sandbox_violation:
+            return "plugin_sandbox_violation";
+        case ErrorCode::plugin_budget_exceeded:
+            return "plugin_budget_exceeded";
     }
     return "<invalid ErrorCode>";
 }
@@ -105,16 +132,14 @@ template <typename T>
 using Result = std::expected<T, Error>;
 
 // Make an Error inline; callers don't have to repeat source_location.
-[[nodiscard]] inline auto make_error(
-    ErrorCode code,
-    std::string message,
-    std::source_location loc = std::source_location::current()) -> Error {
+[[nodiscard]] inline auto make_error(ErrorCode code,
+                                     std::string message,
+                                     std::source_location loc = std::source_location::current())
+    -> Error {
     return Error{.code = code, .message = std::move(message), .where = loc, .cause = nullptr};
 }
 
-[[nodiscard]] inline auto chain_error(
-    Error new_top,
-    Error cause) -> Error {
+[[nodiscard]] inline auto chain_error(Error new_top, Error cause) -> Error {
     new_top.cause = std::make_shared<const Error>(std::move(cause));
     return new_top;
 }
@@ -133,14 +158,14 @@ using Result = std::expected<T, Error>;
 // We prefer the monadic form everywhere for portable code; NOTED_TRY exists
 // only because it makes deeply nested call chains tolerable on Linux.
 #if defined(__GNUC__) || defined(__clang__)
-    #define NOTED_TRY(expr)                                                  \
-        ({                                                                   \
-            auto&& _noted_r = (expr);                                        \
-            if (!_noted_r) {                                                 \
-                return ::std::unexpected(::std::move(_noted_r).error());     \
-            }                                                                \
-            ::std::move(_noted_r).value();                                   \
-        })
+#define NOTED_TRY(expr)                                              \
+    ({                                                               \
+        auto&& _noted_r = (expr);                                    \
+        if (!_noted_r) {                                             \
+            return ::std::unexpected(::std::move(_noted_r).error()); \
+        }                                                            \
+        ::std::move(_noted_r).value();                               \
+    })
 #endif
 
 }  // namespace noted

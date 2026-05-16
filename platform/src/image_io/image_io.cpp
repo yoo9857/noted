@@ -19,13 +19,13 @@ auto load_rgba8(const std::filesystem::path& p) -> noted::Result<LoadedImage> {
     if (raw == nullptr) {
         const char* reason = stbi_failure_reason();
         return std::unexpected(noted::Error{
-            .code    = noted::ErrorCode::invalid_image_format,
+            .code = noted::ErrorCode::invalid_image_format,
             .message = p.string() + ": " + (reason != nullptr ? reason : "stb_image failed"),
-            .where   = std::source_location::current(),
+            .where = std::source_location::current(),
         });
     }
     LoadedImage out;
-    out.width  = static_cast<std::uint32_t>(w);
+    out.width = static_cast<std::uint32_t>(w);
     out.height = static_cast<std::uint32_t>(h);
     const auto byte_count = static_cast<std::size_t>(w) * static_cast<std::size_t>(h) * 4U;
     out.pixels.resize(byte_count);

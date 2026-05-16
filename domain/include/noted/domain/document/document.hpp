@@ -22,13 +22,13 @@ struct TextBlock {
     std::string utf8;
 };
 struct CanvasBlock {
-    std::uint32_t width  = 0;
+    std::uint32_t width = 0;
     std::uint32_t height = 0;
     std::vector<BlockId> layers;
 };
 
 struct Block {
-    BlockId   id{};
+    BlockId id{};
     BlockType type{BlockType::text};
     std::variant<TextBlock, CanvasBlock> payload;
     std::vector<BlockId> children;

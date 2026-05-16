@@ -37,7 +37,7 @@ private:
     Surface() = default;
     void destroy() noexcept;
 
-    VkInstance   owner_  = VK_NULL_HANDLE;
+    VkInstance owner_ = VK_NULL_HANDLE;
     VkSurfaceKHR handle_ = VK_NULL_HANDLE;
 };
 

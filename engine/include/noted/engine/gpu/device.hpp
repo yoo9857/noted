@@ -20,7 +20,7 @@ struct DeviceCreateInfo {
     // these temporarily, but the renderer relies on dynamic_rendering and
     // synchronization2 across the codebase.
     bool enable_dynamic_rendering = true;
-    bool enable_synchronization2  = true;
+    bool enable_synchronization2 = true;
 
     // ---- Vulkan 1.2 modern feature set ----
     // The engine treats these as the "2026 baseline" — every backend assumes
@@ -34,9 +34,9 @@ struct DeviceCreateInfo {
     //                                     by ray tracing and modern shader code.
     // timeline_semaphore                 — single primitive replaces fences +
     //                                     binary semaphores for cross-queue sync.
-    bool enable_descriptor_indexing  = true;
+    bool enable_descriptor_indexing = true;
     bool enable_buffer_device_address = true;
-    bool enable_timeline_semaphore   = true;
+    bool enable_timeline_semaphore = true;
 
     // ---- Vulkan 1.1 features the engine relies on ----
     // shader_draw_parameters     — exposes SV_VertexID / SV_InstanceID
@@ -59,10 +59,9 @@ struct DeviceCreateInfo {
 // Move-only RAII. vkDestroyDevice is called from the destructor.
 class Device {
 public:
-    [[nodiscard]] static auto create(
-        const PhysicalDevice& physical,
-        const Surface&        surface,
-        const DeviceCreateInfo& info = {}) -> Result<Device>;
+    [[nodiscard]] static auto create(const PhysicalDevice& physical,
+                                     const Surface& surface,
+                                     const DeviceCreateInfo& info = {}) -> Result<Device>;
 
     Device(Device&& other) noexcept;
     auto operator=(Device&& other) noexcept -> Device&;
@@ -73,7 +72,9 @@ public:
     [[nodiscard]] auto handle() const noexcept -> VkDevice { return handle_; }
     [[nodiscard]] auto graphics_queue() const noexcept -> VkQueue { return graphics_queue_; }
     [[nodiscard]] auto present_queue() const noexcept -> VkQueue { return present_queue_; }
-    [[nodiscard]] auto graphics_family() const noexcept -> std::uint32_t { return graphics_family_; }
+    [[nodiscard]] auto graphics_family() const noexcept -> std::uint32_t {
+        return graphics_family_;
+    }
     [[nodiscard]] auto present_family() const noexcept -> std::uint32_t { return present_family_; }
 
     // Blocks the calling thread until every queue on this device is idle.
@@ -84,11 +85,11 @@ private:
     Device() = default;
     void destroy() noexcept;
 
-    VkDevice      handle_           = VK_NULL_HANDLE;
-    VkQueue       graphics_queue_   = VK_NULL_HANDLE;
-    VkQueue       present_queue_    = VK_NULL_HANDLE;
-    std::uint32_t graphics_family_  = UINT32_MAX;
-    std::uint32_t present_family_   = UINT32_MAX;
+    VkDevice handle_ = VK_NULL_HANDLE;
+    VkQueue graphics_queue_ = VK_NULL_HANDLE;
+    VkQueue present_queue_ = VK_NULL_HANDLE;
+    std::uint32_t graphics_family_ = UINT32_MAX;
+    std::uint32_t present_family_ = UINT32_MAX;
 };
 
 }  // namespace noted::gpu

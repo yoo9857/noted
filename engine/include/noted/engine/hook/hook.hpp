@@ -54,8 +54,10 @@ public:
         std::scoped_lock lk(mutex_);
         const Token id = ++next_token_;
         listeners_.push_back(Listener{.token = id, .priority = priority, .cb = std::move(cb)});
-        std::stable_sort(listeners_.begin(), listeners_.end(),
-            [](const Listener& a, const Listener& b) { return a.priority < b.priority; });
+        std::stable_sort(
+            listeners_.begin(), listeners_.end(), [](const Listener& a, const Listener& b) {
+                return a.priority < b.priority;
+            });
         return id;
     }
 
@@ -106,16 +108,16 @@ public:
 
 private:
     struct Listener {
-        Token    token{};
-        int      priority{};
+        Token token{};
+        int priority{};
         Callback cb;
     };
 
-    mutable std::mutex     mutex_;
-    std::vector<Listener>  listeners_;
-    std::mutex             deferred_mutex_;
-    std::vector<Event>     deferred_;
-    Token                  next_token_ = 0;
+    mutable std::mutex mutex_;
+    std::vector<Listener> listeners_;
+    std::mutex deferred_mutex_;
+    std::vector<Event> deferred_;
+    Token next_token_ = 0;
 };
 
 // RAII subscription guard — unsubscribes on destruction. Use this in
@@ -129,18 +131,17 @@ public:
     Subscription(const Subscription&) = delete;
     auto operator=(const Subscription&) -> Subscription& = delete;
 
-    Subscription(Subscription&& other) noexcept
-        : channel_(other.channel_), token_(other.token_) {
+    Subscription(Subscription&& other) noexcept : channel_(other.channel_), token_(other.token_) {
         other.channel_ = nullptr;
-        other.token_   = invalid_token;
+        other.token_ = invalid_token;
     }
     auto operator=(Subscription&& other) noexcept -> Subscription& {
         if (this != &other) {
             release();
             channel_ = other.channel_;
-            token_   = other.token_;
+            token_ = other.token_;
             other.channel_ = nullptr;
-            other.token_   = invalid_token;
+            other.token_ = invalid_token;
         }
         return *this;
     }
@@ -152,12 +153,12 @@ public:
             channel_->unsubscribe(token_);
         }
         channel_ = nullptr;
-        token_   = invalid_token;
+        token_ = invalid_token;
     }
 
 private:
     Channel<Event>* channel_ = nullptr;
-    Token           token_   = invalid_token;
+    Token token_ = invalid_token;
 };
 
 // ---- Predefined lifecycle events ---------------------------------------
@@ -170,12 +171,12 @@ struct EngineShutdown {};
 
 struct FrameBegin {
     std::uint64_t frame_index = 0;
-    double        time_seconds = 0.0;
+    double time_seconds = 0.0;
 };
 struct FrameEnd {
     std::uint64_t frame_index = 0;
-    double        cpu_ms = 0.0;
-    double        gpu_ms = 0.0;
+    double cpu_ms = 0.0;
+    double gpu_ms = 0.0;
 };
 
 struct DocumentOpened {
@@ -188,7 +189,7 @@ struct DocumentClosed {};
 
 struct ErrorObserved {
     Error error;
-    bool  recoverable = true;
+    bool recoverable = true;
 };
 
 struct CommandExecuted {
@@ -197,12 +198,12 @@ struct CommandExecuted {
 
 struct TimerSpan {
     std::string_view label;
-    double           ms = 0.0;
+    double ms = 0.0;
 };
 
 struct FlagChanged {
     std::string_view name;
-    bool             new_value = false;
+    bool new_value = false;
 };
 
 // ---- Input events --------------------------------------------------------
@@ -213,30 +214,30 @@ struct FlagChanged {
 // report tilt.
 
 enum class PointerButton : std::uint8_t {
-    left   = 0,
-    right  = 1,
+    left = 0,
+    right = 1,
     middle = 2,
-    other  = 3,
+    other = 3,
 };
 
 struct PointerMoved {
     double x = 0.0;
     double y = 0.0;
-    float  pressure = 1.0F;
-    float  tilt_x   = 0.0F;
-    float  tilt_y   = 0.0F;
+    float pressure = 1.0F;
+    float tilt_x = 0.0F;
+    float tilt_y = 0.0F;
 };
 
 struct PointerPressed {
-    double        x = 0.0;
-    double        y = 0.0;
+    double x = 0.0;
+    double y = 0.0;
     PointerButton button = PointerButton::left;
-    float         pressure = 1.0F;
+    float pressure = 1.0F;
 };
 
 struct PointerReleased {
-    double        x = 0.0;
-    double        y = 0.0;
+    double x = 0.0;
+    double y = 0.0;
     PointerButton button = PointerButton::left;
 };
 
@@ -246,20 +247,20 @@ struct Scrolled {
 };
 
 struct KeyPressed {
-    int  glfw_key  = 0;
-    int  scancode  = 0;
-    int  mods      = 0;  // GLFW_MOD_* bitset
+    int glfw_key = 0;
+    int scancode = 0;
+    int mods = 0;  // GLFW_MOD_* bitset
     bool is_repeat = false;
 };
 
 struct KeyReleased {
     int glfw_key = 0;
     int scancode = 0;
-    int mods     = 0;
+    int mods = 0;
 };
 
 struct FramebufferResized {
-    std::uint32_t width  = 0;
+    std::uint32_t width = 0;
     std::uint32_t height = 0;
 };
 

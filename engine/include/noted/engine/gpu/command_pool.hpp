@@ -19,8 +19,8 @@ namespace noted::gpu {
 class CommandPool {
 public:
     [[nodiscard]] static auto create(
-        const Device&            device,
-        std::uint32_t            queue_family,
+        const Device& device,
+        std::uint32_t queue_family,
         VkCommandPoolCreateFlags flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT)
         -> Result<CommandPool>;
 
@@ -42,7 +42,7 @@ private:
     CommandPool() = default;
     void destroy() noexcept;
 
-    VkDevice      owner_  = VK_NULL_HANDLE;
+    VkDevice owner_ = VK_NULL_HANDLE;
     VkCommandPool handle_ = VK_NULL_HANDLE;
 };
 

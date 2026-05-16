@@ -38,42 +38,42 @@ inline constexpr LayerId invalid_layer_id = 0;
 // Standard Photoshop set. Numeric values are stable on disk; new modes
 // append, never reorder.
 enum class BlendMode : std::uint8_t {
-    normal       =  0,
-    multiply     =  1,
-    screen       =  2,
-    overlay      =  3,
-    soft_light   =  4,
-    hard_light   =  5,
-    color_dodge  =  6,
-    color_burn   =  7,
-    linear_dodge =  8,  // a.k.a. add
-    linear_burn  =  9,
-    difference   = 10,
-    exclusion    = 11,
-    hue          = 12,
-    saturation   = 13,
-    color        = 14,
-    luminosity   = 15,
+    normal = 0,
+    multiply = 1,
+    screen = 2,
+    overlay = 3,
+    soft_light = 4,
+    hard_light = 5,
+    color_dodge = 6,
+    color_burn = 7,
+    linear_dodge = 8,  // a.k.a. add
+    linear_burn = 9,
+    difference = 10,
+    exclusion = 11,
+    hue = 12,
+    saturation = 13,
+    color = 14,
+    luminosity = 15,
 };
 
 // Stable on disk. Payload structs for each kind live in their own headers
 // once we wire concrete data (P3 #8 onward).
 enum class LayerKind : std::uint8_t {
-    bitmap     = 0,  // raster pixels (RGBA texture)
-    stroke     = 1,  // vector ink stroke collection
+    bitmap = 0,      // raster pixels (RGBA texture)
+    stroke = 1,      // vector ink stroke collection
     adjustment = 2,  // pure pixel transform with one input (curves, levels…)
-    group      = 3,  // folder; passes its child's output through
-    mask       = 4,  // 1-channel alpha modulator applied to another layer
+    group = 3,       // folder; passes its child's output through
+    mask = 4,        // 1-channel alpha modulator applied to another layer
 };
 
 struct LayerNode {
-    LayerId               id      {invalid_layer_id};
-    LayerKind             kind    {LayerKind::bitmap};
-    BlendMode             blend   {BlendMode::normal};
-    float                 opacity {1.0F};  // [0, 1]
-    bool                  visible {true};
-    std::string           name;
-    std::vector<LayerId>  inputs;  // upstream nodes whose output feeds this one
+    LayerId id{invalid_layer_id};
+    LayerKind kind{LayerKind::bitmap};
+    BlendMode blend{BlendMode::normal};
+    float opacity{1.0F};  // [0, 1]
+    bool visible{true};
+    std::string name;
+    std::vector<LayerId> inputs;  // upstream nodes whose output feeds this one
 };
 
 // DAG of LayerNodes. All mutators return Result<T> — the graph never
@@ -110,10 +110,10 @@ public:
 
     // Field mutators. Each returns invalid_argument if id is unknown.
     // opacity is clamped to [0, 1]; NaN becomes 0.
-    auto set_blend  (LayerId id, BlendMode mode)      -> Result<void>;
-    auto set_opacity(LayerId id, float value)         -> Result<void>;
-    auto set_visible(LayerId id, bool v)              -> Result<void>;
-    auto set_name   (LayerId id, std::string name)    -> Result<void>;
+    auto set_blend(LayerId id, BlendMode mode) -> Result<void>;
+    auto set_opacity(LayerId id, float value) -> Result<void>;
+    auto set_visible(LayerId id, bool v) -> Result<void>;
+    auto set_name(LayerId id, std::string name) -> Result<void>;
 
     // The root node is the one whose composited output is the document
     // image. set_root rejects if id is unknown. By convention,
@@ -142,8 +142,8 @@ public:
 
 private:
     std::unordered_map<LayerId, LayerNode> nodes_;
-    LayerId                                root_    {invalid_layer_id};
-    LayerId                                next_id_ {1};  // 0 is reserved
+    LayerId root_{invalid_layer_id};
+    LayerId next_id_{1};  // 0 is reserved
 };
 
 }  // namespace noted::domain

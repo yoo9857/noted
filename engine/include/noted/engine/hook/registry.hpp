@@ -12,25 +12,25 @@ namespace noted::hook {
 
 class Registry {
 public:
-    Channel<EngineStartup>    on_startup;
-    Channel<EngineShutdown>   on_shutdown;
-    Channel<FrameBegin>       on_frame_begin;
-    Channel<FrameEnd>         on_frame_end;
-    Channel<DocumentOpened>   on_document_opened;
-    Channel<DocumentSaved>    on_document_saved;
-    Channel<DocumentClosed>   on_document_closed;
-    Channel<ErrorObserved>    on_error;
-    Channel<CommandExecuted>  on_command_executed;
-    Channel<TimerSpan>        on_timer_span;
-    Channel<FlagChanged>      on_flag_changed;
+    Channel<EngineStartup> on_startup;
+    Channel<EngineShutdown> on_shutdown;
+    Channel<FrameBegin> on_frame_begin;
+    Channel<FrameEnd> on_frame_end;
+    Channel<DocumentOpened> on_document_opened;
+    Channel<DocumentSaved> on_document_saved;
+    Channel<DocumentClosed> on_document_closed;
+    Channel<ErrorObserved> on_error;
+    Channel<CommandExecuted> on_command_executed;
+    Channel<TimerSpan> on_timer_span;
+    Channel<FlagChanged> on_flag_changed;
 
     // Input.
-    Channel<PointerMoved>       on_pointer_moved;
-    Channel<PointerPressed>     on_pointer_pressed;
-    Channel<PointerReleased>    on_pointer_released;
-    Channel<Scrolled>           on_scrolled;
-    Channel<KeyPressed>         on_key_pressed;
-    Channel<KeyReleased>        on_key_released;
+    Channel<PointerMoved> on_pointer_moved;
+    Channel<PointerPressed> on_pointer_pressed;
+    Channel<PointerReleased> on_pointer_released;
+    Channel<Scrolled> on_scrolled;
+    Channel<KeyPressed> on_key_pressed;
+    Channel<KeyReleased> on_key_released;
     Channel<FramebufferResized> on_framebuffer_resized;
 };
 

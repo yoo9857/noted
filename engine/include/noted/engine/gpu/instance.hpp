@@ -11,13 +11,13 @@
 namespace noted::gpu {
 
 struct InstanceCreateInfo {
-    std::string_view             app_name           = "noted";
-    std::uint32_t                app_version        = 0;
-    std::uint32_t                api_version        = VK_API_VERSION_1_3;
-    bool                         enable_validation  = false;
+    std::string_view app_name = "noted";
+    std::uint32_t app_version = 0;
+    std::uint32_t api_version = VK_API_VERSION_1_3;
+    bool enable_validation = false;
     // Extra extensions beyond the platform/window surface set the platform
     // layer asks for.
-    std::span<const char* const> extra_extensions   = {};
+    std::span<const char* const> extra_extensions = {};
     std::span<const char* const> surface_extensions = {};
 };
 
@@ -44,8 +44,8 @@ private:
     Instance() = default;
     void destroy() noexcept;
 
-    VkInstance               handle_ = VK_NULL_HANDLE;
-    VkDebugUtilsMessengerEXT debug_  = VK_NULL_HANDLE;
+    VkInstance handle_ = VK_NULL_HANDLE;
+    VkDebugUtilsMessengerEXT debug_ = VK_NULL_HANDLE;
 };
 
 }  // namespace noted::gpu

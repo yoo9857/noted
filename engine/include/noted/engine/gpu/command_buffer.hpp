@@ -38,8 +38,8 @@ private:
     CommandBuffer() = default;
     void destroy() noexcept;
 
-    VkDevice        device_ = VK_NULL_HANDLE;
-    VkCommandPool   pool_   = VK_NULL_HANDLE;
+    VkDevice device_ = VK_NULL_HANDLE;
+    VkCommandPool pool_ = VK_NULL_HANDLE;
     VkCommandBuffer handle_ = VK_NULL_HANDLE;
 };
 

@@ -19,14 +19,13 @@ Engine::~Engine() {
     if (initialized_.load(std::memory_order_acquire)) {
         // Best-effort: never throw from a destructor. Failures publish on
         // the error channel so an observer can capture them.
-        (void)shutdown();
+        (void) shutdown();
     }
 }
 
 auto Engine::init() -> Result<void> {
     bool expected = false;
-    if (!initialized_.compare_exchange_strong(expected, true,
-            std::memory_order_acq_rel)) {
+    if (!initialized_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
         // Idempotent: a second init call is a no-op, not an error.
         return {};
     }
@@ -37,8 +36,7 @@ auto Engine::init() -> Result<void> {
 
 auto Engine::shutdown() -> Result<void> {
     bool expected = true;
-    if (!initialized_.compare_exchange_strong(expected, false,
-            std::memory_order_acq_rel)) {
+    if (!initialized_.compare_exchange_strong(expected, false, std::memory_order_acq_rel)) {
         return {};
     }
     ctr_shutdown_calls.add();
@@ -53,10 +51,9 @@ void Engine::begin_frame() {
     in_frame_ = true;
     frame_start_ = std::chrono::steady_clock::now();
     const auto idx = frame_index_.load(std::memory_order_relaxed);
-    const auto t_s = std::chrono::duration<double>(
-                         frame_start_.time_since_epoch()).count();
+    const auto t_s = std::chrono::duration<double>(frame_start_.time_since_epoch()).count();
     hook::registry().on_frame_begin.publish(hook::FrameBegin{
-        .frame_index  = idx,
+        .frame_index = idx,
         .time_seconds = t_s,
     });
 }
@@ -65,14 +62,13 @@ void Engine::end_frame() {
     harness::validate(in_frame_, "Engine::end_frame called without matching begin_frame");
     in_frame_ = false;
     const auto end = std::chrono::steady_clock::now();
-    const auto cpu_ms =
-        std::chrono::duration<double, std::milli>(end - frame_start_).count();
+    const auto cpu_ms = std::chrono::duration<double, std::milli>(end - frame_start_).count();
     const auto idx = frame_index_.fetch_add(1, std::memory_order_relaxed);
     ctr_frames_total.add();
     hook::registry().on_frame_end.publish(hook::FrameEnd{
         .frame_index = idx,
-        .cpu_ms      = cpu_ms,
-        .gpu_ms      = 0.0,
+        .cpu_ms = cpu_ms,
+        .gpu_ms = 0.0,
     });
 }
 
