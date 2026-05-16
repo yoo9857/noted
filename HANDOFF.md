@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-15 · **main HEAD:** `701127f`
+**Last updated:** 2026-05-16 · **main HEAD:** `867fc99` (+ `feat/tracy-integration`, + `feat/canvas-render-target`)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -69,7 +69,15 @@ tests/        Unit + integration + bench + fuzz scaffolds
    cause chain.
 ✅ Hook system: typed channels with priorities, RAII subscriptions.
 ✅ Harness: FeatureFlag, Counter, ScopedTimer, Config, validate.
-✅ CI matrix verifies build + sanitizers on every PR.
+✅ Profiler: Tracy 0.11 (opt-in via `-DNOTED_ENABLE_TRACY=ON`,
+   on-demand), ScopedTimer→zone and Counter→plot. See ADR 0013.
+✅ Canvas pipeline: offscreen `CanvasRenderTarget` + two-pass renderer
+   (canvas → composite). Foundation for strokes/layers. See ADR 0014.
+✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
+   (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
+   their warnings can't leak. `/Ob[0-9]` collisions removed at the
+   cache layer.
+✅ CI matrix verifies build + sanitizers + Tracy smoke build on every PR.
 
 ### What does NOT work yet (by design — not bugs)
 
@@ -139,7 +147,7 @@ These unblock everything else. Do them before adding new features.
 | # | PR | Effort | Why |
 |---|---|---|---|
 | 1 | `feat/format-sweep` | 1h | Apply `clang-format-18` across the repo, flip CI lint job back to `continue-on-error: false`. Every PR since #10 has format drift; clean it up. |
-| 2 | `feat/tracy-integration` | 3h | Tracy via FetchContent + `NOTED_ENABLE_TRACY` option. Wire `harness::ScopedTimer` and `harness::Counter` into Tracy zones / plots. Mandatory for AAA-grade dev iteration. |
+| 2 | ~~`feat/tracy-integration`~~ ✅ **landed** | — | Tracy via FetchContent + `NOTED_ENABLE_TRACY` option. `harness::ScopedTimer` → Tracy zones, `Counter` → Tracy plots. See ADR 0013. |
 
 ### 🎨 Priority 2 — Canvas + stroke (Goodnotes side)
 
@@ -147,7 +155,7 @@ The product's note-taking half. Each PR builds on the previous.
 
 | # | PR | Effort | Depends on | Why |
 |---|---|---|---|---|
-| 3 | `feat/canvas-render-target` | 4h | — | Offscreen `gpu::Image` used as both render target and sampled texture. Compositor draws it onto the swapchain. Foundation for everything below. |
+| 3 | ~~`feat/canvas-render-target`~~ ✅ **landed** | — | — | `CanvasRenderTarget` (R8G8B8A8_UNORM, COLOR_ATTACHMENT\|SAMPLED\|TRANSFER_DST) + `Renderer::render_with_canvas` two-pass flow. Internal layout tracking via sync2 barriers. See ADR 0014. |
 | 4 | `feat/stroke-engine-mvp` | 6h | #3 | Drag the mouse → draw a circle stamp at the cursor into the canvas render target. Crude but proves the input-→-pixel path. |
 | 5 | `feat/pen-input` | 6h | — | Replace GLFW mouse with Windows Pointer Input API (pressure + tilt). NSEvent / libinput equivalents for mac/Linux later. |
 | 6 | `feat/stroke-engine-pressure` | 4h | #4, #5 | Brush width / opacity respond to pressure. First time the app feels like a real note-taking tool. |

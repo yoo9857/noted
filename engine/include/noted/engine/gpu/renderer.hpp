@@ -15,6 +15,8 @@
 
 namespace noted::gpu {
 
+class CanvasRenderTarget;
+
 // Orchestrates the acquire → record → submit → present cycle.
 //
 // Frames-in-flight: the renderer rotates through `frames_in_flight` slots
@@ -67,6 +69,37 @@ public:
         const Swapchain& swapchain,
         VkClearColorValue clear_color,
         const DrawCallback& draw_callback) -> Result<void>;
+
+    // Two-pass canvas pipeline:
+    //   1) Canvas pass — caller's `canvas_pass.draw` records into the
+    //      offscreen canvas. The renderer transitions the canvas to
+    //      COLOR_ATTACHMENT_OPTIMAL, begins dynamic rendering with the
+    //      caller-supplied clear color, invokes the callback, ends
+    //      rendering, and transitions the canvas to SHADER_READ_ONLY_OPTIMAL.
+    //   2) Swapchain pass — exactly the existing render_frame_with body.
+    //      Callers typically bind a descriptor sampling `canvas.view()`
+    //      and draw a fullscreen quad.
+    //
+    // Both passes run inside the same command buffer / same submit, so
+    // the canvas-to-swapchain handoff is one barrier away — no extra
+    // semaphore needed.
+    //
+    // Same recoverable Error codes as render_frame_with (OUT_OF_DATE /
+    // SUBOPTIMAL).
+    struct CanvasPassDesc {
+        VkClearColorValue clear{};
+        DrawCallback      draw{};  // records into the canvas
+    };
+    struct SwapchainPassDesc {
+        VkClearColorValue clear{};
+        DrawCallback      draw{};  // composites canvas onto the swapchain
+    };
+    [[nodiscard]] auto render_with_canvas(
+        const Device&             device,
+        const Swapchain&          swapchain,
+        CanvasRenderTarget&       canvas,
+        const CanvasPassDesc&     canvas_pass,
+        const SwapchainPassDesc&  swapchain_pass) -> Result<void>;
 
     // Tell the renderer the swapchain has been recreated. Internal per-image
     // resources that depend on image count are rebuilt.
