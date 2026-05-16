@@ -28,9 +28,14 @@ TEST(Hook, SubscribePublishUnsubscribe) {
 TEST(Hook, PriorityOrderingLowFirst) {
     noted::hook::Channel<Ping> ch;
     std::vector<int> order;
-    ch.subscribe([&](const Ping&) { order.push_back(2); }, /*priority=*/10);
-    ch.subscribe([&](const Ping&) { order.push_back(1); }, /*priority=*/0);
-    ch.subscribe([&](const Ping&) { order.push_back(3); }, /*priority=*/20);
+    // Bind to RAII Subscription so the [[nodiscard]] token isn't dropped
+    // and the lambdas detach when the test exits.
+    const noted::hook::Subscription<Ping> s1(
+        ch, ch.subscribe([&](const Ping&) { order.push_back(2); }, /*priority=*/10));
+    const noted::hook::Subscription<Ping> s2(
+        ch, ch.subscribe([&](const Ping&) { order.push_back(1); }, /*priority=*/0));
+    const noted::hook::Subscription<Ping> s3(
+        ch, ch.subscribe([&](const Ping&) { order.push_back(3); }, /*priority=*/20));
     ch.publish({});
     ASSERT_EQ(order.size(), 3U);
     EXPECT_EQ(order[0], 1);
@@ -41,7 +46,8 @@ TEST(Hook, PriorityOrderingLowFirst) {
 TEST(Hook, DeferredPublishWaitsForFlush) {
     noted::hook::Channel<Ping> ch;
     int n = 0;
-    ch.subscribe([&](const Ping&) { ++n; });
+    const noted::hook::Subscription<Ping> sub(
+        ch, ch.subscribe([&](const Ping&) { ++n; }));
     ch.publish_deferred(Ping{});
     ch.publish_deferred(Ping{});
     EXPECT_EQ(n, 0);
