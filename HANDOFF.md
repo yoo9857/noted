@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-16 · **main HEAD:** `867fc99` (+ `feat/tracy-integration`, + `feat/canvas-render-target`, + `feat/stroke-engine-mvp`)
+**Last updated:** 2026-05-16 · **main HEAD:** `bc457e7` (clean, 0 open PRs)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -121,9 +121,15 @@ winget install --id Ninja-build.Ninja -e
 winget install --id KhronosGroup.VulkanSDK -e
 winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--passive --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.22621"
 winget install --id GitHub.cli -e
+winget install --id astral-sh.uv -e   # for clang-format-18
+uv tool install 'clang-format==18.1.8'
 git lfs install
 ```
 Restart the shell.
+
+The build matrix expects `clang-format-18` on PATH. Without it the
+lint CI job still runs (it installs its own), but local pre-commit
+runs require it. Verify with `clang-format --version` → `18.1.8`.
 
 ### Clone + build + run
 
@@ -140,15 +146,34 @@ Expected: window opens with magenta/grey checkerboard. Drop any
 `sample.png` next to `noted_app.exe` to replace the checkerboard with a
 real image.
 
-### Read first
+### Read first (in order — ~30 min)
 
-1. [`docs/architecture/README.md`](docs/architecture/README.md) — the
-   20 ADRs. **Read all of them** before changing cross-cutting code.
-   They explain *why* each decision was made and what alternatives were
-   rejected.
-2. [`CONTRIBUTING.md`](CONTRIBUTING.md) — branch protocol, commit
+1. **This file** — the "Where we are" + "Roadmap" sections above are
+   the entry point. Skim "What does NOT work yet" to know what's
+   intentionally absent vs broken.
+2. [`docs/architecture/README.md`](docs/architecture/README.md) → the
+   20 ADRs in numeric order. **Read all of them** before changing
+   cross-cutting code. ADR 0001 (C++23 + Vulkan), 0003 (Result<T>),
+   0004 (harness), 0011 (2026 baseline), 0016 (LayerGraph), and 0019
+   (compositor) are the most-referenced; the rest fill in details.
+3. [`CONTRIBUTING.md`](CONTRIBUTING.md) — branch protocol, commit
    convention, code style.
-3. [`README.md`](README.md) — project overview.
+4. [`README.md`](README.md) — project overview.
+
+### Pick up where I left off
+
+Sequential next steps from the roadmap:
+1. **P3 #9b** `feat/selection-mask-gpu` — `gpu::SelectionMask` (R8
+   image) + a Selection-to-mask rasterizer. Pattern matches
+   `CanvasRenderTarget` (ADR 0014). ~4 h.
+2. **P3 #9c** `feat/compositor-masking` — `LayerCompositor::composite()`
+   takes an optional `SelectionMask&`, layer shader multiplies output
+   alpha by mask sample. ~3 h.
+3. **P4 #10** `feat/document-block-tree` — independent of #9b/9c.
+   Pure domain logic, follows the same `domain::LayerGraph` pattern.
+
+If you're new to the codebase, P4 #10 is the gentlest landing —
+no GPU work, no shaders, well-bounded.
 
 ---
 
