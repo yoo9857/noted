@@ -46,7 +46,7 @@ every push (see `.clang-format`, `.github/workflows/lint.yml`).
 
 ```
 engine/       Core: Vulkan, allocator, hooks, error model, harness
-domain/       Pure logic: document, layer DAG, commands, CRDT (stubs)
+domain/       Pure logic: document, layer DAG, selection, commands, CRDT
 compositor/   GPU layer compositor (engine + domain bridge)
 plugin/       WASM plugin host (stubs)
 platform/     Windowing, input, fs, image_io
@@ -54,7 +54,7 @@ ui/           View layer (stubs — UI tech TBD)
 app/          Executable entry (src/main.cpp)
 shaders/      Slang sources (fullscreen, stamp, layer)
 cmake/        CMake modules (CompilerWarnings, Hardening, NotedModule, Shaders)
-docs/architecture/  19 ADRs documenting every cross-cutting decision
+docs/architecture/  20 ADRs documenting every cross-cutting decision
 tests/        Unit + integration + bench + fuzz scaffolds
 ```
 
@@ -76,7 +76,20 @@ tests/        Unit + integration + bench + fuzz scaffolds
    (canvas → composite). Foundation for strokes/layers. See ADR 0014.
 ✅ Stroke engine (MVP): mouse drag draws anti-aliased SDF-disk stamps
    into the canvas via a push-constant pipeline. Heap-allocated, RAII
-   hook subscriptions. See ADR 0015.
+   hook subscriptions. See ADR 0015. Pressure-driven brush via
+   `BrushStyle` + `stamp_from_pressure()` curve. See ADR 0018.
+✅ Pen / stylus input: Win32 `WM_POINTER` subclass over GLFW.
+   Real pressure + tilt flow through hook events. Synthetic
+   mouse-from-pen messages suppressed via `MI_WP_SIGNATURE`. See
+   ADR 0017.
+✅ LayerGraph domain model: 16 blend modes + 5 layer kinds (wire
+   stable), DAG with cycle detection, validate-then-mutate. See ADR 0016.
+✅ Layer compositor: walks LayerGraph in topological order, 4
+   fixed-function blend modes + counted fallback, single shader,
+   per-mode pipelines. See ADR 0019.
+✅ Selection domain: rect-list set algebra (add/intersect/subtract),
+   canonical normalization, half-open `contains`. Domain-only;
+   GPU rasterization PR is next. See ADR 0020.
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
    their warnings can't leak. `/Ob[0-9]` collisions removed at the
@@ -85,10 +98,10 @@ tests/        Unit + integration + bench + fuzz scaffolds
 
 ### What does NOT work yet (by design — not bugs)
 
-- No actual document model (domain/ has interfaces only).
-- No layers / blend modes / non-destructive editing.
-- No brush variety (single 4px black tip — see P2 #6).
-- No pen pressure (mouse-only — GLFW limitation).
+- No actual document model (block tree — P4 #10).
+- No GPU selection mask yet (domain ships first — see ADR 0020).
+- No brush variety beyond the MVP black tip; presets / library TBD.
+- Pen pressure plumbed on Windows; macOS / Linux still mouse.
 - No persistence layer.
 - No UI chrome (no widgets, no panels, no menus).
 - No file format.
@@ -130,7 +143,7 @@ real image.
 ### Read first
 
 1. [`docs/architecture/README.md`](docs/architecture/README.md) — the
-   19 ADRs. **Read all of them** before changing cross-cutting code.
+   20 ADRs. **Read all of them** before changing cross-cutting code.
    They explain *why* each decision was made and what alternatives were
    rejected.
 2. [`CONTRIBUTING.md`](CONTRIBUTING.md) — branch protocol, commit
@@ -172,7 +185,9 @@ The image-editor half. Can be developed in parallel with strokes.
 |---|---|---|---|
 | 7 | ~~`feat/layer-domain-model`~~ ✅ **landed** | — | `domain::LayerGraph` — DAG of `LayerNode` (id/kind/blend/opacity/visible/inputs). 16-mode Photoshop blend enum + 5-kind layer enum, both wire-stable. Monotonic IDs, validate-then-mutate, cycle detection via iterative DFS. See ADR 0016. |
 | 8 | ~~`feat/layer-compositor`~~ ✅ **landed** | New `compositor/` module bridging `engine` + `domain`. `LayerPayloadStore` (SolidColor MVP) + `LayerCompositor` with 4 fixed-function blend modes (normal/screen/linear_dodge/multiply) and counted fallback to NORMAL for the other 12. See ADR 0019. |
-| 9 | `feat/selection-mask` | 6h | Marquee / lasso selection → 1-channel mask image. Mask gates compositor output per-pixel. |
+| 9a | ~~`feat/selection-domain`~~ ✅ **landed** | — | `domain::Selection` — canonical rect-list with union/intersect/subtract set ops, bounds, half-open `contains`. Same data/GPU split as LayerGraph→Compositor. See ADR 0020. |
+| 9b | `feat/selection-mask-gpu` | 4h | `gpu::SelectionMask` (R8_UNORM image, fill helpers) + Selection→mask rasterizer. Builds on 9a. |
+| 9c | `feat/compositor-masking` | 3h | `LayerCompositor::composite()` takes an optional `SelectionMask`; layer shader multiplies output alpha by mask sample. Builds on 9b. |
 
 ### 📄 Priority 4 — Document model + persistence
 
