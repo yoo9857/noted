@@ -11,6 +11,25 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# CMake ships MSVC defaults with /Ob2 (inline expansion level 2) baked into
+# CMAKE_CXX_FLAGS_RELEASE / RELWITHDEBINFO / MINSIZEREL. We add the more
+# aggressive /Ob3 per-target in CompilerWarnings.cmake; without removing the
+# baked-in /Ob2 first MSVC emits D9025 ('/Ob2' overridden by '/Ob3') on
+# every Release TU. Strip /Ob[0-9] from the cached flags here so the
+# per-target /Ob3 is the only inline directive that reaches cl.exe.
+if(MSVC)
+    foreach(_cfg "" _DEBUG _RELEASE _RELWITHDEBINFO _MINSIZEREL)
+        if(DEFINED CMAKE_CXX_FLAGS${_cfg})
+            string(REGEX REPLACE "[ ]?/Ob[0-9]" ""
+                CMAKE_CXX_FLAGS${_cfg} "${CMAKE_CXX_FLAGS${_cfg}}")
+        endif()
+        if(DEFINED CMAKE_C_FLAGS${_cfg})
+            string(REGEX REPLACE "[ ]?/Ob[0-9]" ""
+                CMAKE_C_FLAGS${_cfg} "${CMAKE_C_FLAGS${_cfg}}")
+        endif()
+    endforeach()
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 include(Hardening)
@@ -22,11 +41,20 @@ option(NOTED_WARNINGS_AS_ERRORS  "Treat warnings as errors"           OFF)
 option(NOTED_ENABLE_ASAN         "Enable AddressSanitizer"            OFF)
 option(NOTED_ENABLE_UBSAN        "Enable UndefinedBehaviorSanitizer"  OFF)
 option(NOTED_ENABLE_TSAN         "Enable ThreadSanitizer"             OFF)
+option(NOTED_ENABLE_TRACY        "Enable Tracy profiler instrumentation" OFF)
 
 # ---- External dependencies ----------------------------------------------
 find_package(Vulkan 1.3 REQUIRED)
 
 include(FetchContent)
+
+# Every FetchContent_Declare below uses SYSTEM so the dependency's headers
+# are exposed to consumers as system includes. Combined with MSVC's
+# /external:anglebrackets + /external:W0 (in CompilerWarnings.cmake) and
+# GCC/clang's implicit `-isystem` mapping, this silences warnings inside
+# third-party headers (e.g., GLFW emits C4819 on Korean/Japanese code
+# pages) without lowering the warning level for our own code.
+
 set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -36,6 +64,7 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/glfw/glfw.git
     GIT_TAG 3.4
     GIT_SHALLOW TRUE
+    SYSTEM
 )
 FetchContent_MakeAvailable(glfw)
 
@@ -46,6 +75,7 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
     GIT_TAG v3.1.0
     GIT_SHALLOW TRUE
+    SYSTEM
 )
 FetchContent_MakeAvailable(VulkanMemoryAllocator)
 
@@ -55,10 +85,11 @@ FetchContent_Declare(
     stb
     GIT_REPOSITORY https://github.com/nothings/stb.git
     GIT_TAG        f0569113c93ad095470c54bf34a17b36646bbbb5
+    SYSTEM
 )
 FetchContent_MakeAvailable(stb)
 add_library(stb_image INTERFACE)
-target_include_directories(stb_image INTERFACE "${stb_SOURCE_DIR}")
+target_include_directories(stb_image SYSTEM INTERFACE "${stb_SOURCE_DIR}")
 
 if(NOTED_BUILD_TESTS)
     FetchContent_Declare(
@@ -66,10 +97,28 @@ if(NOTED_BUILD_TESTS)
         GIT_REPOSITORY https://github.com/google/googletest.git
         GIT_TAG v1.15.2
         GIT_SHALLOW TRUE
+        SYSTEM
     )
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(googletest)
     enable_testing()
+endif()
+
+# Tracy — frame-grained profiler. Off by default. When enabled we set
+# TRACY_ENABLE so the client compiles its full machinery, and TRACY_ON_DEMAND
+# so the client only collects when a profiler is connected (safe for shipped
+# builds that ship with Tracy compiled in). See docs/architecture/0013.
+if(NOTED_ENABLE_TRACY)
+    set(TRACY_ENABLE    ON  CACHE BOOL "" FORCE)
+    set(TRACY_ON_DEMAND ON  CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        tracy
+        GIT_REPOSITORY https://github.com/wolfpld/tracy.git
+        GIT_TAG v0.11.1
+        GIT_SHALLOW TRUE
+        SYSTEM
+    )
+    FetchContent_MakeAvailable(tracy)
 endif()
 
 # ---- Modules (order: leaves first) --------------------------------------
