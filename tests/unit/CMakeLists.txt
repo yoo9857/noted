@@ -7,6 +7,7 @@ add_executable(noted_unit_tests
     layer_graph_test.cpp
     layer_compositor_test.cpp
     pen_input_test.cpp
+    selection_test.cpp
 )
 
 target_link_libraries(noted_unit_tests PRIVATE noted_test_harness noted::domain noted::compositor noted::platform)
