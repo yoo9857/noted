@@ -87,7 +87,7 @@ TEST(ResolveComposition, OnlyVisibleAndPayloadBearingNodesEmit) {
     LayerGraph g;
     const auto a = g.add_layer(LayerKind::bitmap, "bg");      // visible + payload
     const auto b = g.add_layer(LayerKind::adjustment, "hidden");  // invisible
-    const auto c = g.add_layer(LayerKind::group, "no_payload");   // no payload
+    (void)g.add_layer(LayerKind::group, "no_payload");            // no payload — id unused
     const auto d = g.add_layer(LayerKind::bitmap, "fg");      // visible + payload
 
     ASSERT_TRUE(g.set_visible(b, false));
