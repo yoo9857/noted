@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-16 · **main HEAD:** `bc457e7` (clean, 0 open PRs)
+**Last updated:** 2026-05-18 · **main HEAD:** `2750fea` (clean, 0 open PRs)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -54,7 +54,7 @@ ui/           View layer (stubs — UI tech TBD)
 app/          Executable entry (src/main.cpp)
 shaders/      Slang sources (fullscreen, stamp, layer)
 cmake/        CMake modules (CompilerWarnings, Hardening, NotedModule, Shaders)
-docs/architecture/  20 ADRs documenting every cross-cutting decision
+docs/architecture/  23 ADRs documenting every cross-cutting decision
 tests/        Unit + integration + bench + fuzz scaffolds
 ```
 
@@ -112,7 +112,7 @@ tests/        Unit + integration + bench + fuzz scaffolds
 ### What does NOT work yet (by design — not bugs)
 
 - No undo/redo stack on the document model (P4 #11).
-- No GPU selection mask yet (domain ships first — see ADR 0020).
+- No compositor wired into app/main.cpp yet (LayerCompositor exists with masking, but main still runs the textured-quad demo).
 - No brush variety beyond the MVP black tip; presets / library TBD.
 - Pen pressure plumbed on Windows; macOS / Linux still mouse.
 - No persistence layer.
@@ -165,10 +165,11 @@ real image.
    the entry point. Skim "What does NOT work yet" to know what's
    intentionally absent vs broken.
 2. [`docs/architecture/README.md`](docs/architecture/README.md) → the
-   20 ADRs in numeric order. **Read all of them** before changing
+   23 ADRs in numeric order. **Read all of them** before changing
    cross-cutting code. ADR 0001 (C++23 + Vulkan), 0003 (Result<T>),
-   0004 (harness), 0011 (2026 baseline), 0016 (LayerGraph), and 0019
-   (compositor) are the most-referenced; the rest fill in details.
+   0004 (harness), 0011 (2026 baseline), 0016 (LayerGraph), 0019
+   (compositor), and 0023 (Document) are the most-referenced; the
+   rest fill in details.
 3. [`CONTRIBUTING.md`](CONTRIBUTING.md) — branch protocol, commit
    convention, code style.
 4. [`README.md`](README.md) — project overview.
