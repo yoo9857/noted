@@ -99,6 +99,10 @@ tests/        Unit + integration + bench + fuzz scaffolds
    mask sample. Internal 1×1 "all selected" dummy keeps shader
    unconditional when caller passes nullptr. Lazy dummy init on
    first composite() call. See ADR 0022.
+✅ Document block tree: unified `domain::Document` (group/text/heading/
+   code/canvas/image/embed) for notes AND image edits. Tree with
+   ordered children, parent pointers for O(1) up; payload variant
+   with side-store IDs for heavy data. 30 unit tests. See ADR 0023.
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
    their warnings can't leak. `/Ob[0-9]` collisions removed at the
@@ -107,7 +111,7 @@ tests/        Unit + integration + bench + fuzz scaffolds
 
 ### What does NOT work yet (by design — not bugs)
 
-- No actual document model (block tree — P4 #10).
+- No undo/redo stack on the document model (P4 #11).
 - No GPU selection mask yet (domain ships first — see ADR 0020).
 - No brush variety beyond the MVP black tip; presets / library TBD.
 - Pen pressure plumbed on Windows; macOS / Linux still mouse.
@@ -172,13 +176,14 @@ real image.
 ### Pick up where I left off
 
 Sequential next steps from the roadmap:
-1. **P4 #10** `feat/document-block-tree` — pure domain logic, follows
-   the same `domain::LayerGraph` pattern. ~6 h.
-2. **P4 #11** `feat/command-undo-redo` — Command pattern on top of the
-   block tree. ~4 h.
+1. **P4 #11** `feat/command-undo-redo` — Command pattern + undo
+   stack on top of `Document`. Pure domain logic. ~4 h.
+2. **P4 #12** `feat/file-format-mvp` — `.noted` archive: document
+   json + assets/ + history. Round-trip save/load. ~4 h.
 
-If you're new to the codebase, P4 #10 is the gentlest landing —
-no GPU work, no shaders, well-bounded.
+If you're new to the codebase, P4 #11 is the gentlest landing —
+no GPU work, no shaders, well-bounded, builds directly on the
+just-landed `domain::Document`.
 
 ---
 
@@ -223,7 +228,7 @@ The image-editor half. Can be developed in parallel with strokes.
 
 | # | PR | Effort | Why |
 |---|---|---|---|
-| 10 | `feat/document-block-tree` | 6h | `domain::Document` block tree: text + canvas + image + embed blocks. Unified data structure for notes AND image editor. |
+| 10 | ~~`feat/document-block-tree`~~ ✅ **landed** | — | `domain::Document` — strict tree of `BlockNode` (group/text/heading/code/canvas/image/embed). Payload variant + opaque side-store IDs for heavy data. parent+children for O(1) both directions. 30 unit tests. See ADR 0023. |
 | 11 | `feat/command-undo-redo` | 4h | Command pattern + undo stack on top of the block tree. Every state mutation goes through `Command::apply()`. |
 | 12 | `feat/file-format-mvp` | 4h | `.noted` archive format (zip-ish): document.json + assets/*.png + history.bin. Round-trip save/load. |
 
