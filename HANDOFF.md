@@ -135,6 +135,17 @@ tests/        Unit + integration + bench + fuzz scaffolds
    composite; ImGui still overlays the swapchain composite.
    Textured-quad demo + checkerboard / sample.png loading is
    gone.
+✅ IM_ASSERT routing: `ui/imgui_user_config.hpp` overrides
+   `IM_ASSERT` so ImGui invariant violations route through
+   `noted::harness::validate` (ErrorObserved hook channel)
+   AND still hit `assert()` for fail-fast in debug. Closes
+   ADR 0027's deferred routing promise.
+✅ Product shell (first cut): menu bar (File / Edit / View /
+   About), layer panel observing + mutating the scene graph
+   (visibility toggle wires through `set_visible()`), status
+   bar pinned to the bottom of the viewport (frame index +
+   FPS). `ImGui::ShowDemoWindow` retired to View → ImGui Demo
+   toggle, off by default.
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
    their warnings can't leak. `/Ob[0-9]` collisions removed at the
@@ -219,18 +230,14 @@ without a UI that lets us validate. ADR 0027 commits to Dear
 ImGui for v0.x with an explicit phase boundary for v1.0
 re-evaluation.
 
-1. **`feat/ui-imgui-imassert-routing`** — Route `IM_ASSERT`
-   through `harness::validate` via `IMGUI_USER_CONFIG`. ADR
-   0027 follow-up, deferred from the scaffold to keep dep
-   surface tight. ~1 h.
+1. **`feat/ui-document-shell-undo`** — Wire `domain::Document` +
+   `UndoStack` into the shell. Outline tree shows
+   `Document.preorder()`. Edit menu's Undo/Redo back the stack.
+   File → New / Open / Save wired to the JSON+zip format. ~6 h.
 2. **`feat/ui-debug-overlay`** — Tracy-style overlay: FPS,
    harness counters, fallback counts. Validates the
-   `binding/` channel → view plumbing on a low-stakes target. ~2 h.
-3. **`feat/ui-document-shell`** — Window with menu bar, layer
-   panel, outline tree, undo/redo buttons. First end-to-end
-   product-shaped surface backed by `domain::Document` +
-   `UndoStack`. ~8 h.
-4. **`feat/ui-theme-pass`** — Custom ImGuiStyle + CJK-capable
+   `binding/` channel → view plumbing. ~2 h.
+3. **`feat/ui-theme-pass`** — Custom ImGuiStyle + CJK-capable
    font atlas + dark/light theme. Pushes back the "looks like
    debug tool" risk. ~4 h.
 
@@ -308,6 +315,8 @@ the product has actual content.
 | 17 | ~~`feat/ui-stack-decision`~~ ✅ **decided** | — | ADR 0027 picks **Dear ImGui** (docking branch, MIT, official Vulkan+GLFW backends) for v0.x with an explicit phase boundary for v1.0 reassessment. Pure-design PR — no code change beyond the `ui/ui.hpp` docstring refresh. |
 | 18a | ~~`feat/ui-imgui-scaffold`~~ ✅ **landed** | — | Dear ImGui docking v1.91.5 via FetchContent + official Vulkan/GLFW backends, ALL wrapped by `ui::ImGuiHost` with three-phase frame (`begin_frame` / `finalize_frame` / `render_into`). 6 unit tests cover create() rejection paths. See ADR 0027. |
 | 18b | ~~`feat/ui-compositor-wire`~~ ✅ **landed** | — | `app/main.cpp` drives canvas pass via `LayerCompositor::composite()` walking a 4-layer demo LayerGraph (normal / multiply / linear_dodge). Textured-quad demo + checkerboard / sample.png loading retired. Stroke + ImGui still overlay correctly. |
+| 18c | ~~`feat/ui-imgui-imassert-routing`~~ ✅ **landed** | — | `IM_ASSERT` routes through `noted::harness::validate` via `IMGUI_USER_CONFIG` + a forward-decl in `ui/include/noted/ui/imgui_user_config.hpp`. ADR 0027 follow-up closed. |
+| 18d | ~~`feat/ui-document-shell`~~ ✅ **landed** (shell first cut) | — | Menu bar (File / Edit / View / About) + layer panel (visibility toggle wires through `set_visible()`) + status bar (frame index + FPS). `ShowDemoWindow` retired to View menu toggle. Document + UndoStack wiring follows in #18d-undo. |
 | 18c | `feat/ui-debug-overlay` | 2h | Tracy-style overlay: FPS, harness counters, fallback counts. Validates the `binding/` channel → view plumbing. |
 | 18d | `feat/ui-document-shell` | 8h | Window with menu bar, layer panel, outline tree (Document.preorder), undo/redo buttons backed by `UndoStack`. First end-to-end product-shaped surface. |
 | 18e | `feat/ui-theme-pass` | 4h | Custom `ImGuiStyle` + CJK-capable font atlas + dark/light theme. Defuses the "looks like debug tool" risk. |
