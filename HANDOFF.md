@@ -103,6 +103,12 @@ tests/        Unit + integration + bench + fuzz scaffolds
    code/canvas/image/embed) for notes AND image edits. Tree with
    ordered children, parent pointers for O(1) up; payload variant
    with side-store IDs for heavy data. 30 unit tests. See ADR 0023.
+✅ Command + undo / redo: `Command` abstract base + 7 concrete
+   commands (add/insert/remove/move/set_payload/set_visible/
+   set_name) over `Document`. Inverse-based (not snapshot) so the
+   stack stays small. `UndoStack` with bounded depth, redo
+   invalidation, atomicity. `Document::restore_subtree` as the
+   precise inverse of `remove_block`. 27 unit tests. See ADR 0024.
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
    their warnings can't leak. `/Ob[0-9]` collisions removed at the
@@ -111,14 +117,14 @@ tests/        Unit + integration + bench + fuzz scaffolds
 
 ### What does NOT work yet (by design — not bugs)
 
-- No undo/redo stack on the document model (P4 #11).
+- No persistence: the file format (P4 #12) hasn't shipped yet.
 - No compositor wired into app/main.cpp yet (LayerCompositor exists with masking, but main still runs the textured-quad demo).
 - No brush variety beyond the MVP black tip; presets / library TBD.
 - Pen pressure plumbed on Windows; macOS / Linux still mouse.
 - No persistence layer.
 - No UI chrome (no widgets, no panels, no menus).
 - No file format.
-- No undo/redo wired (Command interface exists; no stack yet).
+- Edit coalescing not implemented (every keystroke is one undo entry — production-ready coalescing is a P4 follow-up).
 - No tests for GPU code (CI has no GPU).
 
 ---
@@ -177,14 +183,14 @@ real image.
 ### Pick up where I left off
 
 Sequential next steps from the roadmap:
-1. **P4 #11** `feat/command-undo-redo` — Command pattern + undo
-   stack on top of `Document`. Pure domain logic. ~4 h.
-2. **P4 #12** `feat/file-format-mvp` — `.noted` archive: document
+1. **P4 #12** `feat/file-format-mvp` — `.noted` archive: document
    json + assets/ + history. Round-trip save/load. ~4 h.
+2. **P5 #13** `feat/shader-objects` — `VK_EXT_shader_object`,
+   pipeline-less shaders. Lifts the codebase to AAA-grade scale
+   for brushes/filters. ~6 h.
 
-If you're new to the codebase, P4 #11 is the gentlest landing —
-no GPU work, no shaders, well-bounded, builds directly on the
-just-landed `domain::Document`.
+If you're new to the codebase, P4 #12 is the gentlest landing —
+no GPU work, builds on top of `Document` + `Command`.
 
 ---
 
@@ -230,7 +236,7 @@ The image-editor half. Can be developed in parallel with strokes.
 | # | PR | Effort | Why |
 |---|---|---|---|
 | 10 | ~~`feat/document-block-tree`~~ ✅ **landed** | — | `domain::Document` — strict tree of `BlockNode` (group/text/heading/code/canvas/image/embed). Payload variant + opaque side-store IDs for heavy data. parent+children for O(1) both directions. 30 unit tests. See ADR 0023. |
-| 11 | `feat/command-undo-redo` | 4h | Command pattern + undo stack on top of the block tree. Every state mutation goes through `Command::apply()`. |
+| 11 | ~~`feat/command-undo-redo`~~ ✅ **landed** | — | `Command` abstract base + 7 concrete commands (add/insert/remove/move/set_payload/set_visible/set_name) + `UndoStack` (bounded depth, redo invalidation, peek labels). Inverse-based undo keeps stack memory tight. Adds `Document::restore_subtree` as the precise inverse of `remove_block`. 27 unit tests. See ADR 0024. |
 | 12 | `feat/file-format-mvp` | 4h | `.noted` archive format (zip-ish): document.json + assets/*.png + history.bin. Round-trip save/load. |
 
 ### ⚡ Priority 5 — Modern Vulkan (post-MVP)
