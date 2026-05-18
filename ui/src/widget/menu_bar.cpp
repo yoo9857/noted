@@ -1,17 +1,34 @@
 #include "noted/ui/widget/menu_bar.hpp"
 
+#include <array>
+#include <utility>
+
 #include <imgui.h>
 
 namespace noted::ui::widget {
 
-auto menu_bar(MenuBarState& state) -> MenuBarResult {
+namespace {
+
+constexpr std::array<std::pair<const char*, noted::domain::BlockKind>, 7> kAddBlockMenu{{
+    {"Group", noted::domain::BlockKind::group},
+    {"Text", noted::domain::BlockKind::text},
+    {"Heading", noted::domain::BlockKind::heading},
+    {"Code", noted::domain::BlockKind::code},
+    {"Canvas", noted::domain::BlockKind::canvas},
+    {"Image", noted::domain::BlockKind::image},
+    {"Embed", noted::domain::BlockKind::embed},
+}};
+
+}  // namespace
+
+auto menu_bar(MenuBarState& state, const MenuBarStatus& status) -> MenuBarResult {
     MenuBarResult result{};
     if (!ImGui::BeginMainMenuBar()) {
         return result;
     }
 
     if (ImGui::BeginMenu("File")) {
-        ImGui::MenuItem("New", "Ctrl+N", false, /*enabled=*/false);  // next PR
+        ImGui::MenuItem("New", "Ctrl+N", false, /*enabled=*/false);
         ImGui::MenuItem("Open", "Ctrl+O", false, /*enabled=*/false);
         ImGui::MenuItem("Save", "Ctrl+S", false, /*enabled=*/false);
         ImGui::Separator();
@@ -22,13 +39,27 @@ auto menu_bar(MenuBarState& state) -> MenuBarResult {
     }
 
     if (ImGui::BeginMenu("Edit")) {
-        ImGui::MenuItem("Undo", "Ctrl+Z", false, /*enabled=*/false);  // next PR
-        ImGui::MenuItem("Redo", "Ctrl+Y", false, /*enabled=*/false);
+        if (ImGui::MenuItem("Undo", "Ctrl+Z", false, status.can_undo)) {
+            result.undo_requested = true;
+        }
+        if (ImGui::MenuItem("Redo", "Ctrl+Y", false, status.can_redo)) {
+            result.redo_requested = true;
+        }
+        ImGui::Separator();
+        if (ImGui::BeginMenu("Add Block")) {
+            for (const auto& [label, kind] : kAddBlockMenu) {
+                if (ImGui::MenuItem(label)) {
+                    result.add_block_requested = kind;
+                }
+            }
+            ImGui::EndMenu();
+        }
         ImGui::EndMenu();
     }
 
     if (ImGui::BeginMenu("View")) {
         ImGui::MenuItem("Layers", nullptr, &state.show_layer_panel);
+        ImGui::MenuItem("Outline", nullptr, &state.show_outline_panel);
         ImGui::MenuItem("ImGui Demo", nullptr, &state.show_demo_window);
         ImGui::Separator();
         ImGui::MenuItem("About noted", nullptr, &state.show_about_window);
