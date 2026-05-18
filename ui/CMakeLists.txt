@@ -6,6 +6,7 @@ noted_add_module(
         src/widget/widget.cpp
         src/widget/menu_bar.cpp
         src/widget/layer_panel.cpp
+        src/widget/outline_panel.cpp
         src/widget/status_bar.cpp
         src/theme/theme.cpp
         src/binding/binding.cpp

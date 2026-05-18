@@ -25,6 +25,8 @@
 
 #include "noted/compositor/layer_compositor.hpp"
 #include "noted/compositor/layer_payload.hpp"
+#include "noted/domain/command/commands.hpp"
+#include "noted/domain/command/undo_stack.hpp"
 #include "noted/domain/document/document.hpp"
 #include "noted/domain/layer/layer.hpp"
 #include "noted/engine/engine.hpp"
@@ -53,6 +55,7 @@
 #include "noted/ui/imgui_host.hpp"
 #include "noted/ui/widget/layer_panel.hpp"
 #include "noted/ui/widget/menu_bar.hpp"
+#include "noted/ui/widget/outline_panel.hpp"
 #include "noted/ui/widget/status_bar.hpp"
 
 #ifndef NOTED_SHADER_DIR
@@ -502,6 +505,13 @@ int main() {
     auto& scene_graph = scene->graph;
     auto& scene_store = scene->store;
 
+    // -------- Document + UndoStack — the live data model the
+    // outline panel renders and the Edit menu mutates via commands.
+    // Starts empty; the user populates via Edit → Add Block.
+    noted::domain::Document document{};
+    noted::domain::UndoStack undo_stack{};
+    noted::domain::BlockId selected_block = noted::domain::invalid_block_id;
+
     noted::ui::widget::MenuBarState menu_state{};
 
     // The canvas pass:
@@ -558,7 +568,11 @@ int main() {
         //   - layer panel observing + mutating the scene graph
         //   - status bar pinned to the bottom of the viewport
         //   - ImGui demo window behind a View toggle (off by default)
-        const auto menu = noted::ui::widget::menu_bar(menu_state);
+        const noted::ui::widget::MenuBarStatus menu_status{
+            .can_undo = undo_stack.can_undo(),
+            .can_redo = undo_stack.can_redo(),
+        };
+        const auto menu = noted::ui::widget::menu_bar(menu_state, menu_status);
         if (menu.quit_requested) {
             // Window has no `request_close()` wrapper yet — the GLFW
             // pattern is documented enough that going through the
@@ -566,7 +580,43 @@ int main() {
             // PR can add the wrapper if a second caller appears.
             glfwSetWindowShouldClose(window->native_handle(), GLFW_TRUE);
         }
+        if (menu.undo_requested) {
+            if (auto r = undo_stack.undo(document); !r) {
+                std::cerr << r.error().format() << '\n';
+            }
+        }
+        if (menu.redo_requested) {
+            if (auto r = undo_stack.redo(document); !r) {
+                std::cerr << r.error().format() << '\n';
+            }
+        }
+        if (menu.add_block_requested) {
+            // Choose the parent: selected block if it's a group,
+            // else the document root, else invalid_block_id which
+            // makes AddBlockCommand allocate a fresh root.
+            noted::domain::BlockId parent = noted::domain::invalid_block_id;
+            if (selected_block != noted::domain::invalid_block_id) {
+                if (const auto* node = document.find(selected_block);
+                    node != nullptr && node->kind == noted::domain::BlockKind::group) {
+                    parent = selected_block;
+                } else if (document.root() != noted::domain::invalid_block_id) {
+                    parent = document.root();
+                }
+            } else if (document.root() != noted::domain::invalid_block_id) {
+                parent = document.root();
+            }
+            auto cmd = std::make_unique<noted::domain::AddBlockCommand>(
+                *menu.add_block_requested, parent, std::string{});
+            auto* cmd_ptr = cmd.get();
+            if (auto r = undo_stack.execute(std::move(cmd), document); !r) {
+                std::cerr << r.error().format() << '\n';
+            } else {
+                selected_block = cmd_ptr->assigned_id();
+            }
+        }
+
         noted::ui::widget::layer_panel(scene_graph, &menu_state.show_layer_panel);
+        noted::ui::widget::outline_panel(document, selected_block, &menu_state.show_outline_panel);
         if (menu_state.show_demo_window) {
             ImGui::ShowDemoWindow(&menu_state.show_demo_window);
         }
