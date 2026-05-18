@@ -19,6 +19,7 @@ noted_add_module(
         src/gpu/buffer.cpp
         src/gpu/image.cpp
         src/gpu/canvas_render_target.cpp
+        src/gpu/selection_mask.cpp
         src/gpu/upload.cpp
         src/gpu/sampler.cpp
         src/gpu/shader_module.cpp
