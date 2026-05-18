@@ -91,6 +91,20 @@ FetchContent_MakeAvailable(stb)
 add_library(stb_image INTERFACE)
 target_include_directories(stb_image SYSTEM INTERFACE "${stb_SOURCE_DIR}")
 
+# nlohmann/json — single-header JSON parser used by the `.noted` file
+# format (domain/io/document_json). Header-only INTERFACE library.
+# Pinned to a tagged release for reproducible builds across the matrix.
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+set(JSON_Install    OFF CACHE INTERNAL "")
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+    GIT_SHALLOW TRUE
+    SYSTEM
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
 if(NOTED_BUILD_TESTS)
     FetchContent_Declare(
         googletest
