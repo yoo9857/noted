@@ -196,13 +196,37 @@ real image.
 ### Pick up where I left off
 
 Sequential next steps from the roadmap:
-1. **P5 #13** `feat/shader-objects` — `VK_EXT_shader_object`,
-   pipeline-less shaders. Lifts the codebase to AAA-grade scale
-   for brushes/filters. ~6 h.
-2. **UI ADR + scaffold** — pick the UI stack (ImGui / Slint / Qt /
-   custom) and wire the compositor into a real frame loop. The
-   `LayerCompositor` exists end-to-end but `main.cpp` still runs
-   the textured-quad demo.
+**UI pivot is active.** Engine MVP is sufficient end-to-end;
+further engine investment (P5 modern Vulkan, asset embedding in
+file format, edit coalescing, color management) is premature
+without a UI that lets us validate. ADR 0027 commits to Dear
+ImGui for v0.x with an explicit phase boundary for v1.0
+re-evaluation.
+
+1. **`feat/ui-imgui-scaffold`** — FetchContent ImGui (docking branch)
+   + `imgui_impl_vulkan` + `imgui_impl_glfw`. Init/shutdown,
+   first ImGui frame inside the existing window, `main.cpp`
+   rewrite to drop the textured-quad demo. ~4-6 h.
+2. **`feat/ui-compositor-wire`** — `LayerCompositor::composite`
+   called inside the ImGui frame loop. First time the user sees
+   a real layer graph rendered with blend modes + selection
+   mask. ~3 h.
+3. **`feat/ui-debug-overlay`** — Tracy-style overlay: FPS,
+   harness counters, fallback counts. Validates the
+   `binding/` channel → view plumbing on a low-stakes target. ~2 h.
+4. **`feat/ui-document-shell`** — Window with menu bar, layer
+   panel, outline tree, undo/redo buttons. First end-to-end
+   product-shaped surface. ~8 h.
+5. **`feat/ui-theme-pass`** — Custom ImGuiStyle + CJK-capable
+   font atlas + dark/light theme. Pushes back the "looks like
+   debug tool" risk. ~4 h.
+
+**Deferred until UI validation:**
+- P5 #13 `feat/shader-objects` (`VK_EXT_shader_object`) and
+  the rest of P5 modern Vulkan extensions
+- Asset / LayerGraph / history embedding in the `.noted` archive
+- Edit coalescing in `UndoStack`
+- macOS / Linux pen-input ports
 
 ---
 
@@ -268,8 +292,12 @@ the product has actual content.
 
 | # | PR | Effort | Why |
 |---|---|---|---|
-| 17 | `feat/ui-stack-decision` | research | ADR 0013: pick the UI stack. **Decision pending**: Qt 6 / custom IMGUI / Slint / Tauri webview. Each has trade-offs documented in ADR 0001's alternatives table. |
-| 18 | `feat/ui-debug-overlay` | 4h | First UI surface: ImGui (or chosen stack) overlay showing FPS, harness counters, flag toggles. Bridges to the rest of the app via hook channels. |
+| 17 | ~~`feat/ui-stack-decision`~~ ✅ **decided** | — | ADR 0027 picks **Dear ImGui** (docking branch, MIT, official Vulkan+GLFW backends) for v0.x with an explicit phase boundary for v1.0 reassessment. Pure-design PR — no code change beyond the `ui/ui.hpp` docstring refresh. |
+| 18a | `feat/ui-imgui-scaffold` | 4-6h | FetchContent Dear ImGui + `imgui_impl_vulkan` + `imgui_impl_glfw`. Init/shutdown lifecycle, first ImGui frame inside the existing window, `main.cpp` drops the textured-quad demo. |
+| 18b | `feat/ui-compositor-wire` | 3h | Call `LayerCompositor::composite` inside the ImGui frame loop. First real layer-graph render with blend modes + selection mask visible to the user. |
+| 18c | `feat/ui-debug-overlay` | 2h | Tracy-style overlay: FPS, harness counters, fallback counts. Validates the `binding/` channel → view plumbing. |
+| 18d | `feat/ui-document-shell` | 8h | Window with menu bar, layer panel, outline tree (Document.preorder), undo/redo buttons backed by `UndoStack`. First end-to-end product-shaped surface. |
+| 18e | `feat/ui-theme-pass` | 4h | Custom `ImGuiStyle` + CJK-capable font atlas + dark/light theme. Defuses the "looks like debug tool" risk. |
 
 ---
 
