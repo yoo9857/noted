@@ -113,8 +113,13 @@ tests/        Unit + integration + bench + fuzz scaffolds
    document_to_json` / `document_from_json` round-trip the block
    tree. Schema is strict (unknown keys rejected), version-gated
    (`"version": 1`), uses wire-stable integer kind ordinals
-   (ADR 0023). 26 unit tests. Zip container is the next follow-up.
-   See ADR 0025.
+   (ADR 0023). 26 unit tests. See ADR 0025.
+✅ `.noted` zip container: `platform::io::save_noted_file` /
+   `load_noted_file` (+ `document_to_archive_bytes` /
+   `document_from_archive_bytes` for in-memory use) wrap
+   `document.json` in a standard zip via miniz. `assets/` +
+   `graphs/` subdirs reserved for future asset + LayerGraph
+   stores. 256 MB extraction cap. 13 unit tests. See ADR 0026.
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
    their warnings can't leak. `/Ob[0-9]` collisions removed at the
@@ -123,14 +128,15 @@ tests/        Unit + integration + bench + fuzz scaffolds
 
 ### What does NOT work yet (by design — not bugs)
 
-- No zip container yet: `.noted` is currently plain JSON. Zip
-  wrapping (`assets/`, `graphs/`, `history.bin` slots) ships next.
+- No asset / LayerGraph contents in the archive yet — the zip
+  container reserves `assets/` and `graphs/` subdirs but v1
+  writers only emit `document.json`.
 - No compositor wired into app/main.cpp yet (LayerCompositor exists with masking, but main still runs the textured-quad demo).
 - No brush variety beyond the MVP black tip; presets / library TBD.
 - Pen pressure plumbed on Windows; macOS / Linux still mouse.
 - No persistence layer.
 - No UI chrome (no widgets, no panels, no menus).
-- File format MVP shipped (JSON-only); zip + assets/graphs/history coming next.
+- File format MVP shipped (JSON + zip container); asset / graph / history embedding still pending.
 - Edit coalescing not implemented (every keystroke is one undo entry — production-ready coalescing is a P4 follow-up).
 - No tests for GPU code (CI has no GPU).
 
@@ -190,16 +196,13 @@ real image.
 ### Pick up where I left off
 
 Sequential next steps from the roadmap:
-1. **P4 #12b** `feat/file-format-zip` — wrap `document.json` in a
-   zip container (`.noted` is the single-file artifact). miniz dep,
-   `platform::io::save_noted_file` / `load_noted_file`. Asset and
-   LayerGraph subdirs reserved but empty. ~3 h.
-2. **P5 #13** `feat/shader-objects` — `VK_EXT_shader_object`,
+1. **P5 #13** `feat/shader-objects` — `VK_EXT_shader_object`,
    pipeline-less shaders. Lifts the codebase to AAA-grade scale
    for brushes/filters. ~6 h.
-
-If you're new to the codebase, P4 #12b is the gentlest landing —
-small surface, one new dep (miniz), pure-logic + file I/O.
+2. **UI ADR + scaffold** — pick the UI stack (ImGui / Slint / Qt /
+   custom) and wire the compositor into a real frame loop. The
+   `LayerCompositor` exists end-to-end but `main.cpp` still runs
+   the textured-quad demo.
 
 ---
 
@@ -247,7 +250,7 @@ The image-editor half. Can be developed in parallel with strokes.
 | 10 | ~~`feat/document-block-tree`~~ ✅ **landed** | — | `domain::Document` — strict tree of `BlockNode` (group/text/heading/code/canvas/image/embed). Payload variant + opaque side-store IDs for heavy data. parent+children for O(1) both directions. 30 unit tests. See ADR 0023. |
 | 11 | ~~`feat/command-undo-redo`~~ ✅ **landed** | — | `Command` abstract base + 7 concrete commands (add/insert/remove/move/set_payload/set_visible/set_name) + `UndoStack` (bounded depth, redo invalidation, peek labels). Inverse-based undo keeps stack memory tight. Adds `Document::restore_subtree` as the precise inverse of `remove_block`. 27 unit tests. See ADR 0024. |
 | 12 | ~~`feat/file-format-mvp`~~ ✅ **landed** (JSON only) | — | `domain::io::document_to_json` / `from_json` round-trip the block tree. Strict parser, version-gated, integer kind ordinals (ADR 0023 wire-stable). 26 unit tests. nlohmann/json dep. See ADR 0025. |
-| 12b | `feat/file-format-zip` | 3h | Wrap `document.json` in a zip container. miniz dep, `platform::io::save_noted_file` / `load_noted_file`. Reserve `assets/` and `graphs/` subdirs. |
+| 12b | ~~`feat/file-format-zip`~~ ✅ **landed** | — | `.noted` is a standard ZIP via miniz. `platform::io::save_noted_file` / `load_noted_file` + a bytes-level API for in-memory use. 256 MB extraction cap. Reserved `assets/` and `graphs/` subdirs for follow-ups. 13 unit tests. See ADR 0026. |
 
 ### ⚡ Priority 5 — Modern Vulkan (post-MVP)
 

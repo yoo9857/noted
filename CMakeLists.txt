@@ -105,6 +105,26 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+# miniz — single-header zip read/write used by the `.noted` archive
+# container (platform/io/noted_file). Public domain. Pinned to 3.0.2.
+# Disable miniz's own tooling targets; we only need the library.
+# CMAKE_POLICY_VERSION_MINIMUM bridges miniz's old
+# `cmake_minimum_required(VERSION 2.8.12)` against modern CMake which
+# refuses anything < 3.5. Confined to miniz's scope.
+set(BUILD_EXAMPLES OFF CACHE INTERNAL "")
+set(BUILD_FUZZERS  OFF CACHE INTERNAL "")
+set(INSTALL_PROJECT OFF CACHE INTERNAL "")
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
+FetchContent_Declare(
+    miniz
+    GIT_REPOSITORY https://github.com/richgel999/miniz.git
+    GIT_TAG 3.0.2
+    GIT_SHALLOW TRUE
+    SYSTEM
+)
+FetchContent_MakeAvailable(miniz)
+unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
+
 if(NOTED_BUILD_TESTS)
     FetchContent_Declare(
         googletest
