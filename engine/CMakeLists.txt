@@ -5,7 +5,6 @@ noted_add_module(
         src/hook/registry.cpp
         src/error/error.cpp
         src/harness/harness.cpp
-        src/gpu/gpu.cpp
         src/gpu/instance.cpp
         src/gpu/physical_device.cpp
         src/gpu/surface.cpp
@@ -29,10 +28,6 @@ noted_add_module(
         src/gpu/pipeline_layout.cpp
         src/gpu/graphics_pipeline.cpp
         src/stroke/stroke_engine.cpp
-        src/tile/tile.cpp
-        src/color/color.cpp
-        src/job/job.cpp
-        src/memory/memory.cpp
     PUBLIC_DEPS
         Vulkan::Vulkan
         glfw

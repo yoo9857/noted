@@ -6,7 +6,6 @@ noted_add_module(
         src/io/document_json.cpp
         src/layer/layer.cpp
         src/selection/selection.cpp
-        src/crdt/crdt.cpp
     PUBLIC_DEPS   noted::engine
     PRIVATE_DEPS  nlohmann_json::nlohmann_json
 )
