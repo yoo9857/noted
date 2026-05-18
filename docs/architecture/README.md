@@ -27,6 +27,7 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0019 | [Layer compositor — GPU render of the layer graph](0019-layer-compositor.md) | Accepted |
 | 0020 | [Selection domain — rect-list set algebra](0020-selection-domain.md) | Accepted |
 | 0021 | [Selection mask — GPU R8 image + buffer-to-image rasterizer](0021-selection-mask-gpu.md) | Accepted |
+| 0022 | [Compositor masking — selection mask gates layer output](0022-compositor-masking.md) | Accepted |
 
 ## Format
 
