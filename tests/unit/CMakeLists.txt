@@ -10,6 +10,7 @@ add_executable(noted_unit_tests
     selection_test.cpp
     selection_rasterizer_test.cpp
     document_test.cpp
+    command_test.cpp
 )
 
 target_link_libraries(noted_unit_tests PRIVATE noted_test_harness noted::domain noted::compositor noted::platform)

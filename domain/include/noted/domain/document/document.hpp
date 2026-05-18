@@ -191,6 +191,40 @@ public:
     //                       (use clear() for a full wipe).
     auto remove_block(BlockId id) -> Result<void>;
 
+    // Restore a previously-removed subtree. The precise inverse of
+    // `remove_block()` — used by the undo system to put a removed
+    // subtree back exactly where it was.
+    //
+    // `subtree[0]` is the root of the subtree. Every subsequent
+    // BlockNode's `parent` must point at another node earlier in the
+    // list (= the subtree must be internally consistent, the way
+    // `remove_block` left it).
+    //
+    // Two cases for the root of `subtree`:
+    //   - Normal case: `subtree.front().parent` names an existing
+    //     block in the document. The root is inserted at `insert_index`
+    //     in that parent's children list.
+    //   - Document-root case: `subtree.front().parent == invalid_block_id`.
+    //     Used to undo `remove_block()` on the document root (which
+    //     could only have succeeded when the root was childless). The
+    //     document must currently have no root; `insert_index` is
+    //     ignored and the restored node becomes the document root.
+    //
+    // `next_id_` is advanced past every restored id so subsequent
+    // allocations stay monotonic.
+    //
+    // Rejects:
+    //   - invalid_argument: subtree is empty; any node's id is
+    //                       invalid_block_id or already present in the
+    //                       document; the root's parent is unknown
+    //                       (normal case); insert_index OOB.
+    //   - invalid_state:    document-root case but a root already
+    //                       exists; the subtree's internal references
+    //                       are inconsistent.
+    //
+    // On failure, the document is unchanged.
+    auto restore_subtree(std::vector<BlockNode> subtree, std::size_t insert_index) -> Result<void>;
+
     // Drop every block. Resets root to invalid_block_id. Next id stays
     // monotonic across clears so IDs from history stay distinct.
     void clear() noexcept;

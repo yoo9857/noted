@@ -178,6 +178,119 @@ auto Document::remove_block(BlockId id) -> Result<void> {
     return {};
 }
 
+auto Document::restore_subtree(std::vector<BlockNode> subtree,
+                               std::size_t insert_index) -> Result<void> {
+    if (subtree.empty()) {
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                 "Document::restore_subtree: subtree is empty"));
+    }
+    // ---- Validation pass — no mutation until every check passes. ----------
+    const BlockId destination_parent = subtree.front().parent;
+    const bool restoring_root = (destination_parent == invalid_block_id);
+    if (restoring_root) {
+        // Document-root restoration: document must currently have no
+        // root. (The root was removed by remove_block, which only
+        // succeeds when root is childless — so this case is the precise
+        // inverse of that.)
+        if (root_ != invalid_block_id) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::invalid_state,
+                "Document::restore_subtree: cannot restore a root while one already exists"));
+        }
+    } else {
+        const auto parent_it = nodes_.find(destination_parent);
+        if (parent_it == nodes_.end()) {
+            return std::unexpected(
+                noted::make_error(noted::ErrorCode::invalid_argument,
+                                  "Document::restore_subtree: destination parent " +
+                                      std::to_string(destination_parent) + " not in document"));
+        }
+        if (insert_index > parent_it->second.children.size()) {
+            return std::unexpected(
+                noted::make_error(noted::ErrorCode::invalid_argument,
+                                  "Document::restore_subtree: insert_index " +
+                                      std::to_string(insert_index) + " out of range (size " +
+                                      std::to_string(parent_it->second.children.size()) + ")"));
+        }
+    }
+
+    // Every id is fresh; every non-root parent points at an earlier
+    // node in the list; every child appears exactly once in someone's
+    // children list inside the subtree.
+    std::unordered_set<BlockId> known_ids;
+    known_ids.reserve(subtree.size());
+    for (std::size_t i = 0; i < subtree.size(); ++i) {
+        const auto& node = subtree[i];
+        if (node.id == invalid_block_id) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::invalid_argument,
+                "Document::restore_subtree: subtree contains an invalid_block_id node"));
+        }
+        if (nodes_.find(node.id) != nodes_.end()) {
+            return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                     "Document::restore_subtree: id " +
+                                                         std::to_string(node.id) +
+                                                         " is already present in the document"));
+        }
+        if (!known_ids.insert(node.id).second) {
+            return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                     "Document::restore_subtree: duplicate id " +
+                                                         std::to_string(node.id) +
+                                                         " inside the subtree"));
+        }
+        if (i == 0) {
+            continue;  // root: its parent is in the live document, validated above
+        }
+        // Non-root nodes: parent must be an earlier node in the list.
+        if (known_ids.find(node.parent) == known_ids.end()) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::invalid_state,
+                "Document::restore_subtree: node " + std::to_string(node.id) + " has parent " +
+                    std::to_string(node.parent) + " which is not earlier in the subtree"));
+        }
+    }
+    // Children references must be consistent with parent references.
+    for (const auto& node : subtree) {
+        std::unordered_set<BlockId> seen;
+        for (const auto child : node.children) {
+            if (known_ids.find(child) == known_ids.end()) {
+                return std::unexpected(noted::make_error(
+                    noted::ErrorCode::invalid_state,
+                    "Document::restore_subtree: node " + std::to_string(node.id) +
+                        " references child " + std::to_string(child) + " not in the subtree"));
+            }
+            if (!seen.insert(child).second) {
+                return std::unexpected(noted::make_error(
+                    noted::ErrorCode::invalid_state,
+                    "Document::restore_subtree: node " + std::to_string(node.id) + " lists child " +
+                        std::to_string(child) + " more than once"));
+            }
+        }
+    }
+
+    // ---- Mutation pass — every check above has passed. -------------------
+    const BlockId root_id = subtree.front().id;
+    BlockId max_seen = 0;
+    for (auto& node : subtree) {
+        max_seen = std::max(max_seen, node.id);
+        nodes_.emplace(node.id, std::move(node));
+    }
+    if (restoring_root) {
+        root_ = root_id;
+    } else {
+        // parent_it from the validation block is gone now; re-lookup
+        // is cheap and avoids holding a reference across the mutation.
+        nodes_.at(destination_parent)
+            .children.insert(nodes_.at(destination_parent).children.begin() +
+                                 static_cast<std::ptrdiff_t>(insert_index),
+                             root_id);
+    }
+    if (max_seen >= next_id_) {
+        next_id_ = max_seen + 1;
+    }
+    return {};
+}
+
 void Document::clear() noexcept {
     nodes_.clear();
     root_ = invalid_block_id;
