@@ -12,9 +12,10 @@ exception handling.
 ## Where we are
 
 **The app builds and runs.** A 1600×1000 window opens, the GPU is picked,
-a Slang-compiled fullscreen quad samples a procedural checkerboard
-texture, the frame loop ticks at ~3960 FPS on a GTX 1050 Ti with **zero
-Vulkan validation errors**.
+a `LayerCompositor` walks a 4-layer demo `LayerGraph` (normal / multiply
+/ linear_dodge blend modes), the stroke engine overlays pen-input ink
+on top, and a Dear ImGui demo window draws over everything. The frame
+loop ticks with **zero Vulkan validation errors**.
 
 ### Stack
 
@@ -124,10 +125,16 @@ tests/        Unit + integration + bench + fuzz scaffolds
    ImGui + Vulkan + GLFW backends with three-phase frame
    (`begin_frame` / `finalize_frame` / `render_into`). The
    split avoids a dangling ImGui frame when the renderer
-   bails on a swapchain-out-of-date. ImGui overlay renders on
-   top of the existing textured-quad demo; the full
-   replacement of main.cpp lands with feat/ui-compositor-wire.
-   6 unit tests cover create() rejection paths. See ADR 0027.
+   bails on a swapchain-out-of-date. 6 unit tests cover
+   create() rejection paths. See ADR 0027.
+✅ Compositor wire-up: `app/main.cpp` now drives the canvas
+   pass via `compositor::LayerCompositor::composite()` walking
+   a demo `domain::LayerGraph` with 4 layers (normal / multiply
+   / linear_dodge / normal) — exercises every FF blend mode the
+   compositor implements. Stroke ink still overlays the layer
+   composite; ImGui still overlays the swapchain composite.
+   Textured-quad demo + checkerboard / sample.png loading is
+   gone.
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
    their warnings can't leak. `/Ob[0-9]` collisions removed at the
@@ -182,9 +189,10 @@ cmake --build build --parallel
 .\build\bin\noted_app.exe
 ```
 
-Expected: window opens with magenta/grey checkerboard. Drop any
-`sample.png` next to `noted_app.exe` to replace the checkerboard with a
-real image.
+Expected: window opens with the 4-layer demo composite (dark
+navy base → muted red → blue glow → warm tint), a Dear ImGui
+demo window on top, and any pen / mouse drag deposits ink stamps
+that survive across frames.
 
 ### Read first (in order — ~30 min)
 
@@ -211,21 +219,18 @@ without a UI that lets us validate. ADR 0027 commits to Dear
 ImGui for v0.x with an explicit phase boundary for v1.0
 re-evaluation.
 
-1. **`feat/ui-compositor-wire`** — Replace the textured-quad demo
-   in main.cpp with `LayerCompositor::composite` driven by a
-   real `domain::Document` + LayerGraph. First time the user
-   sees the actual product pipeline. ~4 h.
-2. **`feat/ui-imgui-imassert-routing`** — Route `IM_ASSERT`
+1. **`feat/ui-imgui-imassert-routing`** — Route `IM_ASSERT`
    through `harness::validate` via `IMGUI_USER_CONFIG`. ADR
    0027 follow-up, deferred from the scaffold to keep dep
    surface tight. ~1 h.
-3. **`feat/ui-debug-overlay`** — Tracy-style overlay: FPS,
+2. **`feat/ui-debug-overlay`** — Tracy-style overlay: FPS,
    harness counters, fallback counts. Validates the
    `binding/` channel → view plumbing on a low-stakes target. ~2 h.
-4. **`feat/ui-document-shell`** — Window with menu bar, layer
+3. **`feat/ui-document-shell`** — Window with menu bar, layer
    panel, outline tree, undo/redo buttons. First end-to-end
-   product-shaped surface. ~8 h.
-5. **`feat/ui-theme-pass`** — Custom ImGuiStyle + CJK-capable
+   product-shaped surface backed by `domain::Document` +
+   `UndoStack`. ~8 h.
+4. **`feat/ui-theme-pass`** — Custom ImGuiStyle + CJK-capable
    font atlas + dark/light theme. Pushes back the "looks like
    debug tool" risk. ~4 h.
 
@@ -301,8 +306,8 @@ the product has actual content.
 | # | PR | Effort | Why |
 |---|---|---|---|
 | 17 | ~~`feat/ui-stack-decision`~~ ✅ **decided** | — | ADR 0027 picks **Dear ImGui** (docking branch, MIT, official Vulkan+GLFW backends) for v0.x with an explicit phase boundary for v1.0 reassessment. Pure-design PR — no code change beyond the `ui/ui.hpp` docstring refresh. |
-| 18a | ~~`feat/ui-imgui-scaffold`~~ ✅ **landed** | — | Dear ImGui docking v1.91.5 via FetchContent + official Vulkan/GLFW backends, ALL wrapped by `ui::ImGuiHost` with three-phase frame (`begin_frame` / `finalize_frame` / `render_into`). ImGui demo overlays the existing quad demo in main.cpp; the quad replacement lands with #18b. 6 unit tests cover create() rejection paths. See ADR 0027. |
-| 18b | `feat/ui-compositor-wire` | 3h | Call `LayerCompositor::composite` inside the ImGui frame loop. First real layer-graph render with blend modes + selection mask visible to the user. |
+| 18a | ~~`feat/ui-imgui-scaffold`~~ ✅ **landed** | — | Dear ImGui docking v1.91.5 via FetchContent + official Vulkan/GLFW backends, ALL wrapped by `ui::ImGuiHost` with three-phase frame (`begin_frame` / `finalize_frame` / `render_into`). 6 unit tests cover create() rejection paths. See ADR 0027. |
+| 18b | ~~`feat/ui-compositor-wire`~~ ✅ **landed** | — | `app/main.cpp` drives canvas pass via `LayerCompositor::composite()` walking a 4-layer demo LayerGraph (normal / multiply / linear_dodge). Textured-quad demo + checkerboard / sample.png loading retired. Stroke + ImGui still overlay correctly. |
 | 18c | `feat/ui-debug-overlay` | 2h | Tracy-style overlay: FPS, harness counters, fallback counts. Validates the `binding/` channel → view plumbing. |
 | 18d | `feat/ui-document-shell` | 8h | Window with menu bar, layer panel, outline tree (Document.preorder), undo/redo buttons backed by `UndoStack`. First end-to-end product-shaped surface. |
 | 18e | `feat/ui-theme-pass` | 4h | Custom `ImGuiStyle` + CJK-capable font atlas + dark/light theme. Defuses the "looks like debug tool" risk. |

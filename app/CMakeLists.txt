@@ -3,6 +3,7 @@ add_executable(noted_app src/main.cpp)
 target_link_libraries(noted_app PRIVATE
     noted::engine
     noted::domain
+    noted::compositor
     noted::platform
     noted::plugin
     noted::ui
