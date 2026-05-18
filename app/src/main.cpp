@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <GLFW/glfw3.h>
+#include <imgui.h>
 
 #include "noted/engine/engine.hpp"
 #include "noted/engine/error/error.hpp"
@@ -42,6 +43,7 @@
 #include "noted/platform/fs/fs.hpp"
 #include "noted/platform/image_io/image_io.hpp"
 #include "noted/platform/window/window.hpp"
+#include "noted/ui/imgui_host.hpp"
 
 #ifndef NOTED_SHADER_DIR
 #define NOTED_SHADER_DIR "shaders"
@@ -414,6 +416,25 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    // -------- Dear ImGui host. Renders an overlay inside the swapchain
+    // pass; the existing textured-quad demo still draws underneath
+    // until feat/ui-compositor-wire takes over the canvas pass (ADR
+    // 0027 follow-up #18b).
+    auto imgui_host = noted::ui::ImGuiHost::create({
+        .instance = &*instance,
+        .physical_device = &*physical,
+        .device = &*device,
+        .window = window->native_handle(),
+        .color_format = swapchain->summary().color_format,
+        .image_count = swapchain->summary().image_count,
+    });
+    if (!imgui_host) {
+        std::cerr << imgui_host.error().format() << '\n';
+        device->wait_idle();
+        (void) engine.shutdown();
+        return EXIT_FAILURE;
+    }
+
     auto recreate_swapchain = [&]() -> noted::Result<void> {
         device->wait_idle();
         const auto [w, h] = window->framebuffer_size();
@@ -472,8 +493,10 @@ int main() {
 
             stroke_h->record(cb, ext);
         };
+    auto* imgui_host_ptr = &*imgui_host;
     noted::gpu::Renderer::DrawCallback composite_draw =
-        [composite_pipeline_h, layout_h, canvas_set_h](VkCommandBuffer cb, VkExtent2D /*ext*/) {
+        [composite_pipeline_h, layout_h, canvas_set_h, imgui_host_ptr](VkCommandBuffer cb,
+                                                                       VkExtent2D /*ext*/) {
             vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, composite_pipeline_h);
             vkCmdBindDescriptorSets(cb,
                                     VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -484,6 +507,12 @@ int main() {
                                     /*dynamicOffsetCount=*/0,
                                     nullptr);
             vkCmdDraw(cb, /*vertexCount=*/3, /*instanceCount=*/1, 0, 0);
+            // ImGui draws on top of the composited canvas. The
+            // surrounding vkCmdBeginRendering (owned by the renderer)
+            // is the right context for ImGui_ImplVulkan_RenderDrawData.
+            // finalize_frame() was already called above the loop body;
+            // here we just record the cached draw data.
+            imgui_host_ptr->render_into(cb);
         };
 
     while (!window->should_close()) {
@@ -492,6 +521,17 @@ int main() {
             NOTED_PROFILE_ZONE_N("poll_events");
             window->poll_events();
         }
+
+        // ImGui frame setup happens BEFORE renderer.render_with_canvas
+        // so ImGui::* calls below land in the same frame the renderer
+        // will draw. finalize_frame is called unconditionally below
+        // so a swapchain-out-of-date error doesn't leave the frame
+        // dangling. render_into runs inside the composite_draw
+        // lambda — only when the pass actually executes.
+        imgui_host->begin_frame();
+        ImGui::ShowDemoWindow();  // v0.x scaffold proof-of-life; real
+                                  // panels land with feat/ui-document-shell.
+        imgui_host->finalize_frame();
 
         // Canvas pass clears to opaque black — the source texture will
         // overdraw the whole surface, but defending against pipeline-state

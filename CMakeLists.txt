@@ -125,6 +125,38 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(miniz)
 unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
 
+# Dear ImGui — v0.x UI stack per ADR 0027. Upstream ships no
+# CMakeLists.txt; FetchContent_MakeAvailable just populates the
+# source tree, then we declare our own static lib target compiling
+# the core TUs plus the Vulkan + GLFW backends.
+FetchContent_Declare(
+    imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG v1.91.5-docking
+    GIT_SHALLOW TRUE
+    SYSTEM
+)
+FetchContent_MakeAvailable(imgui)
+
+add_library(imgui STATIC
+    "${imgui_SOURCE_DIR}/imgui.cpp"
+    "${imgui_SOURCE_DIR}/imgui_demo.cpp"
+    "${imgui_SOURCE_DIR}/imgui_draw.cpp"
+    "${imgui_SOURCE_DIR}/imgui_tables.cpp"
+    "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp"
+    "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp"
+)
+target_include_directories(imgui SYSTEM PUBLIC
+    "${imgui_SOURCE_DIR}"
+    "${imgui_SOURCE_DIR}/backends"
+)
+target_link_libraries(imgui PUBLIC Vulkan::Vulkan glfw)
+# IM_ASSERT → harness::validate routing (ADR 0027) is deferred to a
+# follow-up PR (feat/ui-imgui-imassert-routing). For v0.x scaffold
+# the default assert() is sufficient and gets stripped in Release.
+add_library(imgui::imgui ALIAS imgui)
+
 if(NOTED_BUILD_TESTS)
     FetchContent_Declare(
         googletest

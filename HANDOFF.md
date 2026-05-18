@@ -120,6 +120,14 @@ tests/        Unit + integration + bench + fuzz scaffolds
    `document.json` in a standard zip via miniz. `assets/` +
    `graphs/` subdirs reserved for future asset + LayerGraph
    stores. 256 MB extraction cap. 13 unit tests. See ADR 0026.
+✅ Dear ImGui scaffold: `ui::ImGuiHost` RAII wrapper around
+   ImGui + Vulkan + GLFW backends with three-phase frame
+   (`begin_frame` / `finalize_frame` / `render_into`). The
+   split avoids a dangling ImGui frame when the renderer
+   bails on a swapchain-out-of-date. ImGui overlay renders on
+   top of the existing textured-quad demo; the full
+   replacement of main.cpp lands with feat/ui-compositor-wire.
+   6 unit tests cover create() rejection paths. See ADR 0027.
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
    their warnings can't leak. `/Ob[0-9]` collisions removed at the
@@ -203,14 +211,14 @@ without a UI that lets us validate. ADR 0027 commits to Dear
 ImGui for v0.x with an explicit phase boundary for v1.0
 re-evaluation.
 
-1. **`feat/ui-imgui-scaffold`** — FetchContent ImGui (docking branch)
-   + `imgui_impl_vulkan` + `imgui_impl_glfw`. Init/shutdown,
-   first ImGui frame inside the existing window, `main.cpp`
-   rewrite to drop the textured-quad demo. ~4-6 h.
-2. **`feat/ui-compositor-wire`** — `LayerCompositor::composite`
-   called inside the ImGui frame loop. First time the user sees
-   a real layer graph rendered with blend modes + selection
-   mask. ~3 h.
+1. **`feat/ui-compositor-wire`** — Replace the textured-quad demo
+   in main.cpp with `LayerCompositor::composite` driven by a
+   real `domain::Document` + LayerGraph. First time the user
+   sees the actual product pipeline. ~4 h.
+2. **`feat/ui-imgui-imassert-routing`** — Route `IM_ASSERT`
+   through `harness::validate` via `IMGUI_USER_CONFIG`. ADR
+   0027 follow-up, deferred from the scaffold to keep dep
+   surface tight. ~1 h.
 3. **`feat/ui-debug-overlay`** — Tracy-style overlay: FPS,
    harness counters, fallback counts. Validates the
    `binding/` channel → view plumbing on a low-stakes target. ~2 h.
@@ -293,7 +301,7 @@ the product has actual content.
 | # | PR | Effort | Why |
 |---|---|---|---|
 | 17 | ~~`feat/ui-stack-decision`~~ ✅ **decided** | — | ADR 0027 picks **Dear ImGui** (docking branch, MIT, official Vulkan+GLFW backends) for v0.x with an explicit phase boundary for v1.0 reassessment. Pure-design PR — no code change beyond the `ui/ui.hpp` docstring refresh. |
-| 18a | `feat/ui-imgui-scaffold` | 4-6h | FetchContent Dear ImGui + `imgui_impl_vulkan` + `imgui_impl_glfw`. Init/shutdown lifecycle, first ImGui frame inside the existing window, `main.cpp` drops the textured-quad demo. |
+| 18a | ~~`feat/ui-imgui-scaffold`~~ ✅ **landed** | — | Dear ImGui docking v1.91.5 via FetchContent + official Vulkan/GLFW backends, ALL wrapped by `ui::ImGuiHost` with three-phase frame (`begin_frame` / `finalize_frame` / `render_into`). ImGui demo overlays the existing quad demo in main.cpp; the quad replacement lands with #18b. 6 unit tests cover create() rejection paths. See ADR 0027. |
 | 18b | `feat/ui-compositor-wire` | 3h | Call `LayerCompositor::composite` inside the ImGui frame loop. First real layer-graph render with blend modes + selection mask visible to the user. |
 | 18c | `feat/ui-debug-overlay` | 2h | Tracy-style overlay: FPS, harness counters, fallback counts. Validates the `binding/` channel → view plumbing. |
 | 18d | `feat/ui-document-shell` | 8h | Window with menu bar, layer panel, outline tree (Document.preorder), undo/redo buttons backed by `UndoStack`. First end-to-end product-shaped surface. |
