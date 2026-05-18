@@ -51,6 +51,9 @@
 #include "noted/platform/fs/fs.hpp"
 #include "noted/platform/window/window.hpp"
 #include "noted/ui/imgui_host.hpp"
+#include "noted/ui/widget/layer_panel.hpp"
+#include "noted/ui/widget/menu_bar.hpp"
+#include "noted/ui/widget/status_bar.hpp"
 
 #ifndef NOTED_SHADER_DIR
 #define NOTED_SHADER_DIR "shaders"
@@ -494,8 +497,12 @@ int main() {
     const VkDescriptorSet canvas_set_h = canvas_set.handle();
     auto* const stroke_h = stroke_engine->get();
     auto* const compositor_ptr = &*layer_compositor;
-    const auto& scene_graph = scene->graph;
-    const auto& scene_store = scene->store;
+    // Mutable refs so the layer panel can toggle visibility / blend on
+    // the same graph the compositor walks each frame.
+    auto& scene_graph = scene->graph;
+    auto& scene_store = scene->store;
+
+    noted::ui::widget::MenuBarState menu_state{};
 
     // The canvas pass:
     //   1) `LayerCompositor` walks the demo LayerGraph in topological
@@ -545,8 +552,38 @@ int main() {
         // dangling. render_into runs inside the composite_draw
         // lambda — only when the pass actually executes.
         imgui_host->begin_frame();
-        ImGui::ShowDemoWindow();  // v0.x scaffold proof-of-life; real
-                                  // panels land with feat/ui-document-shell.
+
+        // -------- Product shell (v0.x):
+        //   - main menu bar with File / Edit / View / About
+        //   - layer panel observing + mutating the scene graph
+        //   - status bar pinned to the bottom of the viewport
+        //   - ImGui demo window behind a View toggle (off by default)
+        const auto menu = noted::ui::widget::menu_bar(menu_state);
+        if (menu.quit_requested) {
+            // Window has no `request_close()` wrapper yet — the GLFW
+            // pattern is documented enough that going through the
+            // native handle is acceptable for now. A small follow-up
+            // PR can add the wrapper if a second caller appears.
+            glfwSetWindowShouldClose(window->native_handle(), GLFW_TRUE);
+        }
+        noted::ui::widget::layer_panel(scene_graph, &menu_state.show_layer_panel);
+        if (menu_state.show_demo_window) {
+            ImGui::ShowDemoWindow(&menu_state.show_demo_window);
+        }
+        if (menu_state.show_about_window) {
+            ImGui::SetNextWindowSize({340.0F, 0.0F}, ImGuiCond_FirstUseEver);
+            if (ImGui::Begin(
+                    "About noted", &menu_state.show_about_window, ImGuiWindowFlags_NoCollapse)) {
+                ImGui::TextUnformatted("noted — note-taking + raster editor");
+                ImGui::TextUnformatted("v0.x development build");
+                ImGui::Spacing();
+                ImGui::TextDisabled("Engine: C++23 + Vulkan 1.4 + Slang");
+                ImGui::TextDisabled("UI: Dear ImGui (ADR 0027)");
+            }
+            ImGui::End();
+        }
+        noted::ui::widget::status_bar({.frame_index = engine.frame_index()});
+
         imgui_host->finalize_frame();
 
         // Canvas pass clears to opaque black — the source texture will
