@@ -90,6 +90,10 @@ tests/        Unit + integration + bench + fuzz scaffolds
 ✅ Selection domain: rect-list set algebra (add/intersect/subtract),
    canonical normalization, half-open `contains`. Domain-only;
    GPU rasterization PR is next. See ADR 0020.
+✅ Selection GPU mask: `gpu::SelectionMask` (R8_UNORM image with
+   layout tracking) + `compositor::SelectionRasterizer`
+   (CPU rasterize → buffer-to-image copy). Pure rasterize step
+   unit-tested without a GPU. See ADR 0021.
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
    their warnings can't leak. `/Ob[0-9]` collisions removed at the
@@ -163,13 +167,10 @@ real image.
 ### Pick up where I left off
 
 Sequential next steps from the roadmap:
-1. **P3 #9b** `feat/selection-mask-gpu` — `gpu::SelectionMask` (R8
-   image) + a Selection-to-mask rasterizer. Pattern matches
-   `CanvasRenderTarget` (ADR 0014). ~4 h.
-2. **P3 #9c** `feat/compositor-masking` — `LayerCompositor::composite()`
+1. **P3 #9c** `feat/compositor-masking` — `LayerCompositor::composite()`
    takes an optional `SelectionMask&`, layer shader multiplies output
    alpha by mask sample. ~3 h.
-3. **P4 #10** `feat/document-block-tree` — independent of #9b/9c.
+2. **P4 #10** `feat/document-block-tree` — independent of #9c.
    Pure domain logic, follows the same `domain::LayerGraph` pattern.
 
 If you're new to the codebase, P4 #10 is the gentlest landing —
@@ -211,7 +212,7 @@ The image-editor half. Can be developed in parallel with strokes.
 | 7 | ~~`feat/layer-domain-model`~~ ✅ **landed** | — | `domain::LayerGraph` — DAG of `LayerNode` (id/kind/blend/opacity/visible/inputs). 16-mode Photoshop blend enum + 5-kind layer enum, both wire-stable. Monotonic IDs, validate-then-mutate, cycle detection via iterative DFS. See ADR 0016. |
 | 8 | ~~`feat/layer-compositor`~~ ✅ **landed** | New `compositor/` module bridging `engine` + `domain`. `LayerPayloadStore` (SolidColor MVP) + `LayerCompositor` with 4 fixed-function blend modes (normal/screen/linear_dodge/multiply) and counted fallback to NORMAL for the other 12. See ADR 0019. |
 | 9a | ~~`feat/selection-domain`~~ ✅ **landed** | — | `domain::Selection` — canonical rect-list with union/intersect/subtract set ops, bounds, half-open `contains`. Same data/GPU split as LayerGraph→Compositor. See ADR 0020. |
-| 9b | `feat/selection-mask-gpu` | 4h | `gpu::SelectionMask` (R8_UNORM image, fill helpers) + Selection→mask rasterizer. Builds on 9a. |
+| 9b | ~~`feat/selection-mask-gpu`~~ ✅ **landed** | — | `gpu::SelectionMask` (R8_UNORM, layout tracking) + `compositor::SelectionRasterizer` (CPU rasterize → buffer-to-image copy). Pure step unit-tested without a GPU. See ADR 0021. |
 | 9c | `feat/compositor-masking` | 3h | `LayerCompositor::composite()` takes an optional `SelectionMask`; layer shader multiplies output alpha by mask sample. Builds on 9b. |
 
 ### 📄 Priority 4 — Document model + persistence
