@@ -151,10 +151,22 @@ target_include_directories(imgui SYSTEM PUBLIC
     "${imgui_SOURCE_DIR}"
     "${imgui_SOURCE_DIR}/backends"
 )
+# ui/include is on imgui's path so it (and every consumer) finds
+# noted/ui/imgui_user_config.hpp — the IM_ASSERT routing per ADR 0027.
+# Marked SYSTEM so the ui/ headers visible through it don't generate
+# warnings inside ImGui's own TUs.
+target_include_directories(imgui SYSTEM PUBLIC
+    "${CMAKE_SOURCE_DIR}/ui/include"
+)
+target_compile_definitions(imgui PUBLIC
+    "IMGUI_USER_CONFIG=\"noted/ui/imgui_user_config.hpp\""
+)
 target_link_libraries(imgui PUBLIC Vulkan::Vulkan glfw)
-# IM_ASSERT → harness::validate routing (ADR 0027) is deferred to a
-# follow-up PR (feat/ui-imgui-imassert-routing). For v0.x scaffold
-# the default assert() is sufficient and gets stripped in Release.
+# imgui's TUs reference noted::harness::validate via the user config's
+# forward decl; the symbol resolves at final link time against
+# noted::engine. Adding it to PUBLIC so any consumer linking imgui
+# also pulls in the engine that provides validate().
+target_link_libraries(imgui PUBLIC noted::engine)
 add_library(imgui::imgui ALIAS imgui)
 
 if(NOTED_BUILD_TESTS)
