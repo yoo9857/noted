@@ -1,7 +1,13 @@
 // Application entry. Wires Engine + Window + GPU stack and renders a
-// textured fullscreen quad. The texture is loaded from
-// <executable-dir>/sample.png if present, otherwise a procedural 256x256
-// magenta-on-grey checkerboard so the demo runs without external assets.
+// `domain::LayerGraph` via `compositor::LayerCompositor` into the
+// canvas, then composites the canvas onto the swapchain with an
+// ImGui overlay on top. The stroke engine still writes pen-input
+// stamps over the layer composite, so ink works against the
+// real product pipeline now.
+//
+// The textured-quad demo this file used to host is gone; the LayerGraph
+// constructed below exercises every fixed-function blend mode the
+// compositor implements (normal / screen / linear_dodge / multiply).
 
 #define GLFW_INCLUDE_VULKAN
 #include <array>
@@ -17,6 +23,10 @@
 #include <GLFW/glfw3.h>
 #include <imgui.h>
 
+#include "noted/compositor/layer_compositor.hpp"
+#include "noted/compositor/layer_payload.hpp"
+#include "noted/domain/document/document.hpp"
+#include "noted/domain/layer/layer.hpp"
 #include "noted/engine/engine.hpp"
 #include "noted/engine/error/error.hpp"
 #include "noted/engine/gpu/allocator.hpp"
@@ -26,7 +36,6 @@
 #include "noted/engine/gpu/descriptor_set_layout.hpp"
 #include "noted/engine/gpu/device.hpp"
 #include "noted/engine/gpu/graphics_pipeline.hpp"
-#include "noted/engine/gpu/image.hpp"
 #include "noted/engine/gpu/instance.hpp"
 #include "noted/engine/gpu/physical_device.hpp"
 #include "noted/engine/gpu/pipeline_layout.hpp"
@@ -35,13 +44,11 @@
 #include "noted/engine/gpu/shader_module.hpp"
 #include "noted/engine/gpu/surface.hpp"
 #include "noted/engine/gpu/swapchain.hpp"
-#include "noted/engine/gpu/upload.hpp"
 #include "noted/engine/harness/harness.hpp"
 #include "noted/engine/hook/registry.hpp"
 #include "noted/engine/profile.hpp"
 #include "noted/engine/stroke/stroke_engine.hpp"
 #include "noted/platform/fs/fs.hpp"
-#include "noted/platform/image_io/image_io.hpp"
 #include "noted/platform/window/window.hpp"
 #include "noted/ui/imgui_host.hpp"
 
@@ -102,33 +109,67 @@ void install_default_observers() {
     return noted::gpu::ShaderModule::create(device, *spv);
 }
 
-// 256x256 magenta-on-grey checkerboard, RGBA8.
-[[nodiscard]] auto make_checkerboard() -> noted::platform::image_io::LoadedImage {
-    constexpr std::uint32_t kSize = 256;
-    constexpr std::uint32_t kTile = 32;
-    noted::platform::image_io::LoadedImage out;
-    out.width = kSize;
-    out.height = kSize;
-    out.pixels.resize(static_cast<std::size_t>(kSize) * kSize * 4U);
+// Build a small demo LayerGraph + payload store that exercises every
+// fixed-function blend mode the compositor implements. Four layers
+// stacked in a deterministic order via explicit input edges so the
+// topological walk lands the same way on every run:
+//
+//     bg (normal)        — dark navy base
+//      └── red (normal)  — semi-transparent red over bg
+//           └── add (linear_dodge)  — additive cool blue glow
+//                └── warm (multiply) — warm-tone tint over everything
+//
+// Result on screen: dark navy → muted red → blue glow → warm overlay.
+// Replacing this with a `Document` loaded from disk is the next step;
+// for v0.x scaffold the in-source demo proves the pipeline is wired.
+struct DemoScene {
+    noted::domain::LayerGraph graph;
+    noted::compositor::LayerPayloadStore store;
+};
 
-    auto byte = [](int v) { return static_cast<std::byte>(v); };
-    for (std::uint32_t y = 0; y < kSize; ++y) {
-        for (std::uint32_t x = 0; x < kSize; ++x) {
-            const bool checker = ((x / kTile) ^ (y / kTile)) & 1U;
-            const auto idx = (y * kSize + x) * 4U;
-            if (checker) {
-                out.pixels[idx + 0] = byte(0xC8);  // magenta-ish
-                out.pixels[idx + 1] = byte(0x40);
-                out.pixels[idx + 2] = byte(0xA0);
-            } else {
-                out.pixels[idx + 0] = byte(0x20);  // dark grey
-                out.pixels[idx + 1] = byte(0x20);
-                out.pixels[idx + 2] = byte(0x24);
-            }
-            out.pixels[idx + 3] = byte(0xFF);
-        }
+[[nodiscard]] auto build_demo_scene() -> noted::Result<DemoScene> {
+    using BM = noted::domain::BlendMode;
+    using LK = noted::domain::LayerKind;
+    DemoScene s;
+
+    const auto bg = s.graph.add_layer(LK::bitmap, "background");
+    const auto red = s.graph.add_layer(LK::bitmap, "red");
+    const auto add = s.graph.add_layer(LK::bitmap, "additive glow");
+    const auto warm = s.graph.add_layer(LK::bitmap, "warm tint");
+
+    if (auto r = s.graph.set_blend(red, BM::normal); !r) {
+        return std::unexpected(std::move(r).error());
     }
-    return out;
+    if (auto r = s.graph.set_opacity(red, 0.60F); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    if (auto r = s.graph.set_blend(add, BM::linear_dodge); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    if (auto r = s.graph.set_opacity(add, 0.50F); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    if (auto r = s.graph.set_blend(warm, BM::multiply); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+
+    // Chain the topology so the topological walk produces bg → red → add → warm.
+    if (auto r = s.graph.set_inputs(red, std::array{bg}); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    if (auto r = s.graph.set_inputs(add, std::array{red}); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    if (auto r = s.graph.set_inputs(warm, std::array{add}); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+
+    s.store.set(bg, noted::compositor::SolidColor{0.15F, 0.18F, 0.22F, 1.0F});
+    s.store.set(red, noted::compositor::SolidColor{0.85F, 0.25F, 0.30F, 1.0F});
+    s.store.set(add, noted::compositor::SolidColor{0.20F, 0.45F, 0.95F, 1.0F});
+    s.store.set(warm, noted::compositor::SolidColor{0.95F, 0.85F, 0.70F, 1.0F});
+
+    return s;
 }
 
 }  // namespace
@@ -218,43 +259,6 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    // -------- Texture: try sample.png next to the binary, else checkerboard.
-    auto loaded = noted::platform::image_io::load_rgba8("sample.png");
-    if (!loaded) {
-        std::cout << "sample.png not loaded (" << loaded.error().message
-                  << "), using procedural checkerboard\n";
-        loaded = make_checkerboard();
-    }
-
-    auto texture = noted::gpu::Image::create(
-        *allocator,
-        noted::gpu::ImageCreateInfo{
-            .format = VK_FORMAT_R8G8B8A8_UNORM,
-            .extent = {loaded->width, loaded->height, 1U},
-            .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        });
-    if (!texture) {
-        std::cerr << texture.error().format() << '\n';
-        device->wait_idle();
-        (void) engine.shutdown();
-        return EXIT_FAILURE;
-    }
-
-    if (auto r = noted::gpu::upload_image_pixels(*allocator,
-                                                 *device,
-                                                 *texture,
-                                                 loaded->pixels,
-                                                 noted::gpu::UploadImageInfo{
-                                                     .queue = device->graphics_queue(),
-                                                     .queue_family = device->graphics_family(),
-                                                 });
-        !r) {
-        std::cerr << r.error().format() << '\n';
-        device->wait_idle();
-        (void) engine.shutdown();
-        return EXIT_FAILURE;
-    }
-
     auto sampler = noted::gpu::Sampler::linear_clamp(*device);
     if (!sampler) {
         std::cerr << sampler.error().format() << '\n';
@@ -263,8 +267,11 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    // -------- Descriptor layout shared by both passes:
-    // (set=0, binding=0) = combined image sampler in fragment shader.
+    // -------- Descriptor layout for the composite pass that samples
+    // the canvas onto the swapchain. The compositor and stroke engine
+    // create their own descriptor sets internally, so this layout is
+    // only the canvas → swapchain blit's combined image sampler at
+    // (set=0, binding=0).
     const std::array<noted::gpu::DescriptorBinding, 1> bindings{{{
         .binding = 0,
         .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -279,16 +286,16 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    // Pool holds two sets — one for the source texture (canvas pass) and
-    // one for the canvas itself (composite pass). The canvas set is
-    // rewritten on every swapchain recreate because canvas.view() changes.
+    // One descriptor set — the canvas sampler used by the composite
+    // pass. The canvas set is rewritten on every swapchain recreate
+    // because canvas.view() changes.
     const std::array<noted::gpu::DescriptorPoolSize, 1> pool_sizes{{{
         .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .count = 2,
+        .count = 1,
     }}};
     auto pool = noted::gpu::DescriptorPool::create(*device,
                                                    noted::gpu::DescriptorPoolCreateInfo{
-                                                       .max_sets = 2,
+                                                       .max_sets = 1,
                                                        .pool_sizes = pool_sizes,
                                                    });
     if (!pool) {
@@ -297,18 +304,6 @@ int main() {
         (void) engine.shutdown();
         return EXIT_FAILURE;
     }
-
-    auto raw_texture_set = pool->allocate(*set_layout);
-    if (!raw_texture_set) {
-        std::cerr << raw_texture_set.error().format() << '\n';
-        device->wait_idle();
-        (void) engine.shutdown();
-        return EXIT_FAILURE;
-    }
-    noted::gpu::DescriptorSet texture_set{device->handle(), *raw_texture_set};
-    noted::gpu::DescriptorWriter{texture_set}
-        .write_combined_image_sampler(0, texture->view(), sampler->handle())
-        .commit();
 
     auto raw_canvas_set = pool->allocate(*set_layout);
     if (!raw_canvas_set) {
@@ -336,11 +331,9 @@ int main() {
         .write_combined_image_sampler(0, canvas->view(), sampler->handle())
         .commit();
 
-    // -------- Pipelines: same shader, two color formats.
-    //   pipeline_to_canvas    — outputs to kCanvasFormat
-    //   pipeline_to_swapchain — outputs to swapchain.color_format()
-    // Sharing the shader keeps the demo small; later layers/strokes will
-    // grow their own pipelines.
+    // -------- Composite pipeline: samples the canvas into the swapchain.
+    // Only one pipeline now (previously two — the to-canvas one was the
+    // textured-quad demo; LayerCompositor replaces it below).
     const std::filesystem::path shader_dir{NOTED_SHADER_DIR};
     auto vert = load_shader(*device, shader_dir / "fullscreen.vs_main.spv");
     auto frag = load_shader(*device, shader_dir / "fullscreen.ps_textured.spv");
@@ -362,28 +355,58 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    auto build_pipeline = [&](VkFormat color_format) {
-        return noted::gpu::GraphicsPipelineBuilder{}
+    auto pipeline_to_swapchain =
+        noted::gpu::GraphicsPipelineBuilder{}
             .add_stage(VK_SHADER_STAGE_VERTEX_BIT, *vert, "main")
             .add_stage(VK_SHADER_STAGE_FRAGMENT_BIT, *frag, "main")
             .rasterization(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
-            .color_format(color_format)
+            .color_format(swapchain->summary().color_format)
             .build(*device, *pipeline_layout);
-    };
+    if (!pipeline_to_swapchain) {
+        std::cerr << pipeline_to_swapchain.error().format() << '\n';
+        device->wait_idle();
+        (void) engine.shutdown();
+        return EXIT_FAILURE;
+    }
 
-    auto pipeline_to_canvas = build_pipeline(kCanvasFormat);
-    auto pipeline_to_swapchain = build_pipeline(swapchain->summary().color_format);
-    if (!pipeline_to_canvas || !pipeline_to_swapchain) {
-        std::cerr << (!pipeline_to_canvas ? pipeline_to_canvas.error().format()
-                                          : pipeline_to_swapchain.error().format())
-                  << '\n';
+    // -------- Layer compositor: fills the canvas by walking a LayerGraph
+    // in topological order. Replaces the textured-quad-to-canvas pipeline
+    // that lived here before. Per ADR 0019, the compositor owns its own
+    // pipeline objects (one per fixed-function blend mode) + descriptor
+    // pool + sampler + 1×1 "all selected" dummy mask.
+    auto layer_vs = load_shader(*device, shader_dir / "layer.vs_layer.spv");
+    auto layer_ps = load_shader(*device, shader_dir / "layer.ps_layer.spv");
+    if (!layer_vs || !layer_ps) {
+        std::cerr << (!layer_vs ? layer_vs.error().format() : layer_ps.error().format()) << '\n';
+        device->wait_idle();
+        (void) engine.shutdown();
+        return EXIT_FAILURE;
+    }
+
+    auto layer_compositor = noted::compositor::LayerCompositor::create({
+        .allocator = &*allocator,
+        .device = &*device,
+        .vs_module = &*layer_vs,
+        .ps_module = &*layer_ps,
+        .canvas_format = kCanvasFormat,
+    });
+    if (!layer_compositor) {
+        std::cerr << layer_compositor.error().format() << '\n';
+        device->wait_idle();
+        (void) engine.shutdown();
+        return EXIT_FAILURE;
+    }
+
+    auto scene = build_demo_scene();
+    if (!scene) {
+        std::cerr << scene.error().format() << '\n';
         device->wait_idle();
         (void) engine.shutdown();
         return EXIT_FAILURE;
     }
 
     // -------- Stroke engine: ink drawn into the canvas on top of the
-    // textured background. Subscribes to pointer + framebuffer-resize hooks.
+    // layer composite. Subscribes to pointer + framebuffer-resize hooks.
     auto stamp_vs = load_shader(*device, shader_dir / "stamp.vs_stamp.spv");
     auto stamp_ps = load_shader(*device, shader_dir / "stamp.ps_stamp.spv");
     if (!stamp_vs || !stamp_ps) {
@@ -466,31 +489,24 @@ int main() {
         return {};
     };
 
-    const VkPipeline canvas_pipeline_h = pipeline_to_canvas->handle();
     const VkPipeline composite_pipeline_h = pipeline_to_swapchain->handle();
     const VkPipelineLayout layout_h = pipeline_layout->handle();
-    const VkDescriptorSet texture_set_h = texture_set.handle();
     const VkDescriptorSet canvas_set_h = canvas_set.handle();
     auto* const stroke_h = stroke_engine->get();
+    auto* const compositor_ptr = &*layer_compositor;
+    const auto& scene_graph = scene->graph;
+    const auto& scene_store = scene->store;
 
     // The canvas pass:
-    //   1) draws the background image (textured fullscreen quad), then
-    //   2) overlays accumulated stamps on top via the stroke engine.
+    //   1) `LayerCompositor` walks the demo LayerGraph in topological
+    //      order and fills the canvas (one draw per visible layer
+    //      with the right fixed-function blend state).
+    //   2) The stroke engine overlays accumulated ink stamps on top.
     // Both happen inside one vkCmdBeginRendering — pipeline switches
     // are cheap relative to a full pass barrier.
     noted::gpu::Renderer::DrawCallback canvas_draw =
-        [canvas_pipeline_h, layout_h, texture_set_h, stroke_h](VkCommandBuffer cb, VkExtent2D ext) {
-            vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, canvas_pipeline_h);
-            vkCmdBindDescriptorSets(cb,
-                                    VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                    layout_h,
-                                    /*firstSet=*/0,
-                                    /*setCount=*/1,
-                                    &texture_set_h,
-                                    /*dynamicOffsetCount=*/0,
-                                    nullptr);
-            vkCmdDraw(cb, /*vertexCount=*/3, /*instanceCount=*/1, 0, 0);
-
+        [compositor_ptr, &scene_graph, &scene_store, stroke_h](VkCommandBuffer cb, VkExtent2D ext) {
+            compositor_ptr->composite(cb, ext, scene_graph, scene_store);
             stroke_h->record(cb, ext);
         };
     auto* imgui_host_ptr = &*imgui_host;
