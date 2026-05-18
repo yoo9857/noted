@@ -282,10 +282,6 @@ The lint CI job blocks merges on drift; run
 Hardcoded paths for a specific machine. **Not committed** — recreate per
 machine or run the cmake commands directly.
 
-### Stale `class Pipeline;` forward decl
-Removed earlier; if it reappears, delete it. Forward declarations for
-types that have real headers are dead code.
-
 ### Vulkan SDK version drift
 ADR 0011 pins SDK ≥ 1.4.309. CI installs 1.4.309.0. The local dev guide
 in `docs/SETUP.md` says the same. If you bump it, bump all three places

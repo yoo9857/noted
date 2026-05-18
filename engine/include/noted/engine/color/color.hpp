@@ -11,6 +11,5 @@
 namespace noted::color {
 
 class Profile;
-class Pipeline;
 
 }  // namespace noted::color
