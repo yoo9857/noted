@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-18 · **main HEAD:** `2750fea` (clean, 0 open PRs)
+**Last updated:** 2026-05-18 (end of session) · **main HEAD:** `751c1e2` (clean, 0 open PRs)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -11,11 +11,26 @@ exception handling.
 
 ## Where we are
 
-**The app builds and runs.** A 1600×1000 window opens, the GPU is picked,
-a `LayerCompositor` walks a 4-layer demo `LayerGraph` (normal / multiply
+**The app builds, runs, and is interactive end-to-end** (within v0.x
+demo scope). A 1600×1000 window opens, the GPU is picked, a
+`LayerCompositor` walks a 4-layer demo `LayerGraph` (normal / multiply
 / linear_dodge blend modes), the stroke engine overlays pen-input ink
-on top, and a Dear ImGui demo window draws over everything. The frame
-loop ticks with **zero Vulkan validation errors**.
+on top, and a Dear ImGui-driven product shell renders on top with:
+
+  - **Menu bar** (File / Edit / View / About). File items disabled
+    pending file-picker dep; Edit's Undo / Redo back the live
+    `UndoStack`; Edit → Add Block emits `AddBlockCommand` for any
+    of the 7 BlockKinds.
+  - **Layer panel** — visibility checkbox per layer wires through
+    `LayerGraph::set_visible`; compositor reflects next frame.
+  - **Outline panel** — tree view of `Document.preorder` with
+    click-to-select.
+  - **Status bar** — frame index + FPS pinned to bottom.
+
+The frame loop ticks with **zero Vulkan validation errors**.
+ImGui's `IM_ASSERT` routes through `harness::validate` so internal
+invariant violations land in the same observability channel as
+every other engine assertion (ADR 0027).
 
 ### Stack
 
@@ -55,7 +70,7 @@ ui/           View layer (stubs — UI tech TBD)
 app/          Executable entry (src/main.cpp)
 shaders/      Slang sources (fullscreen, stamp, layer)
 cmake/        CMake modules (CompilerWarnings, Hardening, NotedModule, Shaders)
-docs/architecture/  23 ADRs documenting every cross-cutting decision
+docs/architecture/  27 ADRs documenting every cross-cutting decision
 tests/        Unit + integration + bench + fuzz scaffolds
 ```
 
@@ -219,11 +234,11 @@ that survive across frames.
    the entry point. Skim "What does NOT work yet" to know what's
    intentionally absent vs broken.
 2. [`docs/architecture/README.md`](docs/architecture/README.md) → the
-   23 ADRs in numeric order. **Read all of them** before changing
+   27 ADRs in numeric order. **Read all of them** before changing
    cross-cutting code. ADR 0001 (C++23 + Vulkan), 0003 (Result<T>),
    0004 (harness), 0011 (2026 baseline), 0016 (LayerGraph), 0019
-   (compositor), and 0023 (Document) are the most-referenced; the
-   rest fill in details.
+   (compositor), 0023 (Document), 0024 (Command/Undo), and 0027 (UI
+   stack) are the most-referenced; the rest fill in details.
 3. [`CONTRIBUTING.md`](CONTRIBUTING.md) — branch protocol, commit
    convention, code style.
 4. [`README.md`](README.md) — project overview.
