@@ -94,6 +94,11 @@ tests/        Unit + integration + bench + fuzz scaffolds
    layout tracking) + `compositor::SelectionRasterizer`
    (CPU rasterize → buffer-to-image copy). Pure rasterize step
    unit-tested without a GPU. See ADR 0021.
+✅ Compositor masking: `LayerCompositor::composite()` takes an
+   optional `SelectionMask*`; layer shader multiplies output by
+   mask sample. Internal 1×1 "all selected" dummy keeps shader
+   unconditional when caller passes nullptr. Lazy dummy init on
+   first composite() call. See ADR 0022.
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
    their warnings can't leak. `/Ob[0-9]` collisions removed at the
@@ -167,11 +172,10 @@ real image.
 ### Pick up where I left off
 
 Sequential next steps from the roadmap:
-1. **P3 #9c** `feat/compositor-masking` — `LayerCompositor::composite()`
-   takes an optional `SelectionMask&`, layer shader multiplies output
-   alpha by mask sample. ~3 h.
-2. **P4 #10** `feat/document-block-tree` — independent of #9c.
-   Pure domain logic, follows the same `domain::LayerGraph` pattern.
+1. **P4 #10** `feat/document-block-tree` — pure domain logic, follows
+   the same `domain::LayerGraph` pattern. ~6 h.
+2. **P4 #11** `feat/command-undo-redo` — Command pattern on top of the
+   block tree. ~4 h.
 
 If you're new to the codebase, P4 #10 is the gentlest landing —
 no GPU work, no shaders, well-bounded.
@@ -213,7 +217,7 @@ The image-editor half. Can be developed in parallel with strokes.
 | 8 | ~~`feat/layer-compositor`~~ ✅ **landed** | New `compositor/` module bridging `engine` + `domain`. `LayerPayloadStore` (SolidColor MVP) + `LayerCompositor` with 4 fixed-function blend modes (normal/screen/linear_dodge/multiply) and counted fallback to NORMAL for the other 12. See ADR 0019. |
 | 9a | ~~`feat/selection-domain`~~ ✅ **landed** | — | `domain::Selection` — canonical rect-list with union/intersect/subtract set ops, bounds, half-open `contains`. Same data/GPU split as LayerGraph→Compositor. See ADR 0020. |
 | 9b | ~~`feat/selection-mask-gpu`~~ ✅ **landed** | — | `gpu::SelectionMask` (R8_UNORM, layout tracking) + `compositor::SelectionRasterizer` (CPU rasterize → buffer-to-image copy). Pure step unit-tested without a GPU. See ADR 0021. |
-| 9c | `feat/compositor-masking` | 3h | `LayerCompositor::composite()` takes an optional `SelectionMask`; layer shader multiplies output alpha by mask sample. Builds on 9b. |
+| 9c | ~~`feat/compositor-masking`~~ ✅ **landed** | — | `LayerCompositor::composite()` takes an optional `SelectionMask*`; fragment multiplies output by mask sample. 1×1 dummy keeps shader unconditional. See ADR 0022. |
 
 ### 📄 Priority 4 — Document model + persistence
 

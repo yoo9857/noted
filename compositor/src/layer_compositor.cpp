@@ -1,8 +1,10 @@
 #include "noted/compositor/layer_compositor.hpp"
 
 #include <algorithm>
+#include <array>
 #include <utility>
 
+#include "noted/engine/gpu/allocator.hpp"
 #include "noted/engine/gpu/device.hpp"
 #include "noted/engine/gpu/shader_module.hpp"
 #include "noted/engine/profile.hpp"
@@ -162,27 +164,79 @@ auto LayerCompositor::slot_for(noted::domain::BlendMode mode,
 }
 
 auto LayerCompositor::create(const CreateInfo& info) -> Result<LayerCompositor> {
-    if (info.device == nullptr || info.vs_module == nullptr || info.ps_module == nullptr) {
-        return std::unexpected(
-            noted::make_error(noted::ErrorCode::invalid_argument,
-                              "LayerCompositor::create: device or shader module is null"));
+    if (info.allocator == nullptr || info.device == nullptr || info.vs_module == nullptr ||
+        info.ps_module == nullptr) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_argument,
+            "LayerCompositor::create: allocator, device, or shader module is null"));
     }
 
+    // ---- Descriptor set (set=0, binding=0): R8 mask sampler. ---------------
+    const std::array<noted::gpu::DescriptorBinding, 1> bindings{{{
+        .binding = 0,
+        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .count = 1,
+        .stages = VK_SHADER_STAGE_FRAGMENT_BIT,
+    }}};
+    auto set_layout = noted::gpu::DescriptorSetLayout::create(*info.device, bindings);
+    if (!set_layout) {
+        return std::unexpected(std::move(set_layout).error());
+    }
+
+    const std::array<noted::gpu::DescriptorPoolSize, 1> pool_sizes{{{
+        .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .count = 1,
+    }}};
+    auto pool = noted::gpu::DescriptorPool::create(*info.device,
+                                                   noted::gpu::DescriptorPoolCreateInfo{
+                                                       .max_sets = 1,
+                                                       .pool_sizes = pool_sizes,
+                                                   });
+    if (!pool) {
+        return std::unexpected(std::move(pool).error());
+    }
+    auto raw_set = pool->allocate(*set_layout);
+    if (!raw_set) {
+        return std::unexpected(std::move(raw_set).error());
+    }
+    noted::gpu::DescriptorSet mask_set{info.device->handle(), *raw_set};
+
+    auto sampler = noted::gpu::Sampler::linear_clamp(*info.device);
+    if (!sampler) {
+        return std::unexpected(std::move(sampler).error());
+    }
+
+    // 1×1 dummy mask. Initial clear (to white = "all selected") is
+    // deferred to the first composite() call so create() never needs a
+    // command buffer / queue.
+    auto dummy = noted::gpu::SelectionMask::create(*info.allocator,
+                                                   noted::gpu::SelectionMaskCreateInfo{
+                                                       .extent = VkExtent2D{1, 1},
+                                                   });
+    if (!dummy) {
+        return std::unexpected(std::move(dummy).error());
+    }
+
+    // ---- Pipeline layout (one descriptor set + push range). ----------------
     VkPushConstantRange push_range{};
     push_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     push_range.offset = 0;
     push_range.size = sizeof(LayerPush);
 
-    auto layout = noted::gpu::PipelineLayout::create(
-        *info.device,
-        std::span<const noted::gpu::DescriptorSetLayout* const>{},
-        std::span<const VkPushConstantRange>{&push_range, 1});
-    if (!layout) {
-        return std::unexpected(std::move(layout).error());
+    const std::array<const noted::gpu::DescriptorSetLayout*, 1> set_layouts{&*set_layout};
+    auto pipeline_layout = noted::gpu::PipelineLayout::create(
+        *info.device, set_layouts, std::span<const VkPushConstantRange>{&push_range, 1});
+    if (!pipeline_layout) {
+        return std::unexpected(std::move(pipeline_layout).error());
     }
 
     LayerCompositor c;
-    c.layout_.emplace(std::move(*layout));
+    c.set_layout_.emplace(std::move(*set_layout));
+    c.descriptor_pool_.emplace(std::move(*pool));
+    c.mask_set_ = mask_set;
+    c.sampler_.emplace(std::move(*sampler));
+    c.dummy_mask_.emplace(std::move(*dummy));
+    c.pipeline_layout_.emplace(std::move(*pipeline_layout));
 
     // One pipeline per Slot. All share the same shaders; only blend
     // state differs. Build in the slot order pinned by slot_for().
@@ -203,7 +257,7 @@ auto LayerCompositor::create(const CreateInfo& info) -> Result<LayerCompositor> 
                          VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
                      .color_blend_attachment(blend)
                      .color_format(info.canvas_format)
-                     .build(*info.device, *c.layout_);
+                     .build(*info.device, *c.pipeline_layout_);
         if (!p) {
             return std::unexpected(std::move(p).error());
         }
@@ -212,10 +266,46 @@ auto LayerCompositor::create(const CreateInfo& info) -> Result<LayerCompositor> 
     return c;
 }
 
+void LayerCompositor::ensure_dummy_initialized_(VkCommandBuffer cb) noexcept {
+    if (dummy_initialized_ || !dummy_mask_.has_value()) {
+        return;
+    }
+    // Transition dummy → TRANSFER_DST, clear to 1.0 (all selected),
+    // transition → SHADER_READ_ONLY. Single barrier-clear-barrier
+    // sequence on the caller's command buffer.
+    dummy_mask_->transition_to(cb,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                               VK_PIPELINE_STAGE_2_CLEAR_BIT);
+
+    VkClearColorValue clear{};
+    clear.float32[0] = 1.0F;
+    clear.float32[1] = 0.0F;
+    clear.float32[2] = 0.0F;
+    clear.float32[3] = 0.0F;
+
+    VkImageSubresourceRange range{};
+    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    range.baseMipLevel = 0;
+    range.levelCount = 1;
+    range.baseArrayLayer = 0;
+    range.layerCount = 1;
+
+    vkCmdClearColorImage(
+        cb, dummy_mask_->handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear, 1, &range);
+
+    dummy_mask_->transition_to(cb,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                               VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+    dummy_initialized_ = true;
+}
+
 void LayerCompositor::composite(VkCommandBuffer cb,
                                 VkExtent2D canvas_extent,
                                 const noted::domain::LayerGraph& graph,
-                                const LayerPayloadStore& store) noexcept {
+                                const LayerPayloadStore& store,
+                                const noted::gpu::SelectionMask* mask) noexcept {
     NOTED_PROFILE_ZONE_N("LayerCompositor::composite");
     (void) canvas_extent;  // shader writes full NDC; viewport is dynamic
 
@@ -228,12 +318,29 @@ void LayerCompositor::composite(VkCommandBuffer cb,
         ++fallback_count_;
         return;
     }
-    if (resolved->empty() || !layout_.has_value()) {
+    if (resolved->empty() || !pipeline_layout_.has_value() || !sampler_.has_value() ||
+        !dummy_mask_.has_value()) {
         return;
     }
 
-    const VkPipelineLayout layout_h = layout_->handle();
+    // First-call: prepare the dummy mask. Cheap (one clear) and only
+    // runs once over the compositor's lifetime.
+    ensure_dummy_initialized_(cb);
+
+    // Pick the mask to bind. The caller's mask must already be in
+    // SHADER_READ_ONLY_OPTIMAL — SelectionRasterizer::record() handles
+    // that. The dummy was just transitioned by ensure_dummy_initialized_.
+    const VkImageView mask_view = (mask != nullptr) ? mask->view() : dummy_mask_->view();
+    noted::gpu::DescriptorWriter{mask_set_}
+        .write_combined_image_sampler(0, mask_view, sampler_->handle())
+        .commit();
+
+    const VkPipelineLayout layout_h = pipeline_layout_->handle();
     constexpr VkShaderStageFlags kStages = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    const VkDescriptorSet set_h = mask_set_.handle();
+    vkCmdBindDescriptorSets(
+        cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_h, 0, 1, &set_h, 0, nullptr);
 
     VkPipeline last_pipeline = VK_NULL_HANDLE;
     for (const auto& e : *resolved) {
