@@ -125,6 +125,22 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(miniz)
 unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
 
+# nativefiledialog-extended — modern fork of mlabbe/nativefiledialog
+# with IFileDialog on Win32, GTK3/portal on Linux, NSSavePanel on macOS.
+# Zlib license. Used by platform::io::file_picker to back File →
+# New / Open / Save in the v0.x product shell. CMake target name:
+# `nfd`. SYSTEM so its headers don't generate warnings.
+set(NFD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(NFD_INSTALL     OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    nfd
+    GIT_REPOSITORY https://github.com/btzy/nativefiledialog-extended.git
+    GIT_TAG v1.2.1
+    GIT_SHALLOW TRUE
+    SYSTEM
+)
+FetchContent_MakeAvailable(nfd)
+
 # Dear ImGui — v0.x UI stack per ADR 0027. Upstream ships no
 # CMakeLists.txt; FetchContent_MakeAvailable just populates the
 # source tree, then we declare our own static lib target compiling

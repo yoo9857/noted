@@ -16,8 +16,10 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <GLFW/glfw3.h>
@@ -51,6 +53,8 @@
 #include "noted/engine/profile.hpp"
 #include "noted/engine/stroke/stroke_engine.hpp"
 #include "noted/platform/fs/fs.hpp"
+#include "noted/platform/io/file_picker.hpp"
+#include "noted/platform/io/noted_file.hpp"
 #include "noted/platform/window/window.hpp"
 #include "noted/ui/imgui_host.hpp"
 #include "noted/ui/widget/layer_panel.hpp"
@@ -566,6 +570,35 @@ int main() {
     noted::domain::UndoStack undo_stack{};
     noted::domain::BlockId selected_block = noted::domain::invalid_block_id;
 
+    // File menu state: the on-disk backing path (nullopt for an
+    // untitled document) and the undo-stack depth captured at the
+    // last successful save. Comparing the current depth against the
+    // saved one drives the dirty marker in the title bar — close
+    // enough for v0.x; a true dirty bit would diff Document state.
+    std::optional<std::filesystem::path> current_path{};
+    std::size_t saved_undo_size = 0;
+
+    auto window_title_for = [&]() -> std::string {
+        const std::string name =
+            current_path.has_value() ? current_path->filename().string() : std::string{"Untitled"};
+        const bool dirty = undo_stack.undo_size() != saved_undo_size;
+        return std::string{"noted — "} + name + (dirty ? " *" : "");
+    };
+    glfwSetWindowTitle(window->native_handle(), window_title_for().c_str());
+
+    // Save the document to `path`, refreshing the dirty baseline + title
+    // on success. Centralized so Save and Save As share the post-write
+    // bookkeeping.
+    auto write_document_to = [&](const std::filesystem::path& path) -> noted::Result<void> {
+        if (auto r = noted::platform::io::save_noted_file(path, document); !r) {
+            return std::unexpected(std::move(r).error());
+        }
+        current_path = path;
+        saved_undo_size = undo_stack.undo_size();
+        glfwSetWindowTitle(window->native_handle(), window_title_for().c_str());
+        return {};
+    };
+
     noted::ui::widget::MenuBarState menu_state{};
 
     // The canvas pass:
@@ -625,6 +658,7 @@ int main() {
         const noted::ui::widget::MenuBarStatus menu_status{
             .can_undo = undo_stack.can_undo(),
             .can_redo = undo_stack.can_redo(),
+            .has_document_path = current_path.has_value(),
         };
         const auto menu = noted::ui::widget::menu_bar(menu_state, menu_status);
         if (menu.quit_requested) {
@@ -634,14 +668,71 @@ int main() {
             // PR can add the wrapper if a second caller appears.
             glfwSetWindowShouldClose(window->native_handle(), GLFW_TRUE);
         }
+        if (menu.file_new_requested) {
+            document = noted::domain::Document{};
+            undo_stack.clear();
+            selected_block = noted::domain::invalid_block_id;
+            current_path.reset();
+            saved_undo_size = undo_stack.undo_size();
+            glfwSetWindowTitle(window->native_handle(), window_title_for().c_str());
+        }
+        if (menu.file_open_requested) {
+            auto picked = noted::platform::io::pick_noted_open();
+            if (!picked) {
+                std::cerr << picked.error().format() << '\n';
+            } else if (picked->has_value()) {
+                auto loaded = noted::platform::io::load_noted_file(**picked);
+                if (!loaded) {
+                    std::cerr << loaded.error().format() << '\n';
+                } else {
+                    document = std::move(*loaded);
+                    undo_stack.clear();
+                    selected_block = noted::domain::invalid_block_id;
+                    current_path = **picked;
+                    saved_undo_size = undo_stack.undo_size();
+                    glfwSetWindowTitle(window->native_handle(), window_title_for().c_str());
+                }
+            }
+        }
+        if (menu.file_save_requested) {
+            if (current_path.has_value()) {
+                if (auto r = write_document_to(*current_path); !r) {
+                    std::cerr << r.error().format() << '\n';
+                }
+            }
+        }
+        if (menu.file_save_as_requested) {
+            const std::string default_name =
+                current_path.has_value() ? current_path->filename().string() : "untitled.noted";
+            auto picked = noted::platform::io::pick_noted_save(default_name);
+            if (!picked) {
+                std::cerr << picked.error().format() << '\n';
+            } else if (picked->has_value()) {
+                // NFD does not always append the filter extension on
+                // every platform (Windows does, GTK historically does
+                // not). Force `.noted` so the file round-trips back
+                // through the same filter regardless of OS.
+                std::filesystem::path target = **picked;
+                if (target.extension() != ".noted") {
+                    target += ".noted";
+                }
+                if (auto r = write_document_to(target); !r) {
+                    std::cerr << r.error().format() << '\n';
+                }
+            }
+        }
         if (menu.undo_requested) {
             if (auto r = undo_stack.undo(document); !r) {
                 std::cerr << r.error().format() << '\n';
+            } else {
+                glfwSetWindowTitle(window->native_handle(), window_title_for().c_str());
             }
         }
         if (menu.redo_requested) {
             if (auto r = undo_stack.redo(document); !r) {
                 std::cerr << r.error().format() << '\n';
+            } else {
+                glfwSetWindowTitle(window->native_handle(), window_title_for().c_str());
             }
         }
         if (menu.add_block_requested) {
@@ -666,6 +757,7 @@ int main() {
                 std::cerr << r.error().format() << '\n';
             } else {
                 selected_block = cmd_ptr->assigned_id();
+                glfwSetWindowTitle(window->native_handle(), window_title_for().c_str());
             }
         }
 

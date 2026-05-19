@@ -12,8 +12,9 @@ noted_add_module(
         src/ipc/ipc.cpp
         src/image_io/image_io.cpp
         src/io/noted_file.cpp
+        src/io/file_picker.cpp
     PUBLIC_DEPS   noted::engine noted::domain glfw
-    PRIVATE_DEPS  stb_image miniz
+    PRIVATE_DEPS  stb_image miniz nfd
 )
 
 # Comctl32 ships SetWindowSubclass / DefSubclassProc — required by the

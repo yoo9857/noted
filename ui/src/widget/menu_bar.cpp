@@ -28,9 +28,25 @@ auto menu_bar(MenuBarState& state, const MenuBarStatus& status) -> MenuBarResult
     }
 
     if (ImGui::BeginMenu("File")) {
-        ImGui::MenuItem("New", "Ctrl+N", false, /*enabled=*/false);
-        ImGui::MenuItem("Open", "Ctrl+O", false, /*enabled=*/false);
-        ImGui::MenuItem("Save", "Ctrl+S", false, /*enabled=*/false);
+        if (ImGui::MenuItem("New", "Ctrl+N")) {
+            result.file_new_requested = true;
+        }
+        if (ImGui::MenuItem("Open...", "Ctrl+O")) {
+            result.file_open_requested = true;
+        }
+        // Save is always enabled; when the doc has no backing path
+        // the host transparently falls through to Save As. This
+        // matches the platform convention (Word, Photoshop, VS Code).
+        if (ImGui::MenuItem("Save", "Ctrl+S")) {
+            if (status.has_document_path) {
+                result.file_save_requested = true;
+            } else {
+                result.file_save_as_requested = true;
+            }
+        }
+        if (ImGui::MenuItem("Save As...", "Ctrl+Shift+S")) {
+            result.file_save_as_requested = true;
+        }
         ImGui::Separator();
         if (ImGui::MenuItem("Quit", "Ctrl+Q")) {
             result.quit_requested = true;

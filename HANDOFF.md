@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-18 (end of session) · **main HEAD:** `751c1e2` (clean, 0 open PRs)
+**Last updated:** 2026-05-19 · **main HEAD:** `036fba0` (clean, 0 open PRs at last sync)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -17,17 +17,22 @@ demo scope). A 1600×1000 window opens, the GPU is picked, a
 / linear_dodge blend modes), the stroke engine overlays pen-input ink
 on top, and a Dear ImGui-driven product shell renders on top with:
 
-  - **Menu bar** (File / Edit / View / About). File items disabled
-    pending file-picker dep; Edit's Undo / Redo back the live
-    `UndoStack`; Edit → Add Block emits `AddBlockCommand` for any
-    of the 7 BlockKinds.
+  - **Menu bar** (File / Edit / View / About). File's New / Open /
+    Save / Save As back the `.noted` JSON+zip format via a native
+    OS dialog (nativefiledialog-extended). Edit's Undo / Redo back
+    the live `UndoStack`; Edit → Add Block emits `AddBlockCommand`
+    for any of the 7 BlockKinds. The title bar shows the filename
+    + `*` dirty marker.
   - **Layer panel** — visibility checkbox per layer wires through
     `LayerGraph::set_visible`; compositor reflects next frame.
   - **Outline panel** — tree view of `Document.preorder` with
     click-to-select.
   - **Status bar** — frame index + FPS pinned to bottom.
 
-The frame loop ticks with **zero Vulkan validation errors**.
+The frame loop ticks at ~0.5 ms CPU on a GTX 1050 Ti (240-frame
+sample). See **Known debt and gotchas** below for the pre-existing
+validation warnings around `LayerCompositor::ensure_dummy_initialized_`
+and per-frame descriptor-set rewrites.
 ImGui's `IM_ASSERT` routes through `harness::validate` so internal
 invariant violations land in the same observability channel as
 every other engine assertion (ADR 0027).
@@ -169,6 +174,13 @@ tests/        Unit + integration + bench + fuzz scaffolds
    `AddBlockCommand` under the selected block (group),
    document root, or invalid_block_id (first block becomes
    the root). Selection follows the newly-added block.
+✅ File menu wired: `platform::io::pick_noted_open` /
+   `pick_noted_save` wrap nativefiledialog-extended (zlib, IFileDialog
+   on Win32). main.cpp tracks `current_path` + `saved_undo_size`;
+   Save falls through to Save As when the document has no on-disk
+   backing path. Title bar shows `noted — <filename> [*]`. Save As
+   force-appends `.noted` so the file always round-trips through the
+   same filter. See P4 #18d-file.
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
    their warnings can't leak. `/Ob[0-9]` collisions removed at the
@@ -177,6 +189,10 @@ tests/        Unit + integration + bench + fuzz scaffolds
 
 ### What does NOT work yet (by design — not bugs)
 
+- No keyboard shortcuts. Ctrl+N/O/S/Z/Y are displayed as menu hints
+  but the host doesn't bind them yet — same gap as Edit's Ctrl+Z/Y.
+- No "save before close" confirmation. Quitting with a dirty document
+  silently discards changes.
 - No asset / LayerGraph contents in the archive yet — the zip
   container reserves `assets/` and `graphs/` subdirs but v1
   writers only emit `document.json`.
@@ -253,13 +269,17 @@ without a UI that lets us validate. ADR 0027 commits to Dear
 ImGui for v0.x with an explicit phase boundary for v1.0
 re-evaluation.
 
-1. **`feat/ui-file-menu-wire`** — File → New / Open / Save back
-   the `.noted` JSON+zip format. Needs a native file picker
-   dep (nativefiledialog-extended or similar). ~3 h.
-2. **`feat/ui-debug-overlay`** — Tracy-style overlay: FPS,
+1. ~~**`feat/ui-file-menu-wire`**~~ ✅ landed (PR #45).
+2. **`feat/ui-keyboard-shortcuts`** — bind Ctrl+N/O/S/Shift+S/Z/Y
+   in main.cpp via `ImGui::IsKeyChordPressed` so the menu hints
+   stop lying. ~1 h.
+3. **`feat/ui-dirty-confirm`** — intercept window-close on a
+   dirty document and prompt Save / Discard / Cancel via an
+   ImGui modal. Same plumbing covers File → New on dirty. ~2 h.
+4. **`feat/ui-debug-overlay`** — Tracy-style overlay: FPS,
    harness counters, fallback counts. Validates the
    `binding/` channel → view plumbing. ~2 h.
-3. **`feat/ui-theme-pass`** — Custom ImGuiStyle + CJK-capable
+5. **`feat/ui-theme-pass`** — Custom ImGuiStyle + CJK-capable
    font atlas + dark/light theme. Pushes back the "looks like
    debug tool" risk. ~4 h.
 
@@ -340,13 +360,31 @@ the product has actual content.
 | 18c | ~~`feat/ui-imgui-imassert-routing`~~ ✅ **landed** | — | `IM_ASSERT` routes through `noted::harness::validate` via `IMGUI_USER_CONFIG` + a forward-decl in `ui/include/noted/ui/imgui_user_config.hpp`. ADR 0027 follow-up closed. |
 | 18d | ~~`feat/ui-document-shell`~~ ✅ **landed** (shell first cut) | — | Menu bar (File / Edit / View / About) + layer panel (visibility toggle wires through `set_visible()`) + status bar (frame index + FPS). `ShowDemoWindow` retired to View menu toggle. |
 | 18d-undo | ~~`feat/ui-document-undo-outline`~~ ✅ **landed** | — | `Document` + `UndoStack` live in main.cpp. Outline panel renders `Document.preorder()` with click-to-select. Edit menu's Undo/Redo back the UndoStack live; Edit → Add Block submenu emits `AddBlockCommand` with proper parent selection (selected group → root → invalid_block_id). |
-| 18c | `feat/ui-debug-overlay` | 2h | Tracy-style overlay: FPS, harness counters, fallback counts. Validates the `binding/` channel → view plumbing. |
-| 18d | `feat/ui-document-shell` | 8h | Window with menu bar, layer panel, outline tree (Document.preorder), undo/redo buttons backed by `UndoStack`. First end-to-end product-shaped surface. |
-| 18e | `feat/ui-theme-pass` | 4h | Custom `ImGuiStyle` + CJK-capable font atlas + dark/light theme. Defuses the "looks like debug tool" risk. |
+| 18d-file | ~~`feat/ui-file-menu-wire`~~ ✅ **landed** | — | File → New / Open / Save / Save As. nativefiledialog-extended via FetchContent. `platform::io::pick_noted_open` / `pick_noted_save` returns `Result<optional<path>>` (nullopt = user cancel). main.cpp tracks `current_path` + `saved_undo_size` for the title-bar dirty marker. Save force-falls-through to Save As when there's no backing path; Save As force-appends `.noted` if missing. |
+| 18e | `feat/ui-keyboard-shortcuts` | 1h | Bind Ctrl+N/O/S/Shift+S/Z/Y via `ImGui::IsKeyChordPressed`. The menu hints already display them. |
+| 18f | `feat/ui-dirty-confirm` | 2h | Modal "Save / Discard / Cancel" on window close + File → New when the document is dirty. |
+| 18g | `feat/ui-debug-overlay` | 2h | Tracy-style overlay: FPS, harness counters, fallback counts. Validates the `binding/` channel → view plumbing. |
+| 18h | `feat/ui-theme-pass` | 4h | Custom `ImGuiStyle` + CJK-capable font atlas + dark/light theme. Defuses the "looks like debug tool" risk. |
 
 ---
 
 ## Known debt and gotchas
+
+### Pre-existing Vulkan validation noise (P3 #9b/#9c follow-up)
+At runtime the validation layer reports:
+1. `vkCmdClearColorImage` + `vkCmdPipelineBarrier2` called inside
+   a `vkCmdBeginRendering` instance — `LayerCompositor::ensure_dummy_initialized_`
+   does its one-time clear-to-white on the canvas command buffer
+   which is already inside the canvas render pass.
+2. `vkUpdateDescriptorSets` on a descriptor set still in flight on
+   a prior frame's command buffer — `LayerCompositor::composite()`
+   rewrites the mask binding every frame without
+   `VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT`.
+Both are real spec violations, neither is introduced by recent UI
+PRs. Fix path: hoist dummy init out of the render pass (probably
+into a dedicated "prepare()" call recorded before the canvas pass
+begins), and either double-buffer the mask descriptor set or
+enable update-after-bind.
 
 ### Format drift — resolved
 clang-format-18 is mandatory on every PR. Local setup:

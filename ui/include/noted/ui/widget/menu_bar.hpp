@@ -27,11 +27,18 @@ struct MenuBarState {
     bool show_about_window{false};
 };
 
-// Per-frame inputs for the menu bar's Edit menu — wires the live
-// Undo/Redo state of `UndoStack` into the menu item's enabled flag.
+// Per-frame inputs for the menu bar. Wires the live state of the
+// surrounding model (UndoStack, current document path) into menu
+// items' enabled / label state.
 struct MenuBarStatus {
     bool can_undo{false};
     bool can_redo{false};
+    // True when the current document has an on-disk backing path.
+    // Controls whether Save writes in-place (true) or falls through
+    // to Save As (false). The label always reads "Save" — the
+    // fall-through is invisible to the user, matching the platform
+    // convention (Word, Photoshop, VS Code).
+    bool has_document_path{false};
 };
 
 // One-frame outputs from menu_bar(). The frame loop checks these
@@ -40,6 +47,12 @@ struct MenuBarResult {
     bool quit_requested{false};
     bool undo_requested{false};
     bool redo_requested{false};
+    // File menu — at most one of these can be set per frame because
+    // ImGui menus close on selection.
+    bool file_new_requested{false};
+    bool file_open_requested{false};
+    bool file_save_requested{false};
+    bool file_save_as_requested{false};
     // When set, the user picked Edit → Add Block → <kind>. The host
     // creates an `AddBlockCommand` with this kind and pushes it onto
     // the UndoStack.
