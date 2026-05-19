@@ -30,6 +30,10 @@ void status_bar(const StatusBarInfo& info) {
         ImGui::Text("frame %llu", static_cast<unsigned long long>(info.frame_index));
         ImGui::SameLine(0.0F, 24.0F);
         ImGui::Text("%.1f FPS  (%.2f ms)", io.Framerate, 1000.0F / io.Framerate);
+        if (info.zoom_pct > 0.0F) {
+            ImGui::SameLine(0.0F, 24.0F);
+            ImGui::Text("%d%%", static_cast<int>(info.zoom_pct + 0.5F));
+        }
         ImGui::SameLine(0.0F, 24.0F);
         ImGui::TextDisabled("noted v0.x");
     }

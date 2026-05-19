@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -108,6 +109,15 @@ auto App::create() -> Result<std::unique_ptr<App>> {
     // Apply the default theme exactly once before the first frame
     // so the very first paint is already styled.
     noted::ui::theme::apply(app->applied_theme_);
+
+    // Seed the camera's canvas + window extents from the swapchain
+    // before the first frame. The `framebuffer_resized` hook only
+    // fires on subsequent resizes — without this the very first
+    // render uses Camera's 1×1 defaults and the canvas collapses
+    // to a single pixel.
+    const auto extent = app->swapchain_->summary().extent;
+    app->camera_.set_canvas_extent(extent.width, extent.height);
+    app->camera_.set_window_extent(extent.width, extent.height);
 
     app->install_frame_hook();
     return app;
@@ -264,8 +274,17 @@ auto App::init_canvas_pipeline() -> noted::Result<void> {
     }
     fullscreen_ps_.emplace(std::move(*frag));
 
+    // Composite pass now takes a 16-byte vertex-stage push constant
+    // carrying the Camera's NDC-space scale + translation. See
+    // `shaders/fullscreen.slang` for the matching `CompositePush`.
+    VkPushConstantRange composite_push{};
+    composite_push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    composite_push.offset = 0;
+    composite_push.size = sizeof(float) * 4;  // float2 scale + float2 translation
+
     const std::array<const noted::gpu::DescriptorSetLayout*, 1> layouts{&*composite_set_layout_};
-    auto pipeline_layout = noted::gpu::PipelineLayout::create(*device_, layouts);
+    auto pipeline_layout = noted::gpu::PipelineLayout::create(
+        *device_, layouts, std::span<const VkPushConstantRange>{&composite_push, 1});
     if (!pipeline_layout) {
         return std::unexpected(std::move(pipeline_layout).error());
     }
@@ -389,6 +408,65 @@ void App::install_frame_hook() {
     (void) noted::hook::registry().on_frame_end.subscribe([this](const noted::hook::FrameEnd& f) {
         debug_overlay_state_.push_sample(static_cast<float>(f.cpu_ms));
     });
+
+    // Pointer position tracker. The scroll handler reads the latest
+    // cursor pos so zoom anchors under the cursor (Goodnotes /
+    // Procreate behaviour). Also drives middle-drag panning when
+    // `panning_` is true.
+    (void) noted::hook::registry().on_pointer_moved.subscribe(
+        [this](const noted::hook::PointerMoved& e) {
+            if (panning_) {
+                const double dx = e.x - pan_last_x_;
+                const double dy = e.y - pan_last_y_;
+                camera_.translate_by(dx, dy);
+            }
+            cursor_x_ = e.x;
+            cursor_y_ = e.y;
+            pan_last_x_ = e.x;
+            pan_last_y_ = e.y;
+        });
+
+    // Middle-button press / release toggles pan mode. Left button is
+    // reserved for the stroke engine; right button is open for a
+    // future context menu.
+    (void) noted::hook::registry().on_pointer_pressed.subscribe(
+        [this](const noted::hook::PointerPressed& e) {
+            if (e.button != noted::hook::PointerButton::middle) {
+                return;
+            }
+            panning_ = true;
+            pan_last_x_ = e.x;
+            pan_last_y_ = e.y;
+        });
+    (void) noted::hook::registry().on_pointer_released.subscribe(
+        [this](const noted::hook::PointerReleased& e) {
+            if (e.button != noted::hook::PointerButton::middle) {
+                return;
+            }
+            panning_ = false;
+        });
+
+    // Scroll → zoom around the cursor. dy > 0 (wheel up) zooms in;
+    // dy < 0 (wheel down) zooms out. Multiplicative step `1.1 ^ dy`
+    // mirrors the perceptually-uniform feel of Photoshop / Figma.
+    // The Camera's internal floor / ceiling absorbs any runaway dy.
+    (void) noted::hook::registry().on_scrolled.subscribe([this](const noted::hook::Scrolled& e) {
+        constexpr double kStep = 1.1;
+        const double factor = std::pow(kStep, e.dy);
+        camera_.zoom_around(cursor_x_, cursor_y_, factor);
+        // Pin to a useful user-facing range — too far out and the
+        // canvas is a dot; too far in and pixels become house-sized.
+        camera_.clamp_scale(0.1, 32.0);
+    });
+
+    // Framebuffer resize → keep camera's window extent in sync. The
+    // canvas extent matches the swapchain extent today; if a future
+    // PR makes them independent, this assignment splits.
+    (void) noted::hook::registry().on_framebuffer_resized.subscribe(
+        [this](const noted::hook::FramebufferResized& r) {
+            camera_.set_window_extent(r.width, r.height);
+            camera_.set_canvas_extent(r.width, r.height);
+        });
 }
 
 // ---- Frame loop -----------------------------------------------------------
@@ -435,6 +513,14 @@ void App::on_frame() {
         NOTED_PROFILE_ZONE_N("poll_events");
         window_->poll_events();
     }
+
+    // Sync the stroke engine's input-side view transform with the
+    // current camera. Cheap (three doubles) so we just do it every
+    // frame rather than wiring a change callback through the
+    // camera. The stroke engine applies the inverse on each pointer
+    // event so stamps land at canvas pixels, not screen pixels.
+    stroke_engine_->set_view_transform(
+        camera_.translation_x(), camera_.translation_y(), camera_.scale());
 
     // ImGui frame setup happens BEFORE renderer.render_with_canvas
     // so ImGui::* calls below land in the same frame the renderer
@@ -659,6 +745,9 @@ void App::draw_widgets() {
         noted::ui::widget::DebugOverlayInputs{
             .frame_index = engine_.frame_index(),
             .fallback_count = layer_compositor_->fallback_count(),
+            .camera_scale = camera_.scale(),
+            .camera_translation_x = camera_.translation_x(),
+            .camera_translation_y = camera_.translation_y(),
         },
         debug_overlay_state_,
         &menu_state_.show_debug_overlay);
@@ -679,7 +768,10 @@ void App::draw_widgets() {
         }
         ImGui::End();
     }
-    noted::ui::widget::status_bar({.frame_index = engine_.frame_index()});
+    noted::ui::widget::status_bar({
+        .frame_index = engine_.frame_index(),
+        .zoom_pct = static_cast<float>(camera_.scale() * 100.0),
+    });
 }
 
 void App::refresh_window_title_if_changed() {
@@ -749,6 +841,21 @@ void App::record_swapchain_pass(VkCommandBuffer cb, VkExtent2D /*ext*/) {
                             &set_h,
                             /*dynamicOffsetCount=*/0,
                             nullptr);
+    // Push the Camera-derived view transform that the composite
+    // vertex shader applies to the fullscreen-triangle's vertices.
+    // Layout must mirror `CompositePush` in `shaders/fullscreen.slang`
+    // (float2 scale, float2 translation = 16 bytes).
+    struct CompositePush {
+        float scale[2];
+        float translation[2];
+    };
+    CompositePush push{};
+    push.scale[0] = camera_.shader_scale_x();
+    push.scale[1] = camera_.shader_scale_y();
+    push.translation[0] = camera_.shader_translation_x();
+    push.translation[1] = camera_.shader_translation_y();
+    vkCmdPushConstants(cb, layout_h, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(CompositePush), &push);
+
     vkCmdDraw(cb, /*vertexCount=*/3, /*instanceCount=*/1, 0, 0);
     // ImGui draws on top of the composited canvas. The surrounding
     // vkCmdBeginRendering (owned by the renderer) is the right
@@ -786,6 +893,14 @@ auto App::recreate_swapchain() -> noted::Result<void> {
     noted::gpu::DescriptorWriter{canvas_set_}
         .write_combined_image_sampler(0, canvas_->view(), sampler_->handle())
         .commit();
+    // Keep the camera's notion of window / canvas extent aligned
+    // with the live swapchain. The framebuffer_resized hook also
+    // fires for window resizes, but recreate_swapchain runs on the
+    // OUT_OF_DATE recovery path too — covering both keeps the
+    // camera's shader transform consistent.
+    const auto ext = swapchain_->summary().extent;
+    camera_.set_canvas_extent(ext.width, ext.height);
+    camera_.set_window_extent(ext.width, ext.height);
     return {};
 }
 

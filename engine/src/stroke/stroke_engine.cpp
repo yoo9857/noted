@@ -175,6 +175,21 @@ void StrokeEngine::set_canvas_size(VkExtent2D extent) noexcept {
     canvas_h_ = static_cast<float>(extent.height == 0 ? 1U : extent.height);
 }
 
+void StrokeEngine::set_view_transform(double translation_x,
+                                      double translation_y,
+                                      double scale) noexcept {
+    // Reject pathological scales — leaves the prior transform
+    // intact so a transient bad value can't permanently break
+    // input. Matches the same defensive posture as
+    // `noted::canvas::Camera::set_scale`.
+    if (scale != scale || scale <= 0.0) {
+        return;
+    }
+    view_tx_ = translation_x;
+    view_ty_ = translation_y;
+    view_scale_ = scale;
+}
+
 void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept {
     NOTED_PROFILE_ZONE_N("StrokeEngine::record");
     if (!pipeline_.has_value() || !layout_.has_value() || stamps_.empty()) {
@@ -216,8 +231,14 @@ void StrokeEngine::on_pressed(const noted::hook::PointerPressed& e) noexcept {
     }
     drawing_ = true;
     auto s = stamp_from_pressure(brush_, e.pressure);
-    s.x_px = static_cast<float>(e.x);
-    s.y_px = static_cast<float>(e.y);
+    // Screen → canvas: subtract camera translation, divide by scale.
+    // Identity view (default) reduces to s.x_px = e.x.
+    s.x_px = static_cast<float>((e.x - view_tx_) / view_scale_);
+    s.y_px = static_cast<float>((e.y - view_ty_) / view_scale_);
+    // Brush radius is in canvas pixels too — so when the user
+    // zooms in, the brush appears physically larger on screen
+    // (matches Goodnotes / Photoshop behavior). The brush stays
+    // the same "ink size" in document space.
     stamps_.push_back(s);
 }
 
@@ -226,8 +247,8 @@ void StrokeEngine::on_moved(const noted::hook::PointerMoved& e) noexcept {
         return;
     }
     auto s = stamp_from_pressure(brush_, e.pressure);
-    s.x_px = static_cast<float>(e.x);
-    s.y_px = static_cast<float>(e.y);
+    s.x_px = static_cast<float>((e.x - view_tx_) / view_scale_);
+    s.y_px = static_cast<float>((e.y - view_ty_) / view_scale_);
     stamps_.push_back(s);
 }
 

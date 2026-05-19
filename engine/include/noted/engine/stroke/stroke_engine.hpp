@@ -132,6 +132,19 @@ public:
     // before record() and again on every resize. Cheap.
     void set_canvas_size(VkExtent2D extent) noexcept;
 
+    // Install a screen-pixel → canvas-pixel affine transform applied
+    // to every incoming pointer event. Defaults to identity (the
+    // pre-camera behavior — stamps land at the GLFW pointer pixel).
+    // When the host wires a `noted::canvas::Camera`, pass
+    // (cam.translation_x(), cam.translation_y(), cam.scale()) and
+    // refresh whenever the camera changes.
+    //
+    // Inverse is applied as: canvas = (screen - translation) / scale.
+    // `scale` of 0 or non-finite is rejected — the prior transform
+    // stays intact so a runaway camera state can't render input
+    // permanently inert.
+    void set_view_transform(double translation_x, double translation_y, double scale) noexcept;
+
     // Drain-and-draw. Records vkCmdBindPipeline + per-stamp push constants
     // + vkCmdDraw(6, 1, 0, 0) for every accumulated stamp. Caller is
     // responsible for being inside an active vkCmdBeginRendering whose
@@ -185,6 +198,11 @@ private:
     bool drawing_ = false;
     float canvas_w_ = 1.0F;
     float canvas_h_ = 1.0F;
+    // Screen→canvas affine transform applied at input time.
+    // Identity by default; updated via set_view_transform().
+    double view_tx_ = 0.0;
+    double view_ty_ = 0.0;
+    double view_scale_ = 1.0;
     std::vector<Stamp> stamps_;
     BrushStyle brush_{};
 
