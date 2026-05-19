@@ -57,6 +57,7 @@
 #include "noted/platform/io/noted_file.hpp"
 #include "noted/platform/window/window.hpp"
 #include "noted/ui/imgui_host.hpp"
+#include "noted/ui/widget/debug_overlay.hpp"
 #include "noted/ui/widget/layer_panel.hpp"
 #include "noted/ui/widget/menu_bar.hpp"
 #include "noted/ui/widget/outline_panel.hpp"
@@ -679,6 +680,18 @@ int main() {
         return true;
     };
 
+    // Debug-overlay state: rolling ring buffer of recent per-frame CPU
+    // times. Subscribed to `on_frame_end` so the widget shows live
+    // values without main.cpp having to plumb cpu_ms through every
+    // frame. The hook capture is by reference; `debug_overlay_state`
+    // lives for the full main loop so the reference stays valid until
+    // engine.shutdown() drains future frames.
+    noted::ui::widget::DebugOverlayState debug_overlay_state{};
+    (void) noted::hook::registry().on_frame_end.subscribe(
+        [&debug_overlay_state](const noted::hook::FrameEnd& f) {
+            debug_overlay_state.push_sample(static_cast<float>(f.cpu_ms));
+        });
+
     noted::ui::widget::MenuBarState menu_state{};
 
     // The canvas pass:
@@ -951,6 +964,13 @@ int main() {
 
         noted::ui::widget::layer_panel(scene_graph, &menu_state.show_layer_panel);
         noted::ui::widget::outline_panel(document, selected_block, &menu_state.show_outline_panel);
+        noted::ui::widget::debug_overlay(
+            noted::ui::widget::DebugOverlayInputs{
+                .frame_index = engine.frame_index(),
+                .fallback_count = compositor_ptr->fallback_count(),
+            },
+            debug_overlay_state,
+            &menu_state.show_debug_overlay);
         if (menu_state.show_demo_window) {
             ImGui::ShowDemoWindow(&menu_state.show_demo_window);
         }

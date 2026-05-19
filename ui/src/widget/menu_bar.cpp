@@ -76,6 +76,7 @@ auto menu_bar(MenuBarState& state, const MenuBarStatus& status) -> MenuBarResult
     if (ImGui::BeginMenu("View")) {
         ImGui::MenuItem("Layers", nullptr, &state.show_layer_panel);
         ImGui::MenuItem("Outline", nullptr, &state.show_outline_panel);
+        ImGui::MenuItem("Debug overlay", nullptr, &state.show_debug_overlay);
         ImGui::MenuItem("ImGui Demo", nullptr, &state.show_demo_window);
         ImGui::Separator();
         ImGui::MenuItem("About noted", nullptr, &state.show_about_window);
