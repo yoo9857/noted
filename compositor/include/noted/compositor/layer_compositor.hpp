@@ -33,6 +33,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include <vulkan/vulkan.h>
@@ -81,12 +82,30 @@ struct CompositorEntry {
 
 class LayerCompositor {
 public:
+    // Upper bound on frames-in-flight the compositor will rotate
+    // descriptor sets through. Two is the renderer default; we leave
+    // a margin so a triple-buffer experiment doesn't need a layout
+    // change. If the renderer ever asks for more, create() rejects.
+    static constexpr std::uint32_t kMaxFramesInFlight = 4;
+
     struct CreateInfo {
         const noted::gpu::Allocator* allocator;  // for the dummy mask
         const noted::gpu::Device* device;
         const noted::gpu::ShaderModule* vs_module;
         const noted::gpu::ShaderModule* ps_module;
         VkFormat canvas_format;
+        // Graphics queue + family used to immediately submit the dummy
+        // mask's one-time clear-to-white during create(). Required —
+        // create() returns invalid_argument if either is unset.
+        VkQueue graphics_queue = VK_NULL_HANDLE;
+        std::uint32_t graphics_family = UINT32_MAX;
+        // Number of CPU-side frames the renderer keeps in flight. The
+        // compositor allocates one descriptor set per slot and round-
+        // robins through them so the descriptor write at composite()
+        // never targets a set the GPU is still reading. Must equal the
+        // renderer's frames_in_flight(); a mismatch produces the same
+        // validation error this design exists to prevent.
+        std::uint32_t frames_in_flight = 2;
     };
 
     [[nodiscard]] static auto create(const CreateInfo& info) -> Result<LayerCompositor>;
@@ -109,6 +128,13 @@ public:
     // When `mask` is non-null, the caller is responsible for having
     // transitioned it to SHADER_READ_ONLY_OPTIMAL before this call
     // (`SelectionRasterizer::record()` does this automatically).
+    //
+    // **Frame-loop safe:** this call records only draw commands and at
+    // most one descriptor write (skipped when the bound view matches
+    // last frame's). It performs no barriers and no clears, so it is
+    // legal to call between `vkCmdBeginRendering` and `vkCmdEndRendering`.
+    // The dummy mask is fully initialized in create(); call ordering
+    // requirements are documented there.
     //
     // Failures (cycle / dangling input) increment the fallback counter
     // and produce no draws.
@@ -140,10 +166,17 @@ private:
     [[nodiscard]] static auto slot_for(noted::domain::BlendMode mode,
                                        bool& supported_out) noexcept -> Slot;
 
-    // Lazy one-shot: on the first composite() call after create(),
-    // record a clear-to-white on the dummy mask and transition it to
-    // SHADER_READ_ONLY_OPTIMAL. Subsequent calls skip this.
-    void ensure_dummy_initialized_(VkCommandBuffer cb) noexcept;
+    // Per-frame state for descriptor rotation. One slot per
+    // frame-in-flight: the descriptor set bound at composite() and a
+    // cache of the VkImageView the slot was last written with. When
+    // the next frame wants to bind the same view, we skip the
+    // vkUpdateDescriptorSets call entirely — common case is "same
+    // dummy mask every frame", in which case after the warm-up rounds
+    // we record zero descriptor writes per frame.
+    struct FrameSlot {
+        noted::gpu::DescriptorSet set;  // owned by descriptor_pool_
+        VkImageView cached_view{VK_NULL_HANDLE};
+    };
 
     // Member declaration order is significant — destruction runs in
     // reverse declaration order and Vulkan's resource lifetime rules
@@ -152,18 +185,23 @@ private:
     //   2) VkDescriptorSets must die (via pool destruction) before
     //      their VkDescriptorSetLayout.
     // Hence set_layout_ declared first (dies last), then pipeline_layout_,
-    // then descriptor_pool_ (which destroys mask_set_), then the
-    // leaf resources, then pipelines_ (dies first).
+    // then descriptor_pool_ (which destroys all FrameSlot::set handles),
+    // then the leaf resources, then pipelines_ (dies first).
     std::optional<noted::gpu::DescriptorSetLayout> set_layout_;
     std::optional<noted::gpu::PipelineLayout> pipeline_layout_;
     std::optional<noted::gpu::DescriptorPool> descriptor_pool_;
-    noted::gpu::DescriptorSet mask_set_;  // owned by descriptor_pool_
+    std::vector<FrameSlot> frame_slots_;  // size == frames_in_flight from create()
     std::optional<noted::gpu::Sampler> sampler_;
     // 1×1 R8 "all selected" mask bound when the caller passes nullptr.
+    // Cleared to 1.0 + transitioned to SHADER_READ_ONLY_OPTIMAL at
+    // create() time via gpu::immediate_submit — never touched again.
     std::optional<noted::gpu::SelectionMask> dummy_mask_;
     std::array<std::optional<noted::gpu::GraphicsPipeline>, static_cast<std::size_t>(Slot::count)>
         pipelines_;
-    bool dummy_initialized_{false};
+    // Monotonic counter — `frame_counter_ % frame_slots_.size()` picks
+    // which slot composite() uses this call. Mod-rotates correctly even
+    // when the renderer's fence wait has guaranteed prior use is done.
+    std::uint64_t frame_counter_{0};
     std::uint64_t fallback_count_{0};
 };
 

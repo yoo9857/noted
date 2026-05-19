@@ -68,6 +68,11 @@ noted::harness::FeatureFlag flag_validation_layers{"gpu.enable_validation_layers
                                                    /*default=*/true};
 noted::harness::FeatureFlag flag_force_vsync{"gpu.force_vsync_fifo", /*default=*/false};
 
+// Single source of truth for the CPU-side frames-in-flight count. Passed
+// to both the Renderer and the LayerCompositor — the compositor needs the
+// matching value to size its descriptor-set rotation (see ADR 0028).
+constexpr std::uint32_t kFramesInFlight = 2;
+
 [[nodiscard]] auto glfw_required_extensions() -> std::span<const char* const> {
     std::uint32_t count = 0;
     const char** ptr = glfwGetRequiredInstanceExtensions(&count);
@@ -395,6 +400,9 @@ int main() {
         .vs_module = &*layer_vs,
         .ps_module = &*layer_ps,
         .canvas_format = kCanvasFormat,
+        .graphics_queue = device->graphics_queue(),
+        .graphics_family = device->graphics_family(),
+        .frames_in_flight = kFramesInFlight,
     });
     if (!layer_compositor) {
         std::cerr << layer_compositor.error().format() << '\n';
@@ -437,7 +445,7 @@ int main() {
     }
     (*stroke_engine)->set_canvas_size(swapchain->summary().extent);
 
-    auto renderer = noted::gpu::Renderer::create(*device, *swapchain);
+    auto renderer = noted::gpu::Renderer::create(*device, *swapchain, kFramesInFlight);
     if (!renderer) {
         std::cerr << renderer.error().format() << '\n';
         device->wait_idle();
