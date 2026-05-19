@@ -660,7 +660,42 @@ int main() {
             .can_redo = undo_stack.can_redo(),
             .has_document_path = current_path.has_value(),
         };
-        const auto menu = noted::ui::widget::menu_bar(menu_state, menu_status);
+        auto menu = noted::ui::widget::menu_bar(menu_state, menu_status);
+
+        // Keyboard shortcuts — wire the chords the menu's hint column
+        // advertises. `IsKeyChordPressed` defaults to RouteGlobal so
+        // the chord fires app-wide; once we add text-input widgets
+        // that need to consume Ctrl+Z themselves, switch the relevant
+        // chord to `ImGuiInputFlags_RouteFocused`. Match menu_bar's
+        // semantics exactly: Save falls through to Save As when there
+        // is no backing path; Undo / Redo respect `can_undo` /
+        // `can_redo` so an empty stack doesn't print error noise.
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_N)) {
+            menu.file_new_requested = true;
+        }
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_O)) {
+            menu.file_open_requested = true;
+        }
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S)) {
+            menu.file_save_as_requested = true;
+        }
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_S)) {
+            if (menu_status.has_document_path) {
+                menu.file_save_requested = true;
+            } else {
+                menu.file_save_as_requested = true;
+            }
+        }
+        if (menu_status.can_undo && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Z)) {
+            menu.undo_requested = true;
+        }
+        if (menu_status.can_redo && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Y)) {
+            menu.redo_requested = true;
+        }
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Q)) {
+            menu.quit_requested = true;
+        }
+
         if (menu.quit_requested) {
             // Window has no `request_close()` wrapper yet — the GLFW
             // pattern is documented enough that going through the
