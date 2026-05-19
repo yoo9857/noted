@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-19 · **main HEAD:** `65e2d4e` (clean, 0 open PRs)
+**Last updated:** 2026-05-19 · **main HEAD:** `26591d1` (clean, 0 open PRs)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -212,6 +212,17 @@ tests/        Unit + integration + bench + fuzz scaffolds
    `on_frame_end`, LayerCompositor fallback count, and a
    name/value table of every registered `harness::Counter`. See
    P4 #18g.
+✅ Theme pass: `noted::ui::theme::apply(ThemeKind)` mutates the
+   ImGui global style — dark default + light, shared sizing,
+   single accent. View → Theme submenu toggles live. See P4 #18h.
+✅ App-class architecture: `app/src/main.cpp` is 53 lines doing
+   only profile-thread + observers + App::create+run. Everything
+   else lives in `noted::app::App` (in `app/src/app.{hpp,cpp}`)
+   with frame-loop body split into 7 named methods and four
+   focused helper modules (`DocumentSession`, `DirtyPrompt`,
+   `DemoScene`, `probe_cjk_font`). Move-only App returned as
+   `Result<unique_ptr<App>>` so hook subscriptions can capture
+   `this` safely. See PR #54.
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
    their warnings can't leak. `/Ob[0-9]` collisions removed at the
@@ -306,10 +317,11 @@ re-evaluation.
 4. ~~**`feat/ui-keyboard-shortcuts`**~~ ✅ landed (PR #49).
 5. ~~**`feat/ui-dirty-confirm`**~~ ✅ landed (PR #50).
 6. ~~**`feat/ui-debug-overlay`**~~ ✅ landed (PR #51).
-7. **`feat/ui-theme-pass`** — Custom ImGuiStyle + dark/light theme.
-   The CJK font half of this item shipped in PR #47; what remains is
-   the colour scheme. ~3 h.
-8. **`feat/ui-block-rename`** — first writable in-canvas widget. Pick
+7. ~~**`feat/ui-theme-pass`**~~ ✅ landed (PR #53) — theme half of #18h.
+8. ~~**`refactor/app-class-extract`**~~ ✅ landed (PR #54) — main.cpp
+   1055 → 53 lines via `noted::app::App` class + four single-
+   responsibility helper modules. **Zero behaviour change.**
+9. **`feat/ui-block-rename`** — first writable in-canvas widget. Pick
    a Text block in the outline → inline rename → AddBlockCommand's
    sibling `RenameBlockCommand`. Once this lands the
    `ImGuiInputFlags_RouteFocused` routing comment in #49 needs to be
@@ -398,7 +410,8 @@ the product has actual content.
 | 18f | ~~`feat/ui-dirty-confirm`~~ ✅ **landed** (PR #50) | — | Modal "Save / Discard / Cancel" on window close (X / Quit / Ctrl+Q) + File → New on dirty. One state machine, `confirmed_exit` flag prevents the loop from re-prompting on Save success. Double-X-click race guarded. |
 | 18g | ~~`feat/ui-debug-overlay`~~ ✅ **landed** (PR #51) | — | Floating window (View → Debug overlay; off by default): frame + FPS, 120-sample CPU-time line plot from `on_frame_end`, `LayerCompositor::fallback_count()`, name/value table of every `harness::Counter`. |
 | 18h-font | ~~`feat/ui-cjk-font`~~ ✅ **landed** (PR #47) | — | OS-installed CJK TTF/TTC probed at startup (malgun.ttf / AppleSDGothicNeo / Noto Sans CJK KR / Nanum Gothic). `GetGlyphRangesKorean()` + 2048×2048 atlas. Graceful fallback to ProggyClean on any failure. |
-| 18h-theme | `feat/ui-theme-pass` | 3h | Custom `ImGuiStyle` + dark/light palette. Defuses the "looks like debug tool" risk. |
+| 18h-theme | ~~`feat/ui-theme-pass`~~ ✅ **landed** (PR #53) | — | `noted::ui::theme::apply(ThemeKind)` mutates ImGuiStyle (palette + sizing). Dark (default) + Light, single accent `#5294e2/#2c6cdb`. View → Theme submenu radio toggles; main.cpp watches for change and re-applies. |
+| 18i | ~~`refactor/app-class-extract`~~ ✅ **landed** (PR #54) | — | main.cpp 1055 → 53 lines. `noted::app::App` class owns engine + GPU stack + scene + UI session; non-movable, returned as `Result<unique_ptr<App>>`. Frame loop body split into 7 named methods. New helpers: `DocumentSession`, `DirtyPrompt`, `DemoScene`, `probe_cjk_font`. Zero behaviour change. |
 
 ---
 
