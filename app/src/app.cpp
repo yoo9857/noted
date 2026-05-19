@@ -2,6 +2,7 @@
 
 #define GLFW_INCLUDE_VULKAN
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -477,9 +478,16 @@ void App::apply_theme_if_changed() {
 
 void App::wire_keyboard_shortcuts(const noted::ui::widget::MenuBarStatus& status,
                                   noted::ui::widget::MenuBarResult& menu) {
-    // `IsKeyChordPressed` defaults to RouteGlobal — fires app-wide.
-    // Switch the relevant chord to `ImGuiInputFlags_RouteFocused`
-    // once text-input widgets need to consume Ctrl+Z themselves.
+    // Yield every chord to a focused text-input widget. Without
+    // this, Ctrl+Z during a block rename would undo the *document*
+    // instead of cancelling whatever the user was typing — the
+    // exact RouteFocused collision the inline comment in #49 flagged.
+    // `IsKeyChordPressed` defaults to RouteGlobal so the check has
+    // to happen at the caller side; ImGui has no per-chord
+    // RouteFocused that respects InputText capture.
+    if (ImGui::GetIO().WantTextInput) {
+        return;
+    }
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_N)) {
         menu.file_new_requested = true;
     }
@@ -504,6 +512,31 @@ void App::wire_keyboard_shortcuts(const noted::ui::widget::MenuBarStatus& status
     }
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Q)) {
         menu.quit_requested = true;
+    }
+
+    // F2 = rename the selected block. Gated on "have a selection",
+    // "no rename already in flight", and (already-checked above)
+    // "no text input is consuming keys." Pre-fills the buffer from
+    // the current name; the outline_panel widget takes it from there.
+    if (ImGui::IsKeyPressed(ImGuiKey_F2) &&
+        session_.selected_block() != noted::domain::invalid_block_id &&
+        outline_rename_.target == noted::domain::invalid_block_id) {
+        const auto sel = session_.selected_block();
+        if (const auto* node = session_.document().find(sel); node != nullptr) {
+            outline_rename_.target = sel;
+            outline_rename_.needs_focus = true;
+            outline_rename_.commit_requested = false;
+            outline_rename_.cancel_requested = false;
+            const auto& src = node->name;
+            // -1 to leave room for the null terminator.
+            const auto cap = outline_rename_.buffer.size() - 1;
+            const auto n = std::min(src.size(), cap);
+            std::copy_n(src.begin(), n, outline_rename_.buffer.begin());
+            outline_rename_.buffer[n] = '\0';
+            // Make sure the panel is visible — surprising to arm
+            // a rename you can't see.
+            menu_state_.show_outline_panel = true;
+        }
     }
 }
 
@@ -600,8 +633,27 @@ void App::draw_widgets() {
     noted::ui::widget::layer_panel(scene_->graph, &menu_state_.show_layer_panel);
     auto selected = session_.selected_block();
     noted::ui::widget::outline_panel(
-        session_.document(), selected, &menu_state_.show_outline_panel);
+        session_.document(), selected, &outline_rename_, &menu_state_.show_outline_panel);
     session_.set_selected_block(selected);
+
+    // Drain rename outputs into the command stream. Both flags are
+    // mutually exclusive in practice (the widget never sets both in
+    // the same frame); check Commit first so an Enter + Escape race
+    // resolves to "save what was typed."
+    if (outline_rename_.commit_requested) {
+        outline_rename_.commit_requested = false;
+        const auto target = outline_rename_.target;
+        outline_rename_.target = noted::domain::invalid_block_id;
+        std::string new_name{outline_rename_.buffer.data()};  // null-terminated by ImGui
+        auto cmd = std::make_unique<noted::domain::SetNameCommand>(target, std::move(new_name));
+        if (auto r = session_.execute(std::move(cmd)); !r) {
+            std::cerr << r.error().format() << '\n';
+        }
+    }
+    if (outline_rename_.cancel_requested) {
+        outline_rename_.cancel_requested = false;
+        outline_rename_.target = noted::domain::invalid_block_id;
+    }
 
     noted::ui::widget::debug_overlay(
         noted::ui::widget::DebugOverlayInputs{

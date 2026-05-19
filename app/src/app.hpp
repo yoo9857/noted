@@ -53,6 +53,7 @@
 #include "noted/ui/theme/theme.hpp"
 #include "noted/ui/widget/debug_overlay.hpp"
 #include "noted/ui/widget/menu_bar.hpp"
+#include "noted/ui/widget/outline_panel.hpp"
 
 #include "scene/demo_scene.hpp"
 #include "ui/dirty_prompt.hpp"
@@ -170,6 +171,7 @@ private:
     DirtyPrompt prompt_{};
     noted::ui::widget::MenuBarState menu_state_{};
     noted::ui::widget::DebugOverlayState debug_overlay_state_{};
+    noted::ui::widget::OutlineRenameState outline_rename_{};
     noted::ui::theme::ThemeKind applied_theme_{noted::ui::theme::ThemeKind::dark};
     std::string last_window_title_{};
 };
