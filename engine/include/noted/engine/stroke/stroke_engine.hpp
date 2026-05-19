@@ -29,16 +29,19 @@
 #include <vulkan/vulkan.h>
 
 #include "noted/engine/error/error.hpp"
-// PipelineLayout / GraphicsPipeline are held by-value (in optional) so they
-// need the full definitions. Device / ShaderModule / Registry only appear
-// as pointers in CreateInfo — forward declarations below keep the header's
-// transitive include footprint small.
+// PipelineLayout / GraphicsPipeline / Buffer are held by-value (in
+// optional) so they need the full definitions. Device / ShaderModule /
+// Allocator / Registry only appear as pointers in CreateInfo — forward
+// declarations below keep the header's transitive include footprint
+// small.
+#include "noted/engine/gpu/buffer.hpp"
 #include "noted/engine/gpu/graphics_pipeline.hpp"
 #include "noted/engine/gpu/pipeline_layout.hpp"
 #include "noted/engine/hook/hook.hpp"
 #include "noted/engine/stroke/stroke_geometry.hpp"
 
 namespace noted::gpu {
+class Allocator;
 class Device;
 class ShaderModule;
 }  // namespace noted::gpu
@@ -54,6 +57,12 @@ namespace noted::stroke {
 // — included above for use as `vector<Stroke>` members below.
 
 struct StrokeEngineCreateInfo {
+    // Allocator + device + shader modules are required. The allocator
+    // owns the engine's persistently-mapped ribbon vertex buffer; the
+    // shader modules are `polyline.vs_polyline` and
+    // `polyline.ps_polyline`. The hook registry is what the
+    // engine subscribes to for pointer events.
+    const noted::gpu::Allocator* allocator = nullptr;
     const noted::gpu::Device* device = nullptr;
     const noted::gpu::ShaderModule* vs_module = nullptr;
     const noted::gpu::ShaderModule* ps_module = nullptr;
@@ -158,6 +167,15 @@ private:
     // wrapping side-steps PipelineLayout's private default constructor.
     std::optional<noted::gpu::PipelineLayout> layout_;
     std::optional<noted::gpu::GraphicsPipeline> pipeline_;
+    // Persistently-mapped ribbon vertex buffer. Each `record()` walks
+    // the strokes, tessellates them into `RibbonVertex` triangles,
+    // and memcpys into the mapped pointer. The optional lets the
+    // TestingTag path skip allocation entirely.
+    std::optional<noted::gpu::Buffer> vertex_buffer_;
+    // Allocator pointer is non-owning — caller (App) owns the
+    // VmaAllocator. Stored so a resize can ask for a new buffer
+    // without re-plumbing the create-info.
+    const noted::gpu::Allocator* allocator_{nullptr};
 
     // Accumulation state.
     bool drawing_ = false;
