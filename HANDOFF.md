@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-19 · **main HEAD:** `311a627` (clean, 0 open PRs)
+**Last updated:** 2026-05-19 · **main HEAD:** `65e2d4e` (clean, 0 open PRs)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -22,7 +22,14 @@ on top, and a Dear ImGui-driven product shell renders on top with:
     OS dialog (nativefiledialog-extended). Edit's Undo / Redo back
     the live `UndoStack`; Edit → Add Block emits `AddBlockCommand`
     for any of the 7 BlockKinds. The title bar shows the filename
-    + `*` dirty marker.
+    + `*` dirty marker. Keyboard shortcuts (Ctrl+N/O/S/Shift+S/Z/Y/Q)
+    fire the same signals as the menu items. A modal asks
+    Save / Discard / Cancel when the user closes the window or
+    starts a New on a dirty document.
+  - **Debug overlay** (View → Debug overlay; off by default) — small
+    floating window with frame index + FPS, a 120-sample CPU-time
+    line plot, the LayerCompositor fallback count, and every
+    `harness::Counter` row.
   - **Layer panel** — visibility checkbox per layer wires through
     `LayerGraph::set_visible`; compositor reflects next frame.
   - **Outline panel** — tree view of `Document.preorder` with
@@ -192,6 +199,19 @@ tests/        Unit + integration + bench + fuzz scaffolds
    malgun.ttf / AppleSDGothicNeo / Noto Sans CJK KR / Nanum Gothic in
    that order. Graceful fallback to ProggyClean on any failure — never
    blocks `ImGuiHost::create()`.
+✅ Keyboard shortcuts: Ctrl+N/O/S/Shift+S/Z/Y/Q wired via
+   `ImGui::IsKeyChordPressed` (RouteGlobal default). Save fall-through
+   matches the menu; Undo / Redo gated by `can_undo` / `can_redo` so
+   an empty stack doesn't print error noise. See P4 #18e.
+✅ Dirty-confirm modal: closing the window (X / File → Quit /
+   Ctrl+Q) or starting a New on a dirty document opens a Save /
+   Discard / Cancel modal. One state machine, single arming flag,
+   double-X-click race guarded. See P4 #18f.
+✅ Debug overlay: View → Debug overlay (off by default). Frame
+   index + FPS, 120-sample CPU-time line plot driven by
+   `on_frame_end`, LayerCompositor fallback count, and a
+   name/value table of every registered `harness::Counter`. See
+   P4 #18g.
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
    their warnings can't leak. `/Ob[0-9]` collisions removed at the
@@ -283,18 +303,18 @@ re-evaluation.
 1. ~~**`feat/ui-file-menu-wire`**~~ ✅ landed (PR #45).
 2. ~~**`fix/compositor-render-pass-init`**~~ ✅ landed (PR #46) — ADR 0028.
 3. ~~**`feat/ui-cjk-font`**~~ ✅ landed (PR #47) — CJK font half of #18h.
-4. **`feat/ui-keyboard-shortcuts`** — bind Ctrl+N/O/S/Shift+S/Z/Y
-   in main.cpp via `ImGui::IsKeyChordPressed` so the menu hints
-   stop lying. ~1 h.
-5. **`feat/ui-dirty-confirm`** — intercept window-close on a
-   dirty document and prompt Save / Discard / Cancel via an
-   ImGui modal. Same plumbing covers File → New on dirty. ~2 h.
-6. **`feat/ui-debug-overlay`** — Tracy-style overlay: FPS,
-   harness counters, fallback counts. Validates the
-   `binding/` channel → view plumbing. ~2 h.
+4. ~~**`feat/ui-keyboard-shortcuts`**~~ ✅ landed (PR #49).
+5. ~~**`feat/ui-dirty-confirm`**~~ ✅ landed (PR #50).
+6. ~~**`feat/ui-debug-overlay`**~~ ✅ landed (PR #51).
 7. **`feat/ui-theme-pass`** — Custom ImGuiStyle + dark/light theme.
    The CJK font half of this item shipped in PR #47; what remains is
    the colour scheme. ~3 h.
+8. **`feat/ui-block-rename`** — first writable in-canvas widget. Pick
+   a Text block in the outline → inline rename → AddBlockCommand's
+   sibling `RenameBlockCommand`. Once this lands the
+   `ImGuiInputFlags_RouteFocused` routing comment in #49 needs to be
+   honored — Ctrl+Z inside the rename input should undo text, not
+   the document.
 
 **Deferred until UI validation:**
 - P5 #13 `feat/shader-objects` (`VK_EXT_shader_object`) and
@@ -374,9 +394,9 @@ the product has actual content.
 | 18d | ~~`feat/ui-document-shell`~~ ✅ **landed** (shell first cut) | — | Menu bar (File / Edit / View / About) + layer panel (visibility toggle wires through `set_visible()`) + status bar (frame index + FPS). `ShowDemoWindow` retired to View menu toggle. |
 | 18d-undo | ~~`feat/ui-document-undo-outline`~~ ✅ **landed** | — | `Document` + `UndoStack` live in main.cpp. Outline panel renders `Document.preorder()` with click-to-select. Edit menu's Undo/Redo back the UndoStack live; Edit → Add Block submenu emits `AddBlockCommand` with proper parent selection (selected group → root → invalid_block_id). |
 | 18d-file | ~~`feat/ui-file-menu-wire`~~ ✅ **landed** | — | File → New / Open / Save / Save As. nativefiledialog-extended via FetchContent. `platform::io::pick_noted_open` / `pick_noted_save` returns `Result<optional<path>>` (nullopt = user cancel). main.cpp tracks `current_path` + `saved_undo_size` for the title-bar dirty marker. Save force-falls-through to Save As when there's no backing path; Save As force-appends `.noted` if missing. |
-| 18e | `feat/ui-keyboard-shortcuts` | 1h | Bind Ctrl+N/O/S/Shift+S/Z/Y via `ImGui::IsKeyChordPressed`. The menu hints already display them. |
-| 18f | `feat/ui-dirty-confirm` | 2h | Modal "Save / Discard / Cancel" on window close + File → New when the document is dirty. |
-| 18g | `feat/ui-debug-overlay` | 2h | Tracy-style overlay: FPS, harness counters, fallback counts. Validates the `binding/` channel → view plumbing. |
+| 18e | ~~`feat/ui-keyboard-shortcuts`~~ ✅ **landed** (PR #49) | — | Ctrl+N/O/S/Shift+S/Z/Y/Q via `ImGui::IsKeyChordPressed`. Save fall-through matches the menu; Undo/Redo gated by stack state. Routing defaults to `RouteGlobal`; flip to `RouteFocused` per-chord once text-input widgets land. |
+| 18f | ~~`feat/ui-dirty-confirm`~~ ✅ **landed** (PR #50) | — | Modal "Save / Discard / Cancel" on window close (X / Quit / Ctrl+Q) + File → New on dirty. One state machine, `confirmed_exit` flag prevents the loop from re-prompting on Save success. Double-X-click race guarded. |
+| 18g | ~~`feat/ui-debug-overlay`~~ ✅ **landed** (PR #51) | — | Floating window (View → Debug overlay; off by default): frame + FPS, 120-sample CPU-time line plot from `on_frame_end`, `LayerCompositor::fallback_count()`, name/value table of every `harness::Counter`. |
 | 18h-font | ~~`feat/ui-cjk-font`~~ ✅ **landed** (PR #47) | — | OS-installed CJK TTF/TTC probed at startup (malgun.ttf / AppleSDGothicNeo / Noto Sans CJK KR / Nanum Gothic). `GetGlyphRangesKorean()` + 2048×2048 atlas. Graceful fallback to ProggyClean on any failure. |
 | 18h-theme | `feat/ui-theme-pass` | 3h | Custom `ImGuiStyle` + dark/light palette. Defuses the "looks like debug tool" risk. |
 
