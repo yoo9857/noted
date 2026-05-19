@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-19 · **main HEAD:** `26591d1` (clean, 0 open PRs)
+**Last updated:** 2026-05-19 · **main HEAD:** `8e84d3b` (clean, 0 open PRs)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -223,6 +223,22 @@ tests/        Unit + integration + bench + fuzz scaffolds
    `DemoScene`, `probe_cjk_font`). Move-only App returned as
    `Result<unique_ptr<App>>` so hook subscriptions can capture
    `this` safely. See PR #54.
+✅ Block rename + RouteFocused fix: F2 on a selected outline row
+   opens an inline `InputText` that commits via `SetNameCommand`
+   through the undo stack (Enter / focus loss) or cancels via
+   Escape. `App::wire_keyboard_shortcuts` early-returns when
+   `ImGui::GetIO().WantTextInput` is true so Ctrl+Z inside a
+   rename undoes text rather than the document. See PR #56.
+✅ Canvas Camera (pan + zoom, Phase A.1): `noted::canvas::Camera`
+   is a pure-logic primitive with NaN / inf / zero guards.
+   `zoom_around(anchor, factor)` pins the canvas pixel under the
+   cursor (Goodnotes feel). Composite shader pushes view scale
+   + translation; stroke engine unprojects pointer events so
+   stamps land at canvas pixels regardless of zoom. Mouse wheel
+   = zoom around cursor (clamped to [0.1×, 32×]); middle-drag =
+   pan. Status bar + debug overlay readouts. 13 unit tests cover
+   project/unproject round-trip, zoom-around pin invariant, and
+   pathological-factor guards. See PR #57.
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
    their warnings can't leak. `/Ob[0-9]` collisions removed at the
@@ -321,12 +337,34 @@ re-evaluation.
 8. ~~**`refactor/app-class-extract`**~~ ✅ landed (PR #54) — main.cpp
    1055 → 53 lines via `noted::app::App` class + four single-
    responsibility helper modules. **Zero behaviour change.**
-9. **`feat/ui-block-rename`** — first writable in-canvas widget. Pick
-   a Text block in the outline → inline rename → AddBlockCommand's
-   sibling `RenameBlockCommand`. Once this lands the
-   `ImGuiInputFlags_RouteFocused` routing comment in #49 needs to be
-   honored — Ctrl+Z inside the rename input should undo text, not
-   the document.
+9. ~~**`feat/ui-block-rename`**~~ ✅ landed (PR #56) — F2 inline
+   rename via `SetNameCommand` + `OutlineRenameState` + the
+   RouteFocused fix that early-returns
+   `wire_keyboard_shortcuts` when `WantTextInput` is true.
+10. ~~**`feat/canvas-camera-pan-zoom`**~~ ✅ landed (PR #57) — first
+    Phase A piece: `noted::canvas::Camera` (pure-logic primitive
+    with NaN / zero / inf guards, 13 unit tests), shader push
+    constants for the composite pass, stroke-engine input
+    unprojection, scroll-to-zoom-around-cursor, middle-drag pan,
+    status bar + debug overlay readouts.
+
+### Goodnotes + Photoshop unified canvas — phased plan
+
+Engine MVP + UI shell are ready. The product vision (HANDOFF L4)
+is a single document that delivers **Goodnotes UX** (stylus-first,
+page navigation, infinite canvas feel) on **Photoshop depth**
+(layers, blend modes, filters, color management). Phased to keep
+each PR focused:
+
+| Phase | Item | Status |
+|---|---|---|
+| A.1 | Camera pan + zoom (PR #57) | ✅ |
+| A.2 | Vector ink — replace SDF stamps with Catmull-Rom polyline ribbon, pressure-modulated width | next |
+| A.3 | Page model — Document gets Page block kind with extent + background; page strip panel; multi-page layout | |
+| B   | Tool palette + state machine (pen / eraser / select / shape / text / image) + color picker + brush options | |
+| C   | Photoshop depth — layer panel ops, shader blend modes (12 missing), filter pipeline, color management | |
+| D   | Goodnotes polish — smart shapes, lasso + transform handles, pen-button mapping, page templates, PDF export | |
+| E   | (optional) Native chrome — ImGui → Qt/Slint per ADR 0027 v1.0 boundary | |
 
 **Deferred until UI validation:**
 - P5 #13 `feat/shader-objects` (`VK_EXT_shader_object`) and
@@ -412,6 +450,8 @@ the product has actual content.
 | 18h-font | ~~`feat/ui-cjk-font`~~ ✅ **landed** (PR #47) | — | OS-installed CJK TTF/TTC probed at startup (malgun.ttf / AppleSDGothicNeo / Noto Sans CJK KR / Nanum Gothic). `GetGlyphRangesKorean()` + 2048×2048 atlas. Graceful fallback to ProggyClean on any failure. |
 | 18h-theme | ~~`feat/ui-theme-pass`~~ ✅ **landed** (PR #53) | — | `noted::ui::theme::apply(ThemeKind)` mutates ImGuiStyle (palette + sizing). Dark (default) + Light, single accent `#5294e2/#2c6cdb`. View → Theme submenu radio toggles; main.cpp watches for change and re-applies. |
 | 18i | ~~`refactor/app-class-extract`~~ ✅ **landed** (PR #54) | — | main.cpp 1055 → 53 lines. `noted::app::App` class owns engine + GPU stack + scene + UI session; non-movable, returned as `Result<unique_ptr<App>>`. Frame loop body split into 7 named methods. New helpers: `DocumentSession`, `DirtyPrompt`, `DemoScene`, `probe_cjk_font`. Zero behaviour change. |
+| 18j | ~~`feat/ui-block-rename`~~ ✅ **landed** (PR #56) | — | F2 inline rename in outline panel via `SetNameCommand` + `OutlineRenameState`. RouteFocused fix: `wire_keyboard_shortcuts` early-returns on `WantTextInput` so Ctrl+Z in InputText undoes text not document. |
+| A.1 | ~~`feat/canvas-camera-pan-zoom`~~ ✅ **landed** (PR #57) | — | `noted::canvas::Camera` pure-logic primitive + 13 unit tests, composite-pass push constants, stroke-engine view-transform unprojection, scroll-zoom-around-cursor, middle-drag pan, status bar + debug overlay readouts. |
 
 ---
 
