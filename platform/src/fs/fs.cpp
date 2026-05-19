@@ -1,8 +1,22 @@
 #include "noted/platform/fs/fs.hpp"
 
+#include <array>
 #include <cstring>
 #include <fstream>
 #include <sstream>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <climits>
+
+#include <mach-o/dyld.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace noted::platform::fs {
 
@@ -35,6 +49,45 @@ auto write_all(const std::filesystem::path& p, std::string_view content) -> note
     }
     out.write(content.data(), static_cast<std::streamsize>(content.size()));
     return {};
+}
+
+auto executable_dir() -> std::filesystem::path {
+#if defined(_WIN32)
+    // Win32: ask the loader for our HMODULE's full path. `MAX_PATH`
+    // is too short for long-path-enabled systems; we grow the buffer
+    // until the return doesn't equal the supplied size (the signal
+    // that the path fit).
+    std::vector<wchar_t> buf(1024U);
+    for (;;) {
+        const auto written =
+            ::GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+        if (written == 0U) {
+            return {};
+        }
+        if (written < buf.size()) {
+            return std::filesystem::path{buf.data()}.parent_path();
+        }
+        // Buffer was too small — GetModuleFileNameW returns the
+        // supplied size in that case. Grow and retry.
+        buf.resize(buf.size() * 2U);
+    }
+#elif defined(__APPLE__)
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);  // returns required size
+    std::vector<char> buf(size);
+    if (_NSGetExecutablePath(buf.data(), &size) != 0) {
+        return {};
+    }
+    return std::filesystem::path{buf.data()}.parent_path();
+#else
+    // POSIX (Linux): /proc/self/exe is a symlink to the binary.
+    std::error_code ec;
+    auto resolved = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (ec) {
+        return {};
+    }
+    return resolved.parent_path();
+#endif
 }
 
 auto read_spirv(const std::filesystem::path& p) -> noted::Result<std::vector<std::uint32_t>> {

@@ -34,6 +34,8 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0026 | [`.noted` archive — zip container for the file format](0026-noted-archive-container.md) | Accepted |
 | 0027 | [UI stack — Dear ImGui for v0.x, with a swap path to native chrome](0027-ui-stack-selection.md) | Accepted |
 | 0028 | [Compositor frame-safe init + descriptor rotation](0028-compositor-frame-safe-init.md) | Accepted |
+| 0029 | [Vector ink — polyline rendering](0029-vector-ink-polyline.md) | Accepted |
+| 0030 | [Runtime config — typed `AppConfig` for user-facing tunables](0030-runtime-config.md) | Accepted |
 
 ## Format
 
