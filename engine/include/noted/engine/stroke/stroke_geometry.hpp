@@ -25,9 +25,59 @@
 #include <cstddef>
 #include <vector>
 
-#include "noted/engine/stroke/stroke_engine.hpp"
-
 namespace noted::stroke {
+
+// Per-engine brush style.
+//
+// Fully described tuple: a radius range, an alpha gamma, a softness
+// ratio, and a colour. Pressure (0..1) interpolates radius linearly
+// between min / max and shapes alpha through pow(pressure,
+// alpha_gamma) so a light touch feels noticeably lighter than a
+// medium touch.
+//
+// Defaults yield a ~2..10 px black tip with mild gamma — visible
+// but not heavy, matching the demo's textured background.
+struct BrushStyle {
+    float min_radius_px{2.0F};
+    float max_radius_px{10.0F};
+    // Softness band as a fraction of the current radius. Carried
+    // for future SDF-edge brushes; the ribbon tessellator
+    // currently ignores it.
+    float softness_ratio{0.20F};
+    // pow(pressure, alpha_gamma). 1.0 = linear, >1 emphasizes
+    // high pressure, <1 emphasizes light touches.
+    float alpha_gamma{1.8F};
+    // Straight-alpha color. Alpha is multiplied by the pressure
+    // curve; r/g/b pass through unchanged.
+    float r{0.0F};
+    float g{0.0F};
+    float b{0.0F};
+    float a{1.0F};
+};
+
+// Per-sample brush evaluation (legacy name "Stamp" — historically
+// this was the rendered primitive; vector ink keeps the type as
+// the (radius, colour) tuple the tessellator reads).
+//
+// `x_px` / `y_px` / `softness_px` are vestigial under the
+// vector-ink path. The tessellator only reads
+// `radius_px` / `r` / `g` / `b` / `a`.
+struct Stamp {
+    float x_px = 0.0F;
+    float y_px = 0.0F;
+    float radius_px = 4.0F;
+    float softness_px = 1.0F;
+    float r = 0.0F;
+    float g = 0.0F;
+    float b = 0.0F;
+    float a = 1.0F;
+};
+
+// Pure mapping: (BrushStyle, pressure) → per-sample brush
+// evaluation. Exposed so tests can verify the curve independent
+// of the event path and so the tessellator + any future tools
+// share one source of truth.
+[[nodiscard]] auto stamp_from_pressure(const BrushStyle& style, float pressure) noexcept -> Stamp;
 
 // One pen sample. Captured each frame the pen moves OR pressure
 // changes during a drag. Coordinates are canvas pixels — the
