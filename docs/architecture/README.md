@@ -33,6 +33,7 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0025 | [Document JSON serialization (v1 of the `.noted` format)](0025-document-json-format.md) | Accepted |
 | 0026 | [`.noted` archive — zip container for the file format](0026-noted-archive-container.md) | Accepted |
 | 0027 | [UI stack — Dear ImGui for v0.x, with a swap path to native chrome](0027-ui-stack-selection.md) | Accepted |
+| 0028 | [Compositor frame-safe init + descriptor rotation](0028-compositor-frame-safe-init.md) | Accepted |
 
 ## Format
 

@@ -20,6 +20,7 @@ noted_add_module(
         src/gpu/canvas_render_target.cpp
         src/gpu/selection_mask.cpp
         src/gpu/upload.cpp
+        src/gpu/immediate_submit.cpp
         src/gpu/sampler.cpp
         src/gpu/shader_module.cpp
         src/gpu/descriptor_set_layout.cpp

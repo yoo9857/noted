@@ -6,6 +6,7 @@
 
 #include "noted/engine/gpu/allocator.hpp"
 #include "noted/engine/gpu/device.hpp"
+#include "noted/engine/gpu/immediate_submit.hpp"
 #include "noted/engine/gpu/shader_module.hpp"
 #include "noted/engine/profile.hpp"
 
@@ -170,6 +171,19 @@ auto LayerCompositor::create(const CreateInfo& info) -> Result<LayerCompositor> 
             noted::ErrorCode::invalid_argument,
             "LayerCompositor::create: allocator, device, or shader module is null"));
     }
+    if (info.graphics_queue == VK_NULL_HANDLE || info.graphics_family == UINT32_MAX) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_argument,
+            "LayerCompositor::create: graphics_queue and graphics_family are required "
+            "(used for the one-time dummy mask init)"));
+    }
+    if (info.frames_in_flight == 0 || info.frames_in_flight > kMaxFramesInFlight) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_argument,
+            std::string{"LayerCompositor::create: frames_in_flight must be in [1, "} +
+                std::to_string(kMaxFramesInFlight) + "], got " +
+                std::to_string(info.frames_in_flight)));
+    }
 
     // ---- Descriptor set (set=0, binding=0): R8 mask sampler. ---------------
     const std::array<noted::gpu::DescriptorBinding, 1> bindings{{{
@@ -183,38 +197,94 @@ auto LayerCompositor::create(const CreateInfo& info) -> Result<LayerCompositor> 
         return std::unexpected(std::move(set_layout).error());
     }
 
+    // One descriptor set per frame-in-flight. The pool is sized so each
+    // slot can hold its own combined-image-sampler binding.
     const std::array<noted::gpu::DescriptorPoolSize, 1> pool_sizes{{{
         .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .count = 1,
+        .count = info.frames_in_flight,
     }}};
     auto pool = noted::gpu::DescriptorPool::create(*info.device,
                                                    noted::gpu::DescriptorPoolCreateInfo{
-                                                       .max_sets = 1,
+                                                       .max_sets = info.frames_in_flight,
                                                        .pool_sizes = pool_sizes,
                                                    });
     if (!pool) {
         return std::unexpected(std::move(pool).error());
     }
-    auto raw_set = pool->allocate(*set_layout);
-    if (!raw_set) {
-        return std::unexpected(std::move(raw_set).error());
+    std::vector<FrameSlot> frame_slots;
+    frame_slots.reserve(info.frames_in_flight);
+    for (std::uint32_t i = 0; i < info.frames_in_flight; ++i) {
+        auto raw_set = pool->allocate(*set_layout);
+        if (!raw_set) {
+            return std::unexpected(std::move(raw_set).error());
+        }
+        frame_slots.push_back(FrameSlot{
+            .set = noted::gpu::DescriptorSet{info.device->handle(), *raw_set},
+            .cached_view = VK_NULL_HANDLE,
+        });
     }
-    noted::gpu::DescriptorSet mask_set{info.device->handle(), *raw_set};
 
     auto sampler = noted::gpu::Sampler::linear_clamp(*info.device);
     if (!sampler) {
         return std::unexpected(std::move(sampler).error());
     }
 
-    // 1×1 dummy mask. Initial clear (to white = "all selected") is
-    // deferred to the first composite() call so create() never needs a
-    // command buffer / queue.
+    // 1×1 dummy mask. Cleared to 1.0 (all selected) + transitioned to
+    // SHADER_READ_ONLY_OPTIMAL synchronously here via immediate_submit
+    // so the per-frame composite() path never has to touch it. This
+    // moves the spec-violating "barriers inside a render pass" out of
+    // the hot path entirely (the previous lazy-init lived inside the
+    // canvas pass and tripped VUID-vkCmdPipelineBarrier2-None-09553).
     auto dummy = noted::gpu::SelectionMask::create(*info.allocator,
                                                    noted::gpu::SelectionMaskCreateInfo{
                                                        .extent = VkExtent2D{1, 1},
                                                    });
     if (!dummy) {
         return std::unexpected(std::move(dummy).error());
+    }
+
+    {
+        auto* dummy_ptr = &*dummy;
+        auto submit = noted::gpu::immediate_submit(
+            *info.device,
+            noted::gpu::ImmediateSubmitInfo{
+                .queue = info.graphics_queue,
+                .queue_family = info.graphics_family,
+            },
+            [dummy_ptr](VkCommandBuffer cb) {
+                dummy_ptr->transition_to(cb,
+                                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                         VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                                         VK_PIPELINE_STAGE_2_CLEAR_BIT);
+
+                VkClearColorValue clear{};
+                clear.float32[0] = 1.0F;  // R = "all selected"
+                clear.float32[1] = 0.0F;
+                clear.float32[2] = 0.0F;
+                clear.float32[3] = 0.0F;
+
+                VkImageSubresourceRange range{};
+                range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                range.baseMipLevel = 0;
+                range.levelCount = 1;
+                range.baseArrayLayer = 0;
+                range.layerCount = 1;
+
+                vkCmdClearColorImage(cb,
+                                     dummy_ptr->handle(),
+                                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                     &clear,
+                                     1,
+                                     &range);
+
+                dummy_ptr->transition_to(cb,
+                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                         VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                                         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+            });
+        if (!submit) {
+            return std::unexpected(std::move(submit).error());
+        }
     }
 
     // ---- Pipeline layout (one descriptor set + push range). ----------------
@@ -233,7 +303,7 @@ auto LayerCompositor::create(const CreateInfo& info) -> Result<LayerCompositor> 
     LayerCompositor c;
     c.set_layout_.emplace(std::move(*set_layout));
     c.descriptor_pool_.emplace(std::move(*pool));
-    c.mask_set_ = mask_set;
+    c.frame_slots_ = std::move(frame_slots);
     c.sampler_.emplace(std::move(*sampler));
     c.dummy_mask_.emplace(std::move(*dummy));
     c.pipeline_layout_.emplace(std::move(*pipeline_layout));
@@ -266,41 +336,6 @@ auto LayerCompositor::create(const CreateInfo& info) -> Result<LayerCompositor> 
     return c;
 }
 
-void LayerCompositor::ensure_dummy_initialized_(VkCommandBuffer cb) noexcept {
-    if (dummy_initialized_ || !dummy_mask_.has_value()) {
-        return;
-    }
-    // Transition dummy → TRANSFER_DST, clear to 1.0 (all selected),
-    // transition → SHADER_READ_ONLY. Single barrier-clear-barrier
-    // sequence on the caller's command buffer.
-    dummy_mask_->transition_to(cb,
-                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                               VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                               VK_PIPELINE_STAGE_2_CLEAR_BIT);
-
-    VkClearColorValue clear{};
-    clear.float32[0] = 1.0F;
-    clear.float32[1] = 0.0F;
-    clear.float32[2] = 0.0F;
-    clear.float32[3] = 0.0F;
-
-    VkImageSubresourceRange range{};
-    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    range.baseMipLevel = 0;
-    range.levelCount = 1;
-    range.baseArrayLayer = 0;
-    range.layerCount = 1;
-
-    vkCmdClearColorImage(
-        cb, dummy_mask_->handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear, 1, &range);
-
-    dummy_mask_->transition_to(cb,
-                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                               VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                               VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
-    dummy_initialized_ = true;
-}
-
 void LayerCompositor::composite(VkCommandBuffer cb,
                                 VkExtent2D canvas_extent,
                                 const noted::domain::LayerGraph& graph,
@@ -319,26 +354,39 @@ void LayerCompositor::composite(VkCommandBuffer cb,
         return;
     }
     if (resolved->empty() || !pipeline_layout_.has_value() || !sampler_.has_value() ||
-        !dummy_mask_.has_value()) {
+        !dummy_mask_.has_value() || frame_slots_.empty()) {
         return;
     }
 
-    // First-call: prepare the dummy mask. Cheap (one clear) and only
-    // runs once over the compositor's lifetime.
-    ensure_dummy_initialized_(cb);
+    // Round-robin the per-frame descriptor set. The renderer's fence
+    // wait on slot N guarantees that the GPU has finished consuming
+    // slot N before we hand back the same command buffer for re-record,
+    // so writing slot (frame_counter_ % N).set is always safe — no
+    // VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT needed.
+    const std::size_t slot_index = static_cast<std::size_t>(frame_counter_ % frame_slots_.size());
+    ++frame_counter_;
+    FrameSlot& frame = frame_slots_[slot_index];
 
     // Pick the mask to bind. The caller's mask must already be in
     // SHADER_READ_ONLY_OPTIMAL — SelectionRasterizer::record() handles
-    // that. The dummy was just transitioned by ensure_dummy_initialized_.
+    // that. The dummy mask was transitioned in create() via
+    // immediate_submit.
     const VkImageView mask_view = (mask != nullptr) ? mask->view() : dummy_mask_->view();
-    noted::gpu::DescriptorWriter{mask_set_}
-        .write_combined_image_sampler(0, mask_view, sampler_->handle())
-        .commit();
+
+    // Skip the write when nothing changed for this slot. Common case
+    // ("same dummy mask every frame") settles into zero descriptor
+    // writes after the first N frames.
+    if (frame.cached_view != mask_view) {
+        noted::gpu::DescriptorWriter{frame.set}
+            .write_combined_image_sampler(0, mask_view, sampler_->handle())
+            .commit();
+        frame.cached_view = mask_view;
+    }
 
     const VkPipelineLayout layout_h = pipeline_layout_->handle();
     constexpr VkShaderStageFlags kStages = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    const VkDescriptorSet set_h = mask_set_.handle();
+    const VkDescriptorSet set_h = frame.set.handle();
     vkCmdBindDescriptorSets(
         cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout_h, 0, 1, &set_h, 0, nullptr);
 
