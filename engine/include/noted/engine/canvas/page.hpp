@@ -91,6 +91,12 @@ public:
     // height + gap). No-op when `index >= size()`.
     void remove_page(std::size_t index);
 
+    // Override a single page's horizontal origin. `add_page` /
+    // `remove_page` do not reflow the X axis (pages share a
+    // left edge by default), so per-page X overrides survive
+    // subsequent list mutations. No-op when `index >= size()`.
+    void set_page_origin_x(std::size_t index, float x) noexcept;
+
     // Total stacked height: sum of page heights + (size - 1) gaps.
     // 0 for an empty list.
     [[nodiscard]] auto total_height_px() const noexcept -> float;
