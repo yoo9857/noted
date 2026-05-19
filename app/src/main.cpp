@@ -11,11 +11,13 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <utility>
 
 #include "noted/engine/hook/registry.hpp"
 #include "noted/engine/profile.hpp"
 
 #include "app.hpp"
+#include "config/app_config.hpp"
 
 namespace {
 
@@ -44,7 +46,13 @@ int main() {
     NOTED_PROFILE_THREAD("main");
     install_default_observers();
 
-    auto app = noted::app::App::create();
+    // Load runtime config: `<exe_dir>/noted.config.json` if present,
+    // else `AppConfig::defaults()`. Per ADR 0030, a malformed config
+    // logs to stderr and falls through to defaults rather than
+    // refusing to launch — the user can still get to a working app.
+    auto cfg = noted::app::config::load_default();
+
+    auto app = noted::app::App::create(std::move(cfg));
     if (!app) {
         std::cerr << app.error().format() << '\n';
         return EXIT_FAILURE;

@@ -58,6 +58,7 @@
 #include "noted/ui/widget/menu_bar.hpp"
 #include "noted/ui/widget/outline_panel.hpp"
 
+#include "config/app_config.hpp"
 #include "scene/demo_scene.hpp"
 #include "ui/dirty_prompt.hpp"
 #include "ui/document_session.hpp"
@@ -66,7 +67,11 @@ namespace noted::app {
 
 class App {
 public:
-    [[nodiscard]] static auto create() -> Result<std::unique_ptr<App>>;
+    // `cfg` is consumed by-value — `App::create` stores the snapshot
+    // and uses it during init. Default = `AppConfig::defaults()` so
+    // tests / callers that don't care about config keep working.
+    [[nodiscard]] static auto create(config::AppConfig cfg = config::AppConfig::defaults())
+        -> Result<std::unique_ptr<App>>;
 
     App(const App&) = delete;
     auto operator=(const App&) -> App& = delete;
@@ -177,6 +182,15 @@ private:
 
     std::optional<noted::gpu::Renderer> renderer_;
     std::optional<noted::ui::ImGuiHost> imgui_host_;
+
+    // ---- Runtime config snapshot ----------------------------------------
+    // Populated by `App::create` from the caller's config. Members
+    // are read during init; values that flow into pipelines /
+    // buffers (frames_in_flight, window size) are baked at startup
+    // and not re-read mid-frame. Per-frame tunables (zoom step,
+    // zoom clamps) are re-read so a future Preferences UI can flip
+    // them live.
+    config::AppConfig cfg_{};
 
     // ---- UI / session state ---------------------------------------------
     DocumentSession session_{};

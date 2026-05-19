@@ -36,10 +36,11 @@ namespace noted::app {
 
 namespace {
 
-// Single source of truth for the CPU-side frames-in-flight count.
-// Used by both the Renderer (frame slot count) and the LayerCompositor
-// (descriptor-set rotation depth — see ADR 0028).
-constexpr std::uint32_t kFramesInFlight = 2;
+// Frames-in-flight default lives on AppConfig now (Phase-1 config
+// migration, ADR 0030). The Renderer + LayerCompositor still
+// receive the value via direct parameters during init; the config
+// snapshot in `App::cfg_.canvas.frames_in_flight` is the single
+// runtime source.
 
 noted::harness::FeatureFlag flag_validation_layers{"gpu.enable_validation_layers",
                                                    /*default=*/true};
@@ -79,8 +80,9 @@ constexpr VkFormat kCanvasFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
 // ---- create / destroy ------------------------------------------------------
 
-auto App::create() -> Result<std::unique_ptr<App>> {
+auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
     auto app = std::unique_ptr<App>(new App{});
+    app->cfg_ = std::move(cfg);
     if (auto r = app->init_engine_and_window(); !r) {
         return std::unexpected(std::move(r).error());
     }
@@ -109,8 +111,10 @@ auto App::create() -> Result<std::unique_ptr<App>> {
     app->last_window_title_ = app->session_.title();
     glfwSetWindowTitle(app->window_->native_handle(), app->last_window_title_.c_str());
 
-    // Apply the default theme exactly once before the first frame
-    // so the very first paint is already styled.
+    // Apply the configured default theme exactly once before the
+    // first frame so the very first paint is already styled.
+    app->applied_theme_ = app->cfg_.ui.default_theme;
+    app->menu_state_.theme = app->cfg_.ui.default_theme;
     noted::ui::theme::apply(app->applied_theme_);
 
     // Seed the camera's canvas + window extents from the swapchain
@@ -140,9 +144,9 @@ auto App::init_engine_and_window() -> noted::Result<void> {
         return std::unexpected(std::move(r).error());
     }
     auto window = noted::platform::Window::create({
-        .title = "noted",
-        .width = 1600,
-        .height = 1000,
+        .title = cfg_.window.title,
+        .width = cfg_.window.width,
+        .height = cfg_.window.height,
     });
     if (!window) {
         return std::unexpected(std::move(window).error());
@@ -265,7 +269,14 @@ auto App::init_canvas_pipeline() -> noted::Result<void> {
         .commit();
 
     // Composite pipeline (canvas → swapchain).
-    const std::filesystem::path shader_dir{NOTED_SHADER_DIR};
+    const auto shader_dir = config::resolve_shader_dir(cfg_);
+    if (shader_dir.empty()) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::file_not_found,
+                              "App: shader directory not found. Set NOTED_SHADER_DIR, place "
+                              "`shaders/` next to the executable, or override via "
+                              "noted.config.json `assets.shaderDir`."));
+    }
     auto vert = load_shader(*device_, shader_dir / "fullscreen.vs_main.spv");
     if (!vert) {
         return std::unexpected(std::move(vert).error());
@@ -308,7 +319,14 @@ auto App::init_canvas_pipeline() -> noted::Result<void> {
 }
 
 auto App::init_layer_compositor() -> noted::Result<void> {
-    const std::filesystem::path shader_dir{NOTED_SHADER_DIR};
+    const auto shader_dir = config::resolve_shader_dir(cfg_);
+    if (shader_dir.empty()) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::file_not_found,
+                              "App: shader directory not found. Set NOTED_SHADER_DIR, place "
+                              "`shaders/` next to the executable, or override via "
+                              "noted.config.json `assets.shaderDir`."));
+    }
     auto layer_vs = load_shader(*device_, shader_dir / "layer.vs_layer.spv");
     if (!layer_vs) {
         return std::unexpected(std::move(layer_vs).error());
@@ -328,7 +346,7 @@ auto App::init_layer_compositor() -> noted::Result<void> {
         .canvas_format = kCanvasFormat,
         .graphics_queue = device_->graphics_queue(),
         .graphics_family = device_->graphics_family(),
-        .frames_in_flight = kFramesInFlight,
+        .frames_in_flight = cfg_.canvas.frames_in_flight,
     });
     if (!layer_compositor) {
         return std::unexpected(std::move(layer_compositor).error());
@@ -344,7 +362,14 @@ auto App::init_layer_compositor() -> noted::Result<void> {
 }
 
 auto App::init_page_renderer() -> noted::Result<void> {
-    const std::filesystem::path shader_dir{NOTED_SHADER_DIR};
+    const auto shader_dir = config::resolve_shader_dir(cfg_);
+    if (shader_dir.empty()) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::file_not_found,
+                              "App: shader directory not found. Set NOTED_SHADER_DIR, place "
+                              "`shaders/` next to the executable, or override via "
+                              "noted.config.json `assets.shaderDir`."));
+    }
     auto vs = load_shader(*device_, shader_dir / "page_bg.vs_page_bg.spv");
     if (!vs) {
         return std::unexpected(std::move(vs).error());
@@ -386,7 +411,14 @@ auto App::init_page_renderer() -> noted::Result<void> {
 }
 
 auto App::init_stroke_engine() -> noted::Result<void> {
-    const std::filesystem::path shader_dir{NOTED_SHADER_DIR};
+    const auto shader_dir = config::resolve_shader_dir(cfg_);
+    if (shader_dir.empty()) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::file_not_found,
+                              "App: shader directory not found. Set NOTED_SHADER_DIR, place "
+                              "`shaders/` next to the executable, or override via "
+                              "noted.config.json `assets.shaderDir`."));
+    }
     auto stamp_vs = load_shader(*device_, shader_dir / "polyline.vs_polyline.spv");
     if (!stamp_vs) {
         return std::unexpected(std::move(stamp_vs).error());
@@ -415,13 +447,27 @@ auto App::init_stroke_engine() -> noted::Result<void> {
 }
 
 auto App::init_renderer_and_imgui() -> noted::Result<void> {
-    auto renderer = noted::gpu::Renderer::create(*device_, *swapchain_, kFramesInFlight);
+    auto renderer =
+        noted::gpu::Renderer::create(*device_, *swapchain_, cfg_.canvas.frames_in_flight);
     if (!renderer) {
         return std::unexpected(std::move(renderer).error());
     }
     renderer_.emplace(std::move(*renderer));
 
-    const auto cjk_font_path = probe_cjk_font();
+    // Resolve CJK font path: explicit config override wins; else
+    // walk the per-OS candidate list. Empty result → ImGui falls
+    // back to ProggyClean (Latin-only) and Hangul renders as boxes
+    // — degraded, not fatal.
+    std::filesystem::path cjk_font_path = cfg_.font.cjk_font_path;
+    std::error_code path_ec;
+    if (!cjk_font_path.empty() && (!std::filesystem::exists(cjk_font_path, path_ec) || path_ec)) {
+        std::cerr << "[font] config-supplied cjk path missing: " << cjk_font_path.string()
+                  << " — falling back to OS probe\n";
+        cjk_font_path.clear();
+    }
+    if (cjk_font_path.empty()) {
+        cjk_font_path = probe_cjk_font();
+    }
     if (cjk_font_path.empty()) {
         std::cerr << "[font] no CJK font detected — Korean glyphs will render as boxes "
                      "(install fonts-noto-cjk on Linux, ship with Malgun Gothic on Windows)\n";
@@ -436,7 +482,7 @@ auto App::init_renderer_and_imgui() -> noted::Result<void> {
         .color_format = swapchain_->summary().color_format,
         .image_count = swapchain_->summary().image_count,
         .cjk_font_path = cjk_font_path,
-        .font_size_px = 16.0F,
+        .font_size_px = cfg_.font.size_px,
     });
     if (!imgui_host) {
         return std::unexpected(std::move(imgui_host).error());
@@ -497,12 +543,12 @@ void App::install_frame_hook() {
     // mirrors the perceptually-uniform feel of Photoshop / Figma.
     // The Camera's internal floor / ceiling absorbs any runaway dy.
     (void) noted::hook::registry().on_scrolled.subscribe([this](const noted::hook::Scrolled& e) {
-        constexpr double kStep = 1.1;
-        const double factor = std::pow(kStep, e.dy);
+        // Re-read `cfg_` every event so a future Preferences UI /
+        // hot-reload can flip the feel without restart. The cost is
+        // negligible — a handful of doubles on the stack per scroll.
+        const double factor = std::pow(cfg_.canvas.zoom_step, e.dy);
         camera_.zoom_around(cursor_x_, cursor_y_, factor);
-        // Pin to a useful user-facing range — too far out and the
-        // canvas is a dot; too far in and pixels become house-sized.
-        camera_.clamp_scale(0.1, 32.0);
+        camera_.clamp_scale(cfg_.canvas.zoom_min, cfg_.canvas.zoom_max);
     });
 
     // Framebuffer resize → keep camera's window extent in sync. The
