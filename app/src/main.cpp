@@ -98,6 +98,43 @@ void install_default_observers() {
     });
 }
 
+// Probe the OS for a CJK-capable TrueType font, returning the first
+// one that exists. Returns an empty path when none of the candidates
+// are present — ImGuiHost then keeps the default ProggyClean bitmap
+// font (Latin-only, hangul renders as boxes).
+[[nodiscard]] auto probe_cjk_font() -> std::filesystem::path {
+    static const std::array<const char*, 6> kCandidates{
+#if defined(_WIN32)
+        // Malgun Gothic ships with every Windows since Vista. The
+        // bold variant is the secondary fallback for the rare slim
+        // image where the regular face was uninstalled.
+        "C:/Windows/Fonts/malgun.ttf",
+        "C:/Windows/Fonts/malgunbd.ttf",
+#elif defined(__APPLE__)
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+        "/Library/Fonts/AppleGothic.ttf",
+#else
+        // Debian/Ubuntu via fonts-noto-cjk; Arch via noto-fonts-cjk.
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+#endif
+        nullptr,
+        nullptr,
+    };
+    std::error_code ec;
+    for (const auto* p : kCandidates) {
+        if (p == nullptr) {
+            continue;
+        }
+        std::filesystem::path candidate{p};
+        if (std::filesystem::exists(candidate, ec) && !ec) {
+            return candidate;
+        }
+    }
+    return {};
+}
+
 [[nodiscard]] auto create_window_surface(VkInstance instance, noted::platform::Window& window)
     -> noted::Result<VkSurfaceKHR> {
     VkSurfaceKHR raw = VK_NULL_HANDLE;
@@ -457,6 +494,13 @@ int main() {
     // pass; the existing textured-quad demo still draws underneath
     // until feat/ui-compositor-wire takes over the canvas pass (ADR
     // 0027 follow-up #18b).
+    const auto cjk_font_path = probe_cjk_font();
+    if (cjk_font_path.empty()) {
+        std::cerr << "[font] no CJK font detected — Korean glyphs will render as boxes "
+                     "(install fonts-noto-cjk on Linux, ship with Malgun Gothic on Windows)\n";
+    } else {
+        std::cout << "[font] using CJK font: " << cjk_font_path.string() << '\n';
+    }
     auto imgui_host = noted::ui::ImGuiHost::create({
         .instance = &*instance,
         .physical_device = &*physical,
@@ -464,6 +508,8 @@ int main() {
         .window = window->native_handle(),
         .color_format = swapchain->summary().color_format,
         .image_count = swapchain->summary().image_count,
+        .cjk_font_path = cjk_font_path,
+        .font_size_px = 16.0F,
     });
     if (!imgui_host) {
         std::cerr << imgui_host.error().format() << '\n';
@@ -633,6 +679,7 @@ int main() {
             if (ImGui::Begin(
                     "About noted", &menu_state.show_about_window, ImGuiWindowFlags_NoCollapse)) {
                 ImGui::TextUnformatted("noted — note-taking + raster editor");
+                ImGui::TextUnformatted("노트 + 래스터 이미지 에디터");
                 ImGui::TextUnformatted("v0.x development build");
                 ImGui::Spacing();
                 ImGui::TextDisabled("Engine: C++23 + Vulkan 1.4 + Slang");

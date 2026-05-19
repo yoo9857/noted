@@ -2,7 +2,9 @@
 
 #include <array>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <utility>
 
 #include <imgui.h>
@@ -50,6 +52,78 @@ void check_vk_result(VkResult err) {
     // through harness::validate; until then keep it noisy via the
     // standard C runtime.
     std::fprintf(stderr, "ImGui Vulkan call failed: VkResult=%d\n", static_cast<int>(err));
+}
+
+// Try to load the caller-supplied font with the Korean glyph range
+// merged in. On any failure (missing file, parse error, atlas build
+// failure) emit a warning and fall back to the default ProggyClean
+// font — a missing CJK font is degraded UX, not a fatal error
+// (HANDOFF / ADR 0027 resilience posture).
+//
+// Returns true when the custom font took effect, false on fallback.
+// The caller (create()) does not act on the return value beyond
+// logging — both paths produce a usable atlas.
+[[nodiscard]] auto try_load_cjk_font(const std::filesystem::path& path, float size_px) -> bool {
+    ImGuiIO& io = ImGui::GetIO();
+    if (path.empty()) {
+        return false;
+    }
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec) || ec) {
+        std::fprintf(stderr,
+                     "ImGuiHost: CJK font '%s' not found; falling back to default\n",
+                     path.string().c_str());
+        return false;
+    }
+    if (!(size_px > 0.0F)) {
+        std::fprintf(stderr,
+                     "ImGuiHost: CJK font size_px=%.2f is non-positive; falling back to default\n",
+                     static_cast<double>(size_px));
+        return false;
+    }
+
+    // A larger atlas is required to hold the 2350+ Hangul Syllables
+    // plus Latin basic + ASCII at a legible 16+ px size. 2048×2048 is
+    // the standard "enough headroom for KR" size in ImGui's own
+    // examples; the atlas allocation is ~4 MB once.
+    io.Fonts->TexDesiredWidth = 2048;
+
+    ImFontConfig cfg{};
+    cfg.OversampleH = 2;
+    cfg.OversampleV = 1;
+    cfg.PixelSnapH = false;
+
+    // GetGlyphRangesKorean() returns ranges that cover Latin basic +
+    // Hangul Syllables + Hangul Jamo. Sufficient for the user's
+    // primary language; an extended-CJK build can swap to a merged
+    // KR+JP+CN range in a follow-up if Japanese/Chinese typing lands.
+    const ImWchar* ranges = io.Fonts->GetGlyphRangesKorean();
+
+    // The file content is owned by ImGui after AddFontFromFileTTF —
+    // it reads the bytes and keeps them. ImGui's loader returns nullptr
+    // on parse failure; we don't pre-clear the atlas because the
+    // default font is added on demand if no font has been registered.
+    ImFont* font = io.Fonts->AddFontFromFileTTF(path.string().c_str(), size_px, &cfg, ranges);
+    if (font == nullptr) {
+        std::fprintf(stderr,
+                     "ImGuiHost: AddFontFromFileTTF('%s', %.1f) returned null; "
+                     "falling back to default\n",
+                     path.string().c_str(),
+                     static_cast<double>(size_px));
+        // Clear any partially-added state so the default-font path is
+        // pristine. Build() below would otherwise see a half-registered
+        // entry.
+        io.Fonts->Clear();
+        return false;
+    }
+    if (!io.Fonts->Build()) {
+        std::fprintf(stderr,
+                     "ImGuiHost: ImFontAtlas::Build() failed for '%s'; falling back to default\n",
+                     path.string().c_str());
+        io.Fonts->Clear();
+        return false;
+    }
+    return true;
 }
 
 }  // namespace
@@ -103,6 +177,12 @@ auto ImGuiHost::create(const ImGuiHostCreateInfo& info) -> Result<ImGuiHost> {
     // windows that conflict with our pen-input subclass on Windows
     // (ADR 0017). Re-enable if the docking refactor establishes a
     // clean child-window pen-input path.
+
+    // 2a. Font atlas. Wire the optional CJK font BEFORE the Vulkan
+    // backend init so ImGui_ImplVulkan_Init's lazy font-texture upload
+    // sees the final atlas. The helper falls back to the default
+    // bitmap font on any failure — never blocks create().
+    (void) try_load_cjk_font(info.cjk_font_path, info.font_size_px);
 
     // 3. GLFW backend — wires input and clipboard.
     if (!ImGui_ImplGlfw_InitForVulkan(info.window, /*install_callbacks=*/true)) {

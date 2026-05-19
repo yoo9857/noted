@@ -32,6 +32,7 @@
 // Rationale: see docs/architecture/0027-ui-stack-selection.md.
 
 #include <cstdint>
+#include <filesystem>
 
 #include <vulkan/vulkan.h>
 
@@ -61,9 +62,21 @@ struct ImGuiHostCreateInfo {
     // frame-in-flight count for ImGui's per-frame state.
     std::uint32_t image_count{2};
 
-    // ImGui's font atlas size is bounded by VRAM; the default is
-    // sufficient for ASCII + Latin Extended. CJK glyph ranges are
-    // wired in the theme-pass PR.
+    // Optional CJK-capable TrueType / OpenType font. When set and the
+    // file exists, ImGuiHost loads it as the primary font with the
+    // Korean glyph range merged in (Hangul Syllables + Jamo + Latin
+    // basic). When empty, missing, or unreadable, ImGui's default
+    // ProggyClean bitmap font is used and a warning is written to
+    // stderr — the host never fails create() over a font issue,
+    // because a missing font is a degraded-but-usable state, not a
+    // fatal error in line with ADR 0027's resilience posture.
+    std::filesystem::path cjk_font_path{};
+
+    // Pixel size of the loaded font. Ignored when cjk_font_path is
+    // empty (ProggyClean is bitmap-fixed at ~13 px). 16 is the
+    // smallest size that keeps Hangul legible without subpixel
+    // hinting; 18-20 is more comfortable on high-DPI displays.
+    float font_size_px{16.0F};
 };
 
 class ImGuiHost {
