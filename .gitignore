@@ -66,6 +66,11 @@ desktop.ini
 RenderDoc*
 NsightCache/
 
+# Dear ImGui writes its docking / window-position state next to the
+# binary's working directory on shutdown. Per-user runtime state,
+# never something to check in.
+imgui.ini
+
 # Generated docs
 docs/_build/
 docs/html/
