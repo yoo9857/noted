@@ -586,6 +586,34 @@ int main() {
     };
     glfwSetWindowTitle(window->native_handle(), window_title_for().c_str());
 
+    auto is_dirty = [&]() -> bool { return undo_stack.undo_size() != saved_undo_size; };
+
+    // Discrete actions the "save changes?" modal is gating. Stored across
+    // frames because the modal stays open until the user picks one of
+    // Save / Discard / Cancel.
+    enum class PendingExitAction { none, quit, new_doc };
+    PendingExitAction pending_action = PendingExitAction::none;
+    // Set when any callsite has armed the prompt; drained at the top of
+    // the ImGui frame via `OpenPopup`, which must be called from inside
+    // a frame. Decouples "arm from anywhere" from "open in the right
+    // ImGui phase."
+    bool should_open_dirty_prompt = false;
+    // Set ONLY by the modal's Save (on success) or Discard branches.
+    // The loop-top close intercept treats this as "the user has
+    // already answered" and lets the exit proceed even on a still-
+    // dirty doc — guards against the double-X-click race where the
+    // second click would otherwise bypass the modal.
+    bool confirmed_exit = false;
+
+    auto reset_to_blank_document = [&]() {
+        document = noted::domain::Document{};
+        undo_stack.clear();
+        selected_block = noted::domain::invalid_block_id;
+        current_path.reset();
+        saved_undo_size = undo_stack.undo_size();
+        glfwSetWindowTitle(window->native_handle(), window_title_for().c_str());
+    };
+
     // Save the document to `path`, refreshing the dirty baseline + title
     // on success. Centralized so Save and Save As share the post-write
     // bookkeeping.
@@ -597,6 +625,58 @@ int main() {
         saved_undo_size = undo_stack.undo_size();
         glfwSetWindowTitle(window->native_handle(), window_title_for().c_str());
         return {};
+    };
+
+    // Carry out whatever `pending_action` is set to, then clear it.
+    // Called by the dirty-prompt modal after Save (on success) or
+    // Discard. Cancel does NOT call this — it just clears
+    // `pending_action`.
+    auto execute_pending_action = [&]() {
+        switch (pending_action) {
+            case PendingExitAction::quit:
+                confirmed_exit = true;
+                glfwSetWindowShouldClose(window->native_handle(), GLFW_TRUE);
+                break;
+            case PendingExitAction::new_doc:
+                reset_to_blank_document();
+                break;
+            case PendingExitAction::none:
+                break;
+        }
+        pending_action = PendingExitAction::none;
+    };
+
+    // Save the current document for the dirty-prompt's "Save" button.
+    // Mirrors menu_bar's Save semantics: in-place when a backing path
+    // exists, else falls through to Save As. Returns true iff a write
+    // actually completed — the modal uses this to decide whether to
+    // close + execute the pending action or stay open so the user can
+    // try a different choice.
+    auto save_for_dirty_prompt = [&]() -> bool {
+        if (current_path.has_value()) {
+            if (auto r = write_document_to(*current_path); !r) {
+                std::cerr << r.error().format() << '\n';
+                return false;
+            }
+            return true;
+        }
+        auto picked = noted::platform::io::pick_noted_save("untitled.noted");
+        if (!picked) {
+            std::cerr << picked.error().format() << '\n';
+            return false;
+        }
+        if (!picked->has_value()) {
+            return false;  // user cancelled the Save As dialog
+        }
+        std::filesystem::path target = **picked;
+        if (target.extension() != ".noted") {
+            target += ".noted";
+        }
+        if (auto r = write_document_to(target); !r) {
+            std::cerr << r.error().format() << '\n';
+            return false;
+        }
+        return true;
     };
 
     noted::ui::widget::MenuBarState menu_state{};
@@ -635,7 +715,30 @@ int main() {
             imgui_host_ptr->render_into(cb);
         };
 
-    while (!window->should_close()) {
+    while (true) {
+        // Loop-top close intercept — catches the GLFW window X button,
+        // the File → Quit menu item (which calls
+        // glfwSetWindowShouldClose internally), and the Ctrl+Q chord
+        // (which routes through the same menu signal). Three outcomes:
+        //   1. User already answered Save/Discard (`confirmed_exit`)
+        //      or the doc is clean → break out of the loop.
+        //   2. Dirty, no pending modal yet → arm the prompt and
+        //      swallow the GLFW close flag.
+        //   3. Dirty, modal already armed for quit (e.g. user double-
+        //      clicked X) → swallow the GLFW close flag and let the
+        //      existing modal stay visible. Without this, the second
+        //      click would slip past and lose the user's edits.
+        if (window->should_close()) {
+            if (confirmed_exit || !is_dirty()) {
+                break;
+            }
+            glfwSetWindowShouldClose(window->native_handle(), GLFW_FALSE);
+            if (pending_action != PendingExitAction::quit) {
+                pending_action = PendingExitAction::quit;
+                should_open_dirty_prompt = true;
+            }
+        }
+
         engine.begin_frame();
         {
             NOTED_PROFILE_ZONE_N("poll_events");
@@ -701,15 +804,18 @@ int main() {
             // pattern is documented enough that going through the
             // native handle is acceptable for now. A small follow-up
             // PR can add the wrapper if a second caller appears.
+            // The loop-top intercept above handles the dirty-prompt
+            // hand-off; pressing Quit on a clean doc still exits
+            // immediately on the next iteration.
             glfwSetWindowShouldClose(window->native_handle(), GLFW_TRUE);
         }
         if (menu.file_new_requested) {
-            document = noted::domain::Document{};
-            undo_stack.clear();
-            selected_block = noted::domain::invalid_block_id;
-            current_path.reset();
-            saved_undo_size = undo_stack.undo_size();
-            glfwSetWindowTitle(window->native_handle(), window_title_for().c_str());
+            if (is_dirty()) {
+                pending_action = PendingExitAction::new_doc;
+                should_open_dirty_prompt = true;
+            } else {
+                reset_to_blank_document();
+            }
         }
         if (menu.file_open_requested) {
             auto picked = noted::platform::io::pick_noted_open();
@@ -794,6 +900,53 @@ int main() {
                 selected_block = cmd_ptr->assigned_id();
                 glfwSetWindowTitle(window->native_handle(), window_title_for().c_str());
             }
+        }
+
+        // Drain the queued OpenPopup. ImGui requires the call to come
+        // from inside a frame, so the arming sites only set a flag and
+        // the actual `OpenPopup` happens here. Reset before opening so
+        // the same flag can be re-armed within the same frame without
+        // a double-open (BeginPopupModal silently absorbs a second
+        // open on an already-open popup, but the explicit reset keeps
+        // the state machine readable).
+        if (should_open_dirty_prompt) {
+            should_open_dirty_prompt = false;
+            ImGui::OpenPopup("Unsaved changes##dirty");
+        }
+        {
+            // Center the modal on the main viewport. SetNextWindowPos
+            // only takes effect on Appearing — re-runs of the popup
+            // pick up wherever the user last moved it, which is the
+            // expected ImGui pattern.
+            const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+            ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5F, 0.5F));
+        }
+        if (ImGui::BeginPopupModal(
+                "Unsaved changes##dirty",
+                nullptr,
+                ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+            ImGui::TextUnformatted("You have unsaved changes. Save before continuing?");
+            ImGui::Spacing();
+            constexpr ImVec2 kButton{110.0F, 0.0F};
+            if (ImGui::Button("Save", kButton)) {
+                if (save_for_dirty_prompt()) {
+                    ImGui::CloseCurrentPopup();
+                    execute_pending_action();
+                }
+                // On save failure / user-cancelled Save As: stay in the
+                // modal so the user can pick Discard or Cancel.
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Discard", kButton)) {
+                ImGui::CloseCurrentPopup();
+                execute_pending_action();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel", kButton)) {
+                pending_action = PendingExitAction::none;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
         }
 
         noted::ui::widget::layer_panel(scene_graph, &menu_state.show_layer_panel);
