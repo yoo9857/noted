@@ -10,6 +10,14 @@ auto build_demo_scene() -> noted::Result<DemoScene> {
     using LK = noted::domain::LayerKind;
     DemoScene s;
 
+    // The graph is still wired with the four demo layers + their
+    // blend modes + input edges so the layer panel has something
+    // to show and toggle. **Payloads are intentionally omitted**
+    // so the compositor walks the graph and emits no draws — the
+    // page background from PageRenderer is what the user sees
+    // instead. Re-add the SolidColor payloads to put the demo
+    // canvas-fill back as a regression check, or wire real
+    // bitmap payloads (P3 follow-up) for actual image layers.
     const auto bg = s.graph.add_layer(LK::bitmap, "background");
     const auto red = s.graph.add_layer(LK::bitmap, "red");
     const auto add = s.graph.add_layer(LK::bitmap, "additive glow");
@@ -42,10 +50,8 @@ auto build_demo_scene() -> noted::Result<DemoScene> {
         return std::unexpected(std::move(r).error());
     }
 
-    s.store.set(bg, noted::compositor::SolidColor{0.15F, 0.18F, 0.22F, 1.0F});
-    s.store.set(red, noted::compositor::SolidColor{0.85F, 0.25F, 0.30F, 1.0F});
-    s.store.set(add, noted::compositor::SolidColor{0.20F, 0.45F, 0.95F, 1.0F});
-    s.store.set(warm, noted::compositor::SolidColor{0.95F, 0.85F, 0.70F, 1.0F});
+    // Payload registration deliberately skipped — see the
+    // top-of-function comment.
 
     return s;
 }

@@ -93,6 +93,9 @@ auto App::create() -> Result<std::unique_ptr<App>> {
     if (auto r = app->init_layer_compositor(); !r) {
         return std::unexpected(std::move(r).error());
     }
+    if (auto r = app->init_page_renderer(); !r) {
+        return std::unexpected(std::move(r).error());
+    }
     if (auto r = app->init_stroke_engine(); !r) {
         return std::unexpected(std::move(r).error());
     }
@@ -337,6 +340,48 @@ auto App::init_layer_compositor() -> noted::Result<void> {
         return std::unexpected(std::move(scene).error());
     }
     scene_.emplace(std::move(*scene));
+    return {};
+}
+
+auto App::init_page_renderer() -> noted::Result<void> {
+    const std::filesystem::path shader_dir{NOTED_SHADER_DIR};
+    auto vs = load_shader(*device_, shader_dir / "page_bg.vs_page_bg.spv");
+    if (!vs) {
+        return std::unexpected(std::move(vs).error());
+    }
+    page_bg_vs_.emplace(std::move(*vs));
+    auto ps = load_shader(*device_, shader_dir / "page_bg.ps_page_bg.spv");
+    if (!ps) {
+        return std::unexpected(std::move(ps).error());
+    }
+    page_bg_ps_.emplace(std::move(*ps));
+
+    auto pr = noted::canvas::PageRenderer::create({
+        .device = &*device_,
+        .vs_module = &*page_bg_vs_,
+        .ps_module = &*page_bg_ps_,
+        .canvas_format = kCanvasFormat,
+    });
+    if (!pr) {
+        return std::unexpected(std::move(pr).error());
+    }
+    page_renderer_.emplace(std::move(*pr));
+
+    // Seed with a single demo page — US Letter at 72 DPI, grid
+    // background, centred-ish in the initial swapchain extent so
+    // the user sees paper immediately on first paint. The page's
+    // `add_page` clamps + reflows so this works regardless of the
+    // canvas size at startup.
+    const auto canvas = swapchain_->summary().extent;
+    const float page_w = 612.0F;
+    const float page_h = 792.0F;
+    const float origin_x = std::max(20.0F, (static_cast<float>(canvas.width) - page_w) * 0.5F);
+    pages_ = noted::canvas::PageList{24.0F};
+    const auto idx = pages_.add_page(page_w, page_h, noted::canvas::PageBackground::grid);
+    // `add_page` puts the page at x=0; nudge it to a horizontally
+    // centred position so the user sees it immediately at the
+    // identity camera transform.
+    pages_.set_page_origin_x(idx, origin_x);
     return {};
 }
 
@@ -825,6 +870,14 @@ auto App::render_one_frame() -> noted::Result<void> {
 }
 
 void App::record_canvas_pass(VkCommandBuffer cb, VkExtent2D ext) {
+    // Order matters:
+    //   1. Page backgrounds — paper rectangles. The canvas pass's
+    //      clear colour shows through everywhere outside the pages.
+    //   2. Layer compositor — adjustment / image layers within
+    //      pages (none today; demo payloads were dropped in
+    //      A.3.b so pages stay visible).
+    //   3. Stroke engine — vector ink ribbons on top.
+    page_renderer_->render(cb, ext, pages_);
     layer_compositor_->composite(cb, ext, scene_->graph, scene_->store);
     stroke_engine_->record(cb, ext);
 }

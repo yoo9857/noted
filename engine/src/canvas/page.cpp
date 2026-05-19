@@ -58,6 +58,20 @@ void PageList::remove_page(std::size_t index) {
     reflow_origins();
 }
 
+void PageList::set_page_origin_x(std::size_t index, float x) noexcept {
+    if (index >= pages_.size()) {
+        return;
+    }
+    // NaN guard: a stray bad input shouldn't dump the page off
+    // the document. The page's X is purely cosmetic (it's how the
+    // shader places the quad on canvas), so the safest fallback
+    // is "leave it where it is."
+    if (x != x) {
+        return;
+    }
+    pages_[index].origin_x_px = x;
+}
+
 auto PageList::total_height_px() const noexcept -> float {
     if (pages_.empty()) {
         return 0.0F;

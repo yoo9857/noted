@@ -31,6 +31,8 @@
 
 #include "noted/compositor/layer_compositor.hpp"
 #include "noted/engine/canvas/camera.hpp"
+#include "noted/engine/canvas/page.hpp"
+#include "noted/engine/canvas/page_renderer.hpp"
 #include "noted/engine/engine.hpp"
 #include "noted/engine/error/error.hpp"
 #include "noted/engine/gpu/allocator.hpp"
@@ -115,6 +117,7 @@ private:
     [[nodiscard]] auto init_gpu_stack() -> noted::Result<void>;
     [[nodiscard]] auto init_canvas_pipeline() -> noted::Result<void>;
     [[nodiscard]] auto init_layer_compositor() -> noted::Result<void>;
+    [[nodiscard]] auto init_page_renderer() -> noted::Result<void>;
     [[nodiscard]] auto init_stroke_engine() -> noted::Result<void>;
     [[nodiscard]] auto init_renderer_and_imgui() -> noted::Result<void>;
     void install_frame_hook();
@@ -157,6 +160,14 @@ private:
     std::optional<noted::gpu::ShaderModule> layer_ps_;
     std::optional<noted::compositor::LayerCompositor> layer_compositor_;
     std::optional<DemoScene> scene_;
+
+    // Page rendering — Phase A.3.b. The page list is the document's
+    // canvas layout; the renderer draws each page's paper background
+    // BEFORE the layer compositor + stroke engine layer on top.
+    std::optional<noted::gpu::ShaderModule> page_bg_vs_;
+    std::optional<noted::gpu::ShaderModule> page_bg_ps_;
+    std::optional<noted::canvas::PageRenderer> page_renderer_;
+    noted::canvas::PageList pages_{};
 
     std::optional<noted::gpu::ShaderModule> stamp_vs_;
     std::optional<noted::gpu::ShaderModule> stamp_ps_;

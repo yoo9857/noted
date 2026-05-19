@@ -32,6 +32,7 @@ noted_add_module(
         src/stroke/stroke_geometry.cpp
         src/canvas/camera.cpp
         src/canvas/page.cpp
+        src/canvas/page_renderer.cpp
     PUBLIC_DEPS
         Vulkan::Vulkan
         glfw
