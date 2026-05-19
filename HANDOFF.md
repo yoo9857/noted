@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-19 · **main HEAD:** `036fba0` (clean, 0 open PRs at last sync)
+**Last updated:** 2026-05-19 · **main HEAD:** `311a627` (clean, 0 open PRs)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -30,9 +30,9 @@ on top, and a Dear ImGui-driven product shell renders on top with:
   - **Status bar** — frame index + FPS pinned to bottom.
 
 The frame loop ticks at ~0.5 ms CPU on a GTX 1050 Ti (240-frame
-sample). See **Known debt and gotchas** below for the pre-existing
-validation warnings around `LayerCompositor::ensure_dummy_initialized_`
-and per-frame descriptor-set rewrites.
+sample) with **zero Vulkan validation errors** — the LayerCompositor
+moved its one-time dummy-mask init out of the render pass and now
+rotates descriptor sets per frame-in-flight (ADR 0028).
 ImGui's `IM_ASSERT` routes through `harness::validate` so internal
 invariant violations land in the same observability channel as
 every other engine assertion (ADR 0027).
@@ -181,6 +181,17 @@ tests/        Unit + integration + bench + fuzz scaffolds
    backing path. Title bar shows `noted — <filename> [*]`. Save As
    force-appends `.noted` so the file always round-trips through the
    same filter. See P4 #18d-file.
+✅ Frame-safe compositor: `LayerCompositor::create()` runs the dummy
+   mask's clear + transition synchronously via the new
+   `gpu::immediate_submit` helper (transient pool + one-time-submit CB
+   + fence wait). composite() is now a pure-draw path with per-frame-
+   in-flight descriptor sets and view-cached descriptor writes — zero
+   barriers, zero spec violations. See ADR 0028.
+✅ CJK font: ImGuiHost loads an OS-installed CJK TTF/TTC at startup
+   with `GetGlyphRangesKorean()` + 2048×2048 atlas. main.cpp probes
+   malgun.ttf / AppleSDGothicNeo / Noto Sans CJK KR / Nanum Gothic in
+   that order. Graceful fallback to ProggyClean on any failure — never
+   blocks `ImGuiHost::create()`.
 ✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
    (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
    their warnings can't leak. `/Ob[0-9]` collisions removed at the
@@ -270,18 +281,20 @@ ImGui for v0.x with an explicit phase boundary for v1.0
 re-evaluation.
 
 1. ~~**`feat/ui-file-menu-wire`**~~ ✅ landed (PR #45).
-2. **`feat/ui-keyboard-shortcuts`** — bind Ctrl+N/O/S/Shift+S/Z/Y
+2. ~~**`fix/compositor-render-pass-init`**~~ ✅ landed (PR #46) — ADR 0028.
+3. ~~**`feat/ui-cjk-font`**~~ ✅ landed (PR #47) — CJK font half of #18h.
+4. **`feat/ui-keyboard-shortcuts`** — bind Ctrl+N/O/S/Shift+S/Z/Y
    in main.cpp via `ImGui::IsKeyChordPressed` so the menu hints
    stop lying. ~1 h.
-3. **`feat/ui-dirty-confirm`** — intercept window-close on a
+5. **`feat/ui-dirty-confirm`** — intercept window-close on a
    dirty document and prompt Save / Discard / Cancel via an
    ImGui modal. Same plumbing covers File → New on dirty. ~2 h.
-4. **`feat/ui-debug-overlay`** — Tracy-style overlay: FPS,
+6. **`feat/ui-debug-overlay`** — Tracy-style overlay: FPS,
    harness counters, fallback counts. Validates the
    `binding/` channel → view plumbing. ~2 h.
-5. **`feat/ui-theme-pass`** — Custom ImGuiStyle + CJK-capable
-   font atlas + dark/light theme. Pushes back the "looks like
-   debug tool" risk. ~4 h.
+7. **`feat/ui-theme-pass`** — Custom ImGuiStyle + dark/light theme.
+   The CJK font half of this item shipped in PR #47; what remains is
+   the colour scheme. ~3 h.
 
 **Deferred until UI validation:**
 - P5 #13 `feat/shader-objects` (`VK_EXT_shader_object`) and
@@ -364,27 +377,12 @@ the product has actual content.
 | 18e | `feat/ui-keyboard-shortcuts` | 1h | Bind Ctrl+N/O/S/Shift+S/Z/Y via `ImGui::IsKeyChordPressed`. The menu hints already display them. |
 | 18f | `feat/ui-dirty-confirm` | 2h | Modal "Save / Discard / Cancel" on window close + File → New when the document is dirty. |
 | 18g | `feat/ui-debug-overlay` | 2h | Tracy-style overlay: FPS, harness counters, fallback counts. Validates the `binding/` channel → view plumbing. |
-| 18h | `feat/ui-theme-pass` | 4h | Custom `ImGuiStyle` + CJK-capable font atlas + dark/light theme. Defuses the "looks like debug tool" risk. |
+| 18h-font | ~~`feat/ui-cjk-font`~~ ✅ **landed** (PR #47) | — | OS-installed CJK TTF/TTC probed at startup (malgun.ttf / AppleSDGothicNeo / Noto Sans CJK KR / Nanum Gothic). `GetGlyphRangesKorean()` + 2048×2048 atlas. Graceful fallback to ProggyClean on any failure. |
+| 18h-theme | `feat/ui-theme-pass` | 3h | Custom `ImGuiStyle` + dark/light palette. Defuses the "looks like debug tool" risk. |
 
 ---
 
 ## Known debt and gotchas
-
-### Pre-existing Vulkan validation noise (P3 #9b/#9c follow-up)
-At runtime the validation layer reports:
-1. `vkCmdClearColorImage` + `vkCmdPipelineBarrier2` called inside
-   a `vkCmdBeginRendering` instance — `LayerCompositor::ensure_dummy_initialized_`
-   does its one-time clear-to-white on the canvas command buffer
-   which is already inside the canvas render pass.
-2. `vkUpdateDescriptorSets` on a descriptor set still in flight on
-   a prior frame's command buffer — `LayerCompositor::composite()`
-   rewrites the mask binding every frame without
-   `VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT`.
-Both are real spec violations, neither is introduced by recent UI
-PRs. Fix path: hoist dummy init out of the render pass (probably
-into a dedicated "prepare()" call recorded before the canvas pass
-begins), and either double-buffer the mask descriptor set or
-enable update-after-bind.
 
 ### Format drift — resolved
 clang-format-18 is mandatory on every PR. Local setup:
