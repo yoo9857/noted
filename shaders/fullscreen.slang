@@ -8,6 +8,20 @@
 //
 // Compiled to SPIR-V via slangc; see shaders/CMakeLists.txt.
 
+// View transform applied by vs_main. `scale` and `translation` come
+// from `noted::canvas::Camera::shader_scale_*` /
+// `shader_translation_*` so the identity camera reproduces the
+// original `ndc = uv * 2 - 1` mapping with scale=(2,2) and
+// translation=(-1,-1). Push-constant size = 16 bytes — well under
+// the 128-byte Vulkan minimum.
+struct CompositePush {
+    float2 scale;        // offset 0, 8 bytes
+    float2 translation;  // offset 8, 8 bytes
+};
+
+[[vk::push_constant]]
+CompositePush u_view;
+
 struct VOut {
     float4 pos : SV_Position;
     float2 uv  : TEXCOORD0;
@@ -17,7 +31,9 @@ struct VOut {
 VOut vs_main(uint vid : SV_VertexID) {
     VOut o;
     o.uv  = float2(float((vid << 1) & 2), float(vid & 2));
-    o.pos = float4(o.uv * 2.0 - 1.0, 0.0, 1.0);
+    // o.pos.xy = uv * scale + translation; at identity that reduces
+    // to uv * 2 - 1 — the standard fullscreen-triangle mapping.
+    o.pos = float4(o.uv * u_view.scale + u_view.translation, 0.0, 1.0);
     return o;
 }
 

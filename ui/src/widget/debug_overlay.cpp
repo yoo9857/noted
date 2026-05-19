@@ -103,6 +103,14 @@ void debug_overlay(const DebugOverlayInputs& inputs, const DebugOverlayState& st
         ImGui::TextDisabled("(blend modes without a fixed-function pipeline drew via NORMAL)");
     }
 
+    // ---- Canvas camera --------------------------------------------------
+    if (inputs.camera_scale > 0.0) {
+        ImGui::Separator();
+        ImGui::TextUnformatted("camera");
+        ImGui::Text("zoom   %.0f%%", inputs.camera_scale * 100.0);
+        ImGui::Text("pan    %.0f, %.0f", inputs.camera_translation_x, inputs.camera_translation_y);
+    }
+
     // ---- Harness counters ------------------------------------------------
     // `all_counters()` returns the live set registered at static-init
     // time — typically a handful of engine-lifecycle counters. The

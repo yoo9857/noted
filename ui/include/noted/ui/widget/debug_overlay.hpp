@@ -32,6 +32,12 @@ struct DebugOverlayInputs {
     // Snapshotted at draw time. `LayerCompositor::fallback_count()`
     // is the canonical source; main.cpp wires the value through.
     std::uint64_t fallback_count{0};
+    // Active canvas camera (Goodnotes-style pan + zoom). The host
+    // passes values from its `noted::canvas::Camera`. Zero scale
+    // suppresses the row — leaves headless / test contexts clean.
+    double camera_scale{0.0};
+    double camera_translation_x{0.0};
+    double camera_translation_y{0.0};
 };
 
 // Ring buffer of recent per-frame CPU times. Caller owns one; pushes

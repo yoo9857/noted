@@ -20,6 +20,12 @@ struct StatusBarInfo {
     std::uint64_t frame_index{0};
     // FPS comes from ImGuiIO::Framerate at render time. No need to
     // pre-compute it on the host side; the widget reads it itself.
+
+    // Canvas zoom as a percentage (1.0 → "100%"). Host supplies it
+    // from the active `noted::canvas::Camera`. 0 (or any
+    // non-positive) skips the readout — leaves room for tests /
+    // headless contexts that don't bind a camera.
+    float zoom_pct{100.0F};
 };
 
 // Render the status bar. Always visible; toggling lives behind the

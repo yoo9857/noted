@@ -30,6 +30,7 @@
 #include <vulkan/vulkan.h>
 
 #include "noted/compositor/layer_compositor.hpp"
+#include "noted/engine/canvas/camera.hpp"
 #include "noted/engine/engine.hpp"
 #include "noted/engine/error/error.hpp"
 #include "noted/engine/gpu/allocator.hpp"
@@ -174,6 +175,24 @@ private:
     noted::ui::widget::OutlineRenameState outline_rename_{};
     noted::ui::theme::ThemeKind applied_theme_{noted::ui::theme::ThemeKind::dark};
     std::string last_window_title_{};
+
+    // ---- Canvas view --------------------------------------------------
+    // Pan + scale state shared by the composite pass (camera-projected
+    // canvas quad), the stroke engine (input unprojection), and the
+    // status / debug overlays (zoom % readout).
+    noted::canvas::Camera camera_{};
+    // Last seen pointer position in screen pixels — tracked so the
+    // scroll handler can zoom around the cursor. Updated on every
+    // pointer-moved event.
+    double cursor_x_{0.0};
+    double cursor_y_{0.0};
+    // Middle-button drag state for canvas panning. `panning_` is true
+    // between middle-press and middle-release; `pan_last_*` stores the
+    // previous frame's pointer position so the move handler can
+    // compute a delta.
+    bool panning_{false};
+    double pan_last_x_{0.0};
+    double pan_last_y_{0.0};
 };
 
 }  // namespace noted::app

@@ -14,6 +14,7 @@ add_executable(noted_unit_tests
     document_json_test.cpp
     noted_file_test.cpp
     imgui_host_test.cpp
+    camera_test.cpp
 )
 
 target_link_libraries(noted_unit_tests PRIVATE noted_test_harness noted::domain noted::compositor noted::platform noted::ui)
