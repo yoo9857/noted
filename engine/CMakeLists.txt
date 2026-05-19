@@ -29,6 +29,7 @@ noted_add_module(
         src/gpu/pipeline_layout.cpp
         src/gpu/graphics_pipeline.cpp
         src/stroke/stroke_engine.cpp
+        src/stroke/stroke_geometry.cpp
         src/canvas/camera.cpp
     PUBLIC_DEPS
         Vulkan::Vulkan

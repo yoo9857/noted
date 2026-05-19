@@ -1,0 +1,89 @@
+#pragma once
+
+// Vector-ink stroke geometry — the resolution-independent data model
+// that supersedes the SDF disk-stamp accumulation from ADR 0015.
+//
+// Why vector ink (Phase A.2 of the unified-canvas plan):
+//   - Stamps live at the resolution they were drawn at. Zoom in
+//     past 1.0 and the antialiased disk turns into a blurry blob.
+//     Goodnotes / Procreate avoid this by storing the centerline
+//     and re-tessellating per frame.
+//   - A vector stroke is roundtrip-stable for the `.noted` file
+//     format: pen samples in, pen samples out — no rasterisation
+//     loss across save/load.
+//   - The ribbon is what the GPU draws. Tessellation is a pure
+//     function of the centerline + brush style, so the GPU upload
+//     side can cache per stroke and only re-upload on style
+//     changes (later PRs).
+//
+// This header is the **pure data + pure logic** layer. It does
+// not touch Vulkan; the GPU integration lives in stroke_engine.
+// All math here is `float` (matches the GPU's vertex layout) and
+// dimensions are canvas pixels (post-`Camera::unproject`). Unit
+// tests verify centerline → ribbon invariants without a GPU.
+
+#include <cstddef>
+#include <vector>
+
+#include "noted/engine/stroke/stroke_engine.hpp"
+
+namespace noted::stroke {
+
+// One pen sample. Captured each frame the pen moves OR pressure
+// changes during a drag. Coordinates are canvas pixels — the
+// caller (App via `Camera::unproject`) has already converted from
+// screen space, so the values are resolution-independent.
+struct StrokeSample {
+    float x{0.0F};
+    float y{0.0F};
+    // Pen pressure in [0, 1]. The brush style maps this to a
+    // per-sample ribbon width via `stamp_from_pressure`. A mouse
+    // (no pressure sensor) supplies 1.0F.
+    float pressure{1.0F};
+};
+
+// One vector ink stroke. The brush style is captured **at stroke
+// start** — later edits to the live BrushStyle do not retroactively
+// change accumulated strokes (matching Goodnotes / Photoshop
+// expectations: changing the brush mid-document doesn't repaint
+// existing ink).
+struct Stroke {
+    std::vector<StrokeSample> samples{};
+    BrushStyle style{};
+};
+
+// One ribbon vertex. The tessellator emits these in
+// triangle-strip order (alternating left / right of the centerline).
+// Position is in canvas pixels; colour is straight RGBA carried
+// per-vertex so a future variable-colour stroke (rainbow / colour
+// modulation) drops in without a layout change.
+struct RibbonVertex {
+    float x{0.0F};
+    float y{0.0F};
+    float r{0.0F};
+    float g{0.0F};
+    float b{0.0F};
+    float a{1.0F};
+};
+
+// Build a triangle-strip ribbon from a stroke's centerline + brush
+// style. For each interior sample, the tangent is the average of
+// the incoming and outgoing segment directions; for the endpoints
+// it's the lone adjacent segment's direction. The ribbon's two
+// vertices for sample `i` are `sample ± normal * half_width(i)`.
+//
+// `half_width(i)` comes from `stamp_from_pressure(style, p_i)` so
+// the existing pressure curve (min/max radius + alpha_gamma) is
+// the single source of truth.
+//
+// Degenerate cases:
+//   - 0 or 1 sample → empty output (no draw call needed).
+//   - Consecutive duplicate samples are skipped so the tangent
+//     calculation never divides by zero.
+//
+// Caller draws with `VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP`. The
+// returned vector is contiguous + heap-allocated, suitable for
+// direct `memcpy` into a `noted::gpu::Buffer`.
+[[nodiscard]] auto tessellate_ribbon(const Stroke& stroke) -> std::vector<RibbonVertex>;
+
+}  // namespace noted::stroke
