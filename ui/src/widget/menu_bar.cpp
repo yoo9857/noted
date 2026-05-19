@@ -78,6 +78,17 @@ auto menu_bar(MenuBarState& state, const MenuBarStatus& status) -> MenuBarResult
         ImGui::MenuItem("Outline", nullptr, &state.show_outline_panel);
         ImGui::MenuItem("Debug overlay", nullptr, &state.show_debug_overlay);
         ImGui::MenuItem("ImGui Demo", nullptr, &state.show_demo_window);
+        if (ImGui::BeginMenu("Theme")) {
+            using noted::ui::theme::ThemeKind;
+            constexpr std::array<ThemeKind, 2> kThemes{ThemeKind::dark, ThemeKind::light};
+            for (const auto t : kThemes) {
+                const bool selected = (state.theme == t);
+                if (ImGui::MenuItem(noted::ui::theme::label(t), nullptr, selected)) {
+                    state.theme = t;
+                }
+            }
+            ImGui::EndMenu();
+        }
         ImGui::Separator();
         ImGui::MenuItem("About noted", nullptr, &state.show_about_window);
         ImGui::EndMenu();

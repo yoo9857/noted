@@ -14,6 +14,7 @@
 #include <optional>
 
 #include "noted/domain/document/document.hpp"
+#include "noted/ui/theme/theme.hpp"
 
 namespace noted::ui::widget {
 
@@ -26,6 +27,10 @@ struct MenuBarState {
     bool show_debug_overlay{false};
     bool show_demo_window{false};
     bool show_about_window{false};
+    // Active theme. Mutated by the menu's View → Theme radio items;
+    // the host watches for changes and re-applies via
+    // `noted::ui::theme::apply()`.
+    noted::ui::theme::ThemeKind theme{noted::ui::theme::ThemeKind::dark};
 };
 
 // Per-frame inputs for the menu bar. Wires the live state of the
