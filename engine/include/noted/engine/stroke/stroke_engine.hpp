@@ -36,6 +36,7 @@
 #include "noted/engine/gpu/graphics_pipeline.hpp"
 #include "noted/engine/gpu/pipeline_layout.hpp"
 #include "noted/engine/hook/hook.hpp"
+#include "noted/engine/stroke/stroke_geometry.hpp"
 
 namespace noted::gpu {
 class Device;
@@ -48,58 +49,9 @@ class Registry;
 
 namespace noted::stroke {
 
-// Public POD describing a single brush stamp.
-//
-// Coordinates are pixel-space, top-left origin, matching GLFW pointer
-// events. Color is straight-alpha RGBA; the pipeline blends it onto the
-// canvas with SRC_ALPHA / ONE_MINUS_SRC_ALPHA.
-struct Stamp {
-    float x_px = 0.0F;
-    float y_px = 0.0F;
-    float radius_px = 4.0F;
-    float softness_px = 1.0F;
-    float r = 0.0F;
-    float g = 0.0F;
-    float b = 0.0F;
-    float a = 1.0F;
-};
-
-// Per-engine brush style.
-//
-// The MVP brush is a fully described tuple: a radius range, an alpha
-// gamma, a softness ratio, and a color. Pressure (0..1) interpolates
-// radius linearly between min / max and shapes alpha through
-// pow(pressure, alpha_gamma) so a light touch feels noticeably lighter
-// than a medium touch.
-//
-// Defaults yield a ~2..10 px black tip with mild gamma — visible but
-// not heavy, matching the demo's textured background.
-//
-// Why parameters not a template:
-//   - Brushes need runtime tuning (debug UI sliders, brush presets).
-//   - A template would force one StrokeEngine type per brush.
-struct BrushStyle {
-    float min_radius_px{2.0F};
-    float max_radius_px{10.0F};
-    // Softness band as a fraction of the current radius. 0.2F means
-    // "the outer 20% of the disk fades from opaque to transparent".
-    // Anti-aliasing always uses at least 1 px so very small stamps
-    // don't alias.
-    float softness_ratio{0.20F};
-    // pow(pressure, alpha_gamma). 1.0 = linear, >1 emphasizes high
-    // pressure, <1 emphasizes light touches.
-    float alpha_gamma{1.8F};
-    // Straight-alpha color. Alpha is multiplied by the pressure curve;
-    // r/g/b pass through unchanged.
-    float r{0.0F};
-    float g{0.0F};
-    float b{0.0F};
-    float a{1.0F};
-};
-
-// Pure mapping: (BrushStyle, pressure) → Stamp template (without x/y).
-// Exposed so tests can verify the curve independent of the event path.
-[[nodiscard]] auto stamp_from_pressure(const BrushStyle& style, float pressure) noexcept -> Stamp;
+// BrushStyle / Stamp / stamp_from_pressure / Stroke / StrokeSample /
+// RibbonVertex / tessellate_ribbon all live in `stroke_geometry.hpp`
+// — included above for use as `vector<Stroke>` members below.
 
 struct StrokeEngineCreateInfo {
     const noted::gpu::Device* device = nullptr;
@@ -152,10 +104,23 @@ public:
     void record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept;
 
     // Inspect / control state — used by tests and the future debug UI.
-    [[nodiscard]] auto stamp_count() const noexcept -> std::size_t { return stamps_.size(); }
+    // The engine stores vector-ink Strokes (a centerline polyline +
+    // per-sample pressure + the brush style snapshotted at stroke
+    // start). Render-time tessellation turns the centerline into a
+    // GPU ribbon — see `tessellate_ribbon` in stroke_geometry.hpp.
     [[nodiscard]] auto is_drawing() const noexcept -> bool { return drawing_; }
-    [[nodiscard]] auto stamps() const noexcept -> const std::vector<Stamp>& { return stamps_; }
-    void clear_stamps() noexcept { stamps_.clear(); }
+    [[nodiscard]] auto stroke_count() const noexcept -> std::size_t { return strokes_.size(); }
+    [[nodiscard]] auto strokes() const noexcept -> const std::vector<Stroke>& { return strokes_; }
+    // The in-flight stroke being accumulated while the pen is held
+    // down. `samples` is empty between presses.
+    [[nodiscard]] auto current_stroke() const noexcept -> const Stroke& { return current_stroke_; }
+    // Total samples across completed strokes + the in-flight one —
+    // handy for debug overlays and sanity-check tests.
+    [[nodiscard]] auto total_sample_count() const noexcept -> std::size_t;
+    // Drop every accumulated stroke + the in-flight one. Drag state
+    // (`is_drawing()`) is unaffected; clear purges geometry, not
+    // input phase.
+    void clear_strokes() noexcept;
 
     // Live brush style — read freely; mutate when the user changes brush
     // settings. Existing accumulated stamps are unchanged; only future
@@ -203,7 +168,14 @@ private:
     double view_tx_ = 0.0;
     double view_ty_ = 0.0;
     double view_scale_ = 1.0;
-    std::vector<Stamp> stamps_;
+    // Completed strokes (released-pen events flush current_stroke_
+    // into this vector). Order is preserved so the debug overlay
+    // and any future undo/redo command can identify them by index.
+    std::vector<Stroke> strokes_;
+    // Stroke being accumulated between press and release. After
+    // release, `samples` is empty and `style` is reset on the
+    // next press from `brush_`.
+    Stroke current_stroke_{};
     BrushStyle brush_{};
 
     // RAII subscriptions — released when the engine goes out of scope.

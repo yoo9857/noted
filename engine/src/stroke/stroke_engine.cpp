@@ -190,9 +190,73 @@ void StrokeEngine::set_view_transform(double translation_x,
     view_scale_ = scale;
 }
 
+auto StrokeEngine::total_sample_count() const noexcept -> std::size_t {
+    std::size_t n = current_stroke_.samples.size();
+    for (const auto& s : strokes_) {
+        n += s.samples.size();
+    }
+    return n;
+}
+
+void StrokeEngine::clear_strokes() noexcept {
+    strokes_.clear();
+    current_stroke_ = Stroke{};
+}
+
+namespace {
+
+// Helper: emit one stamp draw call. Pulled out of the per-sample
+// inner loop in `record` so the loop body reads as data flow
+// rather than 12 lines of struct-init boilerplate.
+void emit_stamp_draw(VkCommandBuffer cb,
+                     VkPipelineLayout layout_h,
+                     float cw,
+                     float ch,
+                     float cx,
+                     float cy,
+                     const Stamp& brush_eval) noexcept {
+    constexpr VkShaderStageFlags kStages =
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    StampPush p{};
+    p.color[0] = brush_eval.r;
+    p.color[1] = brush_eval.g;
+    p.color[2] = brush_eval.b;
+    p.color[3] = brush_eval.a;
+    p.canvas_size[0] = cw;
+    p.canvas_size[1] = ch;
+    p.center_px[0] = cx;
+    p.center_px[1] = cy;
+    p.radius_px = brush_eval.radius_px;
+    p.softness_px = brush_eval.softness_px;
+
+    vkCmdPushConstants(cb, layout_h, kStages, 0, sizeof(StampPush), &p);
+    vkCmdDraw(cb, /*vertexCount=*/6, /*instanceCount=*/1, 0, 0);
+}
+
+void draw_stroke_via_stamps(VkCommandBuffer cb,
+                            VkPipelineLayout layout_h,
+                            float cw,
+                            float ch,
+                            const Stroke& stroke) noexcept {
+    // Per-sample stamp draw — interim rendering path while the
+    // vector-ink swap to a polyline ribbon pipeline (Phase A.2.c)
+    // is in flight. The Stroke is the durable model; this loop
+    // exists so the data-model PR is shippable without the GPU
+    // rewrite in the same change.
+    for (const auto& sample : stroke.samples) {
+        const auto brush_eval = stamp_from_pressure(stroke.style, sample.pressure);
+        emit_stamp_draw(cb, layout_h, cw, ch, sample.x, sample.y, brush_eval);
+    }
+}
+
+}  // namespace
+
 void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept {
     NOTED_PROFILE_ZONE_N("StrokeEngine::record");
-    if (!pipeline_.has_value() || !layout_.has_value() || stamps_.empty()) {
+    if (!pipeline_.has_value() || !layout_.has_value()) {
+        return;
+    }
+    if (strokes_.empty() && current_stroke_.samples.empty()) {
         return;
     }
 
@@ -200,26 +264,13 @@ void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept
     const float ch = static_cast<float>(canvas_extent.height == 0 ? 1U : canvas_extent.height);
 
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_->handle());
-
     const VkPipelineLayout layout_h = layout_->handle();
-    constexpr VkShaderStageFlags kStages =
-        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    for (const auto& s : stamps_) {
-        StampPush p{};
-        p.color[0] = s.r;
-        p.color[1] = s.g;
-        p.color[2] = s.b;
-        p.color[3] = s.a;
-        p.canvas_size[0] = cw;
-        p.canvas_size[1] = ch;
-        p.center_px[0] = s.x_px;
-        p.center_px[1] = s.y_px;
-        p.radius_px = s.radius_px;
-        p.softness_px = s.softness_px;
-
-        vkCmdPushConstants(cb, layout_h, kStages, 0, sizeof(StampPush), &p);
-        vkCmdDraw(cb, /*vertexCount=*/6, /*instanceCount=*/1, 0, 0);
+    for (const auto& stroke : strokes_) {
+        draw_stroke_via_stamps(cb, layout_h, cw, ch, stroke);
+    }
+    if (!current_stroke_.samples.empty()) {
+        draw_stroke_via_stamps(cb, layout_h, cw, ch, current_stroke_);
     }
 }
 
@@ -230,26 +281,30 @@ void StrokeEngine::on_pressed(const noted::hook::PointerPressed& e) noexcept {
         return;
     }
     drawing_ = true;
-    auto s = stamp_from_pressure(brush_, e.pressure);
+    // Snapshot the brush style at stroke start — later mid-stroke
+    // edits to `brush_` (debug UI sliders, brush presets) do NOT
+    // retroactively change this stroke. Matches Goodnotes /
+    // Photoshop expectations.
+    current_stroke_.style = brush_;
+    current_stroke_.samples.clear();
     // Screen → canvas: subtract camera translation, divide by scale.
-    // Identity view (default) reduces to s.x_px = e.x.
-    s.x_px = static_cast<float>((e.x - view_tx_) / view_scale_);
-    s.y_px = static_cast<float>((e.y - view_ty_) / view_scale_);
-    // Brush radius is in canvas pixels too — so when the user
-    // zooms in, the brush appears physically larger on screen
-    // (matches Goodnotes / Photoshop behavior). The brush stays
-    // the same "ink size" in document space.
-    stamps_.push_back(s);
+    // Identity view (default) reduces to s.x = e.x.
+    StrokeSample sample{};
+    sample.x = static_cast<float>((e.x - view_tx_) / view_scale_);
+    sample.y = static_cast<float>((e.y - view_ty_) / view_scale_);
+    sample.pressure = e.pressure;
+    current_stroke_.samples.push_back(sample);
 }
 
 void StrokeEngine::on_moved(const noted::hook::PointerMoved& e) noexcept {
     if (!drawing_) {
         return;
     }
-    auto s = stamp_from_pressure(brush_, e.pressure);
-    s.x_px = static_cast<float>((e.x - view_tx_) / view_scale_);
-    s.y_px = static_cast<float>((e.y - view_ty_) / view_scale_);
-    stamps_.push_back(s);
+    StrokeSample sample{};
+    sample.x = static_cast<float>((e.x - view_tx_) / view_scale_);
+    sample.y = static_cast<float>((e.y - view_ty_) / view_scale_);
+    sample.pressure = e.pressure;
+    current_stroke_.samples.push_back(sample);
 }
 
 void StrokeEngine::on_released(const noted::hook::PointerReleased& e) noexcept {
@@ -257,6 +312,15 @@ void StrokeEngine::on_released(const noted::hook::PointerReleased& e) noexcept {
         return;
     }
     drawing_ = false;
+    // Flush the in-flight stroke into the completed collection
+    // when it has anything to draw. Single-sample strokes (no
+    // movement between press and release) are dropped — the
+    // current ribbon tessellator emits nothing for them anyway,
+    // and storing them would just be noise.
+    if (current_stroke_.samples.size() >= 2) {
+        strokes_.push_back(std::move(current_stroke_));
+    }
+    current_stroke_ = Stroke{};
 }
 
 void StrokeEngine::on_resized(const noted::hook::FramebufferResized& e) noexcept {
