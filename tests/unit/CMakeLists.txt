@@ -15,6 +15,7 @@ add_executable(noted_unit_tests
     noted_file_test.cpp
     imgui_host_test.cpp
     camera_test.cpp
+    stroke_geometry_test.cpp
 )
 
 target_link_libraries(noted_unit_tests PRIVATE noted_test_harness noted::domain noted::compositor noted::platform noted::ui)
