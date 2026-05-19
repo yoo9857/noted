@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-19 · **main HEAD:** `8e84d3b` (clean, 0 open PRs)
+**Last updated:** 2026-05-19 · **main HEAD:** `295ed6d` (clean, 0 open PRs)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -347,6 +347,25 @@ re-evaluation.
     constants for the composite pass, stroke-engine input
     unprojection, scroll-to-zoom-around-cursor, middle-drag pan,
     status bar + debug overlay readouts.
+11. ~~**Phase A.2 vector ink**~~ ✅ landed (PRs #59-#61, ADR 0029) —
+    `Stroke` / `StrokeSample` / `RibbonVertex` + `tessellate_ribbon`
+    pure-logic geometry, `StrokeEngine` rewritten on top of it,
+    GPU polyline pipeline (`polyline.slang` replaces `stamp.slang`).
+    Persistently-mapped vertex buffer with geometric grow.
+12. ~~**Phase A.3.a + A.3.b page model + render**~~ ✅ landed
+    (PRs #63, #64) — `Page` + `PageList` POD with reflow / clamp
+    invariants + 19 unit tests; `PageRenderer` GPU primitive +
+    `page_bg.slang` (blank / lined / grid / dotted patterns with
+    smoothstep AA, paper colour, light grey lines).
+13. ~~**`feat/app-config-foundation`**~~ ✅ landed (PR #65, ADR 0030) —
+    Phase 1 AAA-grade hardcoding cleanup. Typed
+    `noted::app::config::AppConfig` (window / canvas / font /
+    assets / ui sub-structs), env-var → `noted.config.json` →
+    `defaults()` priority, `platform::fs::executable_dir()`
+    cross-platform, `resolve_shader_dir(cfg)` 4-stage candidate
+    walk, CMake post-build copy of `.spv` files next to the .exe
+    so `build/bin/` is zip-distributable on Windows.
+    Malformed config logs and falls through to defaults.
 
 ### Goodnotes + Photoshop unified canvas — phased plan
 
@@ -359,8 +378,11 @@ each PR focused:
 | Phase | Item | Status |
 |---|---|---|
 | A.1 | Camera pan + zoom (PR #57) | ✅ |
-| A.2 | Vector ink — replace SDF stamps with Catmull-Rom polyline ribbon, pressure-modulated width | next |
-| A.3 | Page model — Document gets Page block kind with extent + background; page strip panel; multi-page layout | |
+| A.2 | Vector ink — Catmull-Rom polyline ribbon, pressure-modulated width (PRs #59-61, ADR 0029) | ✅ |
+| A.3.a | Page model — `Page` + `PageList` POD + 19 unit tests (PR #63) | ✅ |
+| A.3.b | Page background rendering — `PageRenderer` + `page_bg.slang` patterns (PR #64) | ✅ |
+| A.3.c | Page strip panel + Add/Remove page UI + multi-page nav | next |
+| A.3.d | Document linkage — `PageList` ownership moves into Document, mutation via Command, persists to `.noted` | |
 | B   | Tool palette + state machine (pen / eraser / select / shape / text / image) + color picker + brush options | |
 | C   | Photoshop depth — layer panel ops, shader blend modes (12 missing), filter pipeline, color management | |
 | D   | Goodnotes polish — smart shapes, lasso + transform handles, pen-button mapping, page templates, PDF export | |
@@ -372,6 +394,48 @@ each PR focused:
 - Asset / LayerGraph / history embedding in the `.noted` archive
 - Edit coalescing in `UndoStack`
 - macOS / Linux pen-input ports
+
+### Next session — pick up here
+
+**Target: Phase A.3.c — page strip widget + add/remove + nav.**
+Branch name: `feat/page-strip-panel`.
+
+Concrete plan (single focused PR):
+
+1. **`ui/include/noted/ui/widget/page_strip.hpp` + `.cpp`** — new
+   `noted::ui::widget` module. Renders an ImGui side rail (left
+   dock) showing one row per page in the current `PageList`. Each
+   row: index, "Page N" label, background-kind glyph (blank/lined/
+   grid/dotted), thumbnail-sized placeholder rect. Row click →
+   emits `PageStripResult{ .focus_request = idx }`. Footer button
+   "+ Add page" → emits `.add_request = true`. Right-click row →
+   context menu with "Remove" → emits `.remove_request = idx`.
+2. **`App::draw_widgets`** wires the strip alongside the existing
+   menu bar / layer panel / outline panel. The strip's results
+   drive `pages_.add_page(...)` / `pages_.remove_page(idx)` /
+   `camera_.set_focus(...)` (camera jump to that page's
+   `origin_y_px`, animated over a few frames is a stretch goal —
+   instant is fine for v0.x).
+3. **AppConfig**: add `UiConfig::show_page_strip{true}` and a
+   `CanvasConfig::default_page_extent_{w,h}_px` + 
+   `CanvasConfig::default_page_background` so the demo seed values
+   in `init_page_renderer` come from config instead of literals.
+4. **Tests**: pure-logic helpers on the strip (e.g. "focus index
+   → camera y target" math) get their own unit tests in
+   `tests/ui/`. The ImGui draw itself isn't unit-tested
+   (interactive only), but the data-prep stage should be.
+5. **Demo seed**: bump the demo from 1 page to 3 pages of mixed
+   backgrounds so the strip has something to show on first run.
+6. **Smoke**: open app, see 3 pages in strip, click row 3, camera
+   jumps; click "+" → 4 pages; right-click row 2 → Remove →
+   3 pages again, lower pages reflow. Stderr stays at 0 bytes.
+
+Do **not** touch Document linkage in this PR — that's A.3.d.
+PageList stays App-owned for now; A.3.d moves it into Document,
+wraps mutation in `Command<>`, persists to `.noted`.
+
+After A.3.c lands: A.3.d, then Phase B (tool palette + state
+machine + color picker).
 
 ---
 
