@@ -57,6 +57,7 @@
 #include "noted/platform/io/noted_file.hpp"
 #include "noted/platform/window/window.hpp"
 #include "noted/ui/imgui_host.hpp"
+#include "noted/ui/theme/theme.hpp"
 #include "noted/ui/widget/debug_overlay.hpp"
 #include "noted/ui/widget/layer_panel.hpp"
 #include "noted/ui/widget/menu_bar.hpp"
@@ -523,6 +524,13 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    // Apply the default theme exactly once before the first frame so
+    // the very first paint is already styled — without this, frame 0
+    // briefly flashes ImGui's built-in look. The per-frame watcher
+    // below re-applies only on user toggle.
+    noted::ui::theme::apply(noted::ui::theme::ThemeKind::dark);
+    auto applied_theme = noted::ui::theme::ThemeKind::dark;
+
     auto recreate_swapchain = [&]() -> noted::Result<void> {
         device->wait_idle();
         const auto [w, h] = window->framebuffer_size();
@@ -777,6 +785,14 @@ int main() {
             .has_document_path = current_path.has_value(),
         };
         auto menu = noted::ui::widget::menu_bar(menu_state, menu_status);
+
+        // Re-apply the theme when the user toggles View → Theme. The
+        // menu mutates `menu_state.theme` directly; we mirror with
+        // `applied_theme` so the work is skipped on every other frame.
+        if (menu_state.theme != applied_theme) {
+            applied_theme = menu_state.theme;
+            noted::ui::theme::apply(applied_theme);
+        }
 
         // Keyboard shortcuts — wire the chords the menu's hint column
         // advertises. `IsKeyChordPressed` defaults to RouteGlobal so
