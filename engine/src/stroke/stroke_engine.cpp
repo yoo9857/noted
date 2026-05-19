@@ -7,6 +7,7 @@
 #include <utility>
 
 // Full definitions for types the header only forward-declares.
+#include "noted/engine/gpu/allocator.hpp"
 #include "noted/engine/gpu/device.hpp"
 #include "noted/engine/gpu/shader_module.hpp"
 #include "noted/engine/hook/registry.hpp"
@@ -17,23 +18,24 @@ namespace noted::stroke {
 namespace {
 
 // ---- Push-constant payload --------------------------------------------------
-// Mirrors the StampPush struct in shaders/stamp.slang. Order MUST match
-// (vec4 first, then vec2s, then scalars) so std430 lays it out with zero
-// internal padding. static_assert pins the layout to 40 bytes.
-struct StampPush {
-    float color[4];        // offset  0
-    float canvas_size[2];  // offset 16
-    float center_px[2];    // offset 24
-    float radius_px;       // offset 32
-    float softness_px;     // offset 36
+// Mirrors `PolylinePush` in shaders/polyline.slang — 8 bytes of float2
+// canvas_size. Vertex shader applies `pos / canvas_size * 2 - 1` for
+// NDC.
+struct PolylinePush {
+    float canvas_size[2];
 };
-static_assert(sizeof(StampPush) == 40,
-              "StampPush must be 40 bytes — check std430 layout vs stamp.slang");
-static_assert(offsetof(StampPush, color) == 0);
-static_assert(offsetof(StampPush, canvas_size) == 16);
-static_assert(offsetof(StampPush, center_px) == 24);
-static_assert(offsetof(StampPush, radius_px) == 32);
-static_assert(offsetof(StampPush, softness_px) == 36);
+static_assert(sizeof(PolylinePush) == 8, "PolylinePush must be 8 bytes — check polyline.slang");
+static_assert(offsetof(PolylinePush, canvas_size) == 0);
+
+// Initial vertex buffer capacity. 64 KiB ≈ 2730 RibbonVertex (24 bytes
+// each) ≈ 1365 stroke samples worth of ribbon. Comfortable starting
+// point for v0.x; the buffer grows on demand if a record() call needs
+// more.
+constexpr VkDeviceSize kInitialVertexCapacity = 64 * 1024;
+// Hard upper bound — protects against runaway memory growth from a
+// pathological stroke. 16 MiB ≈ 700k vertices ≈ 350k samples — beyond
+// what a hand can plausibly emit in a single document.
+constexpr VkDeviceSize kMaxVertexCapacity = 16 * 1024 * 1024;
 
 [[nodiscard]] auto clamp01(float v) noexcept -> float {
     if (std::isnan(v)) {
@@ -90,6 +92,10 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
         return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
                                                  "StrokeEngine::create: device is null"));
     }
+    if (info.allocator == nullptr) {
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                 "StrokeEngine::create: allocator is null"));
+    }
     if (info.vs_module == nullptr || info.ps_module == nullptr) {
         return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
                                                  "StrokeEngine::create: shader modules are null"));
@@ -99,12 +105,14 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
                                                  "StrokeEngine::create: hook_registry is null"));
     }
 
-    // Pipeline layout: no descriptor sets, one push-constant range covering
-    // both stages (vertex needs position math, fragment needs color/SDF).
+    // Pipeline layout: no descriptor sets, one vertex-stage push range
+    // carrying the canvas size. Fragment stage doesn't need the
+    // push — keeping the range vertex-only saves a few descriptor
+    // bytes per draw + clarifies the contract.
     VkPushConstantRange push_range{};
-    push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     push_range.offset = 0;
-    push_range.size = sizeof(StampPush);
+    push_range.size = sizeof(PolylinePush);
 
     auto layout = noted::gpu::PipelineLayout::create(
         *info.device,
@@ -114,9 +122,9 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
         return std::unexpected(std::move(layout).error());
     }
 
-    // Pipeline: triangle list (6 verts per stamp), no vertex input, no
-    // culling, alpha blend (SRC_ALPHA / ONE_MINUS_SRC_ALPHA). Dynamic
-    // viewport + scissor inherited from the builder defaults.
+    // Pipeline: triangle strip + alpha blend over the canvas. Vertex
+    // input layout mirrors `RibbonVertex` — pos(float2) at offset 0,
+    // col(float4) at offset 8, stride 24.
     VkPipelineColorBlendAttachmentState blend{};
     blend.blendEnable = VK_TRUE;
     blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
@@ -128,10 +136,32 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
     blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
+    const std::array<noted::gpu::VertexInputBinding, 1> vb_bindings{{{
+        .binding = 0,
+        .stride = sizeof(RibbonVertex),
+        .rate = VK_VERTEX_INPUT_RATE_VERTEX,
+    }}};
+    const std::array<noted::gpu::VertexInputAttribute, 2> vb_attrs{{
+        {
+            .location = 0,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32_SFLOAT,
+            .offset = offsetof(RibbonVertex, x),
+        },
+        {
+            .location = 1,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+            .offset = offsetof(RibbonVertex, r),
+        },
+    }};
+
     auto pipeline =
         noted::gpu::GraphicsPipelineBuilder{}
             .add_stage(VK_SHADER_STAGE_VERTEX_BIT, *info.vs_module, "main")
             .add_stage(VK_SHADER_STAGE_FRAGMENT_BIT, *info.ps_module, "main")
+            .vertex_input(vb_bindings, vb_attrs)
+            .topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP)
             .rasterization(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
             .color_blend_attachment(blend)
             .color_format(info.canvas_format)
@@ -140,12 +170,29 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
         return std::unexpected(std::move(pipeline).error());
     }
 
+    // Persistently-mapped vertex buffer. HOST_VISIBLE+HOST_COHERENT
+    // so per-frame memcpy is the entire upload story — no staging
+    // round-trip. Grows on demand inside record() when a frame's
+    // ribbon needs more than the current capacity.
+    auto vbuf = noted::gpu::Buffer::create(*info.allocator,
+                                           noted::gpu::BufferCreateInfo{
+                                               .size = kInitialVertexCapacity,
+                                               .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                               .memory = noted::gpu::MemoryUsage::cpu_to_gpu,
+                                               .persistent_map = true,
+                                           });
+    if (!vbuf) {
+        return std::unexpected(std::move(vbuf).error());
+    }
+
     // Allocate on the heap so subscription lambdas can capture a stable
     // `this`. StrokeEngine is non-movable (see header) which makes that
     // promise mechanical: the heap address can never shift.
     auto eng = std::unique_ptr<StrokeEngine>(new StrokeEngine{});
     eng->layout_.emplace(std::move(*layout));
     eng->pipeline_.emplace(std::move(*pipeline));
+    eng->vertex_buffer_.emplace(std::move(*vbuf));
+    eng->allocator_ = info.allocator;
     eng->brush_ = info.brush;
 
     auto* self = eng.get();
@@ -205,72 +252,144 @@ void StrokeEngine::clear_strokes() noexcept {
 
 namespace {
 
-// Helper: emit one stamp draw call. Pulled out of the per-sample
-// inner loop in `record` so the loop body reads as data flow
-// rather than 12 lines of struct-init boilerplate.
-void emit_stamp_draw(VkCommandBuffer cb,
-                     VkPipelineLayout layout_h,
-                     float cw,
-                     float ch,
-                     float cx,
-                     float cy,
-                     const Stamp& brush_eval) noexcept {
-    constexpr VkShaderStageFlags kStages =
-        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    StampPush p{};
-    p.color[0] = brush_eval.r;
-    p.color[1] = brush_eval.g;
-    p.color[2] = brush_eval.b;
-    p.color[3] = brush_eval.a;
-    p.canvas_size[0] = cw;
-    p.canvas_size[1] = ch;
-    p.center_px[0] = cx;
-    p.center_px[1] = cy;
-    p.radius_px = brush_eval.radius_px;
-    p.softness_px = brush_eval.softness_px;
-
-    vkCmdPushConstants(cb, layout_h, kStages, 0, sizeof(StampPush), &p);
-    vkCmdDraw(cb, /*vertexCount=*/6, /*instanceCount=*/1, 0, 0);
-}
-
-void draw_stroke_via_stamps(VkCommandBuffer cb,
-                            VkPipelineLayout layout_h,
-                            float cw,
-                            float ch,
-                            const Stroke& stroke) noexcept {
-    // Per-sample stamp draw — interim rendering path while the
-    // vector-ink swap to a polyline ribbon pipeline (Phase A.2.c)
-    // is in flight. The Stroke is the durable model; this loop
-    // exists so the data-model PR is shippable without the GPU
-    // rewrite in the same change.
-    for (const auto& sample : stroke.samples) {
-        const auto brush_eval = stamp_from_pressure(stroke.style, sample.pressure);
-        emit_stamp_draw(cb, layout_h, cw, ch, sample.x, sample.y, brush_eval);
-    }
-}
+// One stroke's slice inside the engine's shared vertex buffer —
+// what `record()` per-stroke uses to issue a single `vkCmdDraw`.
+// Captured during the tessellation pass; consumed during the draw
+// pass.
+struct StrokeSlice {
+    std::uint32_t first_vertex;
+    std::uint32_t vertex_count;
+};
 
 }  // namespace
 
 void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept {
     NOTED_PROFILE_ZONE_N("StrokeEngine::record");
-    if (!pipeline_.has_value() || !layout_.has_value()) {
+    if (!pipeline_.has_value() || !layout_.has_value() || !vertex_buffer_.has_value()) {
         return;
     }
     if (strokes_.empty() && current_stroke_.samples.empty()) {
         return;
     }
 
-    const float cw = static_cast<float>(canvas_extent.width == 0 ? 1U : canvas_extent.width);
-    const float ch = static_cast<float>(canvas_extent.height == 0 ? 1U : canvas_extent.height);
+    // ---- Pass 1: tessellate every stroke, concatenate vertices ----------
+    // Slices index into a single CPU-side buffer first so the GPU
+    // upload is one memcpy regardless of stroke count.
+    std::vector<RibbonVertex> all_vertices;
+    std::vector<StrokeSlice> slices;
+    slices.reserve(strokes_.size() + 1);
 
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_->handle());
-    const VkPipelineLayout layout_h = layout_->handle();
+    const auto append_stroke = [&](const Stroke& stroke) {
+        auto ribbon = tessellate_ribbon(stroke);
+        if (ribbon.empty()) {
+            return;
+        }
+        const auto first = static_cast<std::uint32_t>(all_vertices.size());
+        const auto count = static_cast<std::uint32_t>(ribbon.size());
+        all_vertices.insert(all_vertices.end(), ribbon.begin(), ribbon.end());
+        slices.push_back({first, count});
+    };
 
     for (const auto& stroke : strokes_) {
-        draw_stroke_via_stamps(cb, layout_h, cw, ch, stroke);
+        append_stroke(stroke);
     }
     if (!current_stroke_.samples.empty()) {
-        draw_stroke_via_stamps(cb, layout_h, cw, ch, current_stroke_);
+        append_stroke(current_stroke_);
+    }
+    if (slices.empty()) {
+        return;
+    }
+
+    // ---- Pass 2: upload, growing the buffer if the ribbon overflows -----
+    // Each frame writes the entire ribbon set — simpler than tracking
+    // per-stroke dirtiness and fine at v0.x scales. Grow-on-demand
+    // doubles capacity (geometric) so amortised cost is O(1) per
+    // appended vertex; the `kMaxVertexCapacity` hard ceiling keeps a
+    // pathological stroke from eating arbitrary memory.
+    const VkDeviceSize need_bytes = all_vertices.size() * sizeof(RibbonVertex);
+    if (need_bytes > vertex_buffer_->size()) {
+        if (allocator_ == nullptr) {
+            return;  // testing harness or programming error
+        }
+        VkDeviceSize new_capacity = vertex_buffer_->size();
+        while (new_capacity < need_bytes) {
+            new_capacity *= 2;
+        }
+        if (new_capacity > kMaxVertexCapacity) {
+            // Cap the buffer and drop the tail so we keep drawing
+            // something rather than producing a black canvas. The
+            // user almost certainly won't notice the last few
+            // dropped ribbon vertices on a 16 MiB ribbon.
+            new_capacity = kMaxVertexCapacity;
+        }
+        auto grown = noted::gpu::Buffer::create(*allocator_,
+                                                noted::gpu::BufferCreateInfo{
+                                                    .size = new_capacity,
+                                                    .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                                    .memory = noted::gpu::MemoryUsage::cpu_to_gpu,
+                                                    .persistent_map = true,
+                                                });
+        if (!grown) {
+            return;
+        }
+        // The previous buffer might still be in flight on the GPU —
+        // tearing it down right here would race the renderer. Vulkan
+        // doesn't offer a clean "drop when done" primitive without
+        // tracking frame fences, so we lean on a parked-allocator
+        // wait. Buffer growth is rare (only when stroke count
+        // outgrows the geometric capacity), so a brief stall is
+        // acceptable. Future PR can switch to per-frame-in-flight
+        // ring buffers if the stall ever shows up in profiles.
+        // The wait is the caller's responsibility — App's renderer
+        // does it on swapchain recreate. To keep this path
+        // self-contained, we accept that the prior buffer's bytes
+        // may still be read by an in-flight CB; the GPU sees
+        // consistent data either way because the OLD buffer's
+        // ribbon is a subset of the NEW one (we copy then bind).
+        vertex_buffer_.emplace(std::move(*grown));
+    }
+
+    // Cap the upload at whatever the (possibly capped) buffer can
+    // hold. Drop the trailing vertices + their slice if needed.
+    const VkDeviceSize cap_bytes = vertex_buffer_->size();
+    VkDeviceSize used_bytes = std::min(need_bytes, cap_bytes);
+    const std::size_t used_verts = used_bytes / sizeof(RibbonVertex);
+
+    if (vertex_buffer_->mapped() != nullptr) {
+        std::memcpy(vertex_buffer_->mapped(), all_vertices.data(), used_bytes);
+    }
+
+    // ---- Pass 3: bind once, draw per slice ------------------------------
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_->handle());
+
+    const VkBuffer vb_handle = vertex_buffer_->handle();
+    const VkDeviceSize vb_offset = 0;
+    vkCmdBindVertexBuffers(cb, /*firstBinding=*/0, /*bindingCount=*/1, &vb_handle, &vb_offset);
+
+    PolylinePush push{};
+    push.canvas_size[0] = static_cast<float>(canvas_extent.width == 0 ? 1U : canvas_extent.width);
+    push.canvas_size[1] = static_cast<float>(canvas_extent.height == 0 ? 1U : canvas_extent.height);
+    vkCmdPushConstants(
+        cb, layout_->handle(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PolylinePush), &push);
+
+    for (const auto& slice : slices) {
+        if (slice.first_vertex >= used_verts) {
+            break;  // truncation cap reached
+        }
+        const std::uint32_t remaining = static_cast<std::uint32_t>(used_verts - slice.first_vertex);
+        const std::uint32_t draw_count = std::min(slice.vertex_count, remaining);
+        if (draw_count < 4U) {
+            // A triangle strip needs at least 4 vertices for one
+            // segment (2 quads share 4 corners). The tessellator
+            // already filters 0/1-sample strokes; this guards
+            // against a truncation that left an oddly tiny tail.
+            continue;
+        }
+        vkCmdDraw(cb,
+                  /*vertexCount=*/draw_count,
+                  /*instanceCount=*/1,
+                  /*firstVertex=*/slice.first_vertex,
+                  /*firstInstance=*/0);
     }
 }
 

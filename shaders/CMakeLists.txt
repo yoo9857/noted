@@ -23,19 +23,20 @@ noted_compile_slang_entry(
     OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.ps_textured.spv"
 )
 
-# Stamp shader — two entries (vs_stamp + ps_stamp). Used by the stroke
-# engine to draw disk stamps into the canvas. See stamp.slang for the
-# push-constant contract.
-set(_stamp_src "${CMAKE_CURRENT_SOURCE_DIR}/stamp.slang")
+# Polyline shader — two entries (vs_polyline + ps_polyline). The
+# stroke engine tessellates each Stroke into a triangle-strip ribbon
+# (Phase A.2.c). Supersedes the old stamp.slang per ADR 0015 →
+# ADR 0029 vector-ink migration.
+set(_polyline_src "${CMAKE_CURRENT_SOURCE_DIR}/polyline.slang")
 noted_compile_slang_entry(
-    SOURCE  "${_stamp_src}"
-    ENTRY   vs_stamp
-    OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/stamp.vs_stamp.spv"
+    SOURCE  "${_polyline_src}"
+    ENTRY   vs_polyline
+    OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/polyline.vs_polyline.spv"
 )
 noted_compile_slang_entry(
-    SOURCE  "${_stamp_src}"
-    ENTRY   ps_stamp
-    OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/stamp.ps_stamp.spv"
+    SOURCE  "${_polyline_src}"
+    ENTRY   ps_polyline
+    OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/polyline.ps_polyline.spv"
 )
 
 # Layer compositor shader — two entries (vs_layer + ps_layer). One
@@ -57,8 +58,8 @@ add_custom_target(noted_shaders ALL
         "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.vs_main.spv"
         "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.ps_gradient.spv"
         "${NOTED_SHADER_OUTPUT_DIR}/fullscreen.ps_textured.spv"
-        "${NOTED_SHADER_OUTPUT_DIR}/stamp.vs_stamp.spv"
-        "${NOTED_SHADER_OUTPUT_DIR}/stamp.ps_stamp.spv"
+        "${NOTED_SHADER_OUTPUT_DIR}/polyline.vs_polyline.spv"
+        "${NOTED_SHADER_OUTPUT_DIR}/polyline.ps_polyline.spv"
         "${NOTED_SHADER_OUTPUT_DIR}/layer.vs_layer.spv"
         "${NOTED_SHADER_OUTPUT_DIR}/layer.ps_layer.spv"
 )

@@ -342,18 +342,19 @@ auto App::init_layer_compositor() -> noted::Result<void> {
 
 auto App::init_stroke_engine() -> noted::Result<void> {
     const std::filesystem::path shader_dir{NOTED_SHADER_DIR};
-    auto stamp_vs = load_shader(*device_, shader_dir / "stamp.vs_stamp.spv");
+    auto stamp_vs = load_shader(*device_, shader_dir / "polyline.vs_polyline.spv");
     if (!stamp_vs) {
         return std::unexpected(std::move(stamp_vs).error());
     }
     stamp_vs_.emplace(std::move(*stamp_vs));
-    auto stamp_ps = load_shader(*device_, shader_dir / "stamp.ps_stamp.spv");
+    auto stamp_ps = load_shader(*device_, shader_dir / "polyline.ps_polyline.spv");
     if (!stamp_ps) {
         return std::unexpected(std::move(stamp_ps).error());
     }
     stamp_ps_.emplace(std::move(*stamp_ps));
 
     auto stroke = noted::stroke::StrokeEngine::create({
+        .allocator = &*allocator_,
         .device = &*device_,
         .vs_module = &*stamp_vs_,
         .ps_module = &*stamp_ps_,
