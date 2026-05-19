@@ -31,6 +31,7 @@ noted_add_module(
         src/stroke/stroke_engine.cpp
         src/stroke/stroke_geometry.cpp
         src/canvas/camera.cpp
+        src/canvas/page.cpp
     PUBLIC_DEPS
         Vulkan::Vulkan
         glfw
