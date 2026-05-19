@@ -1,0 +1,51 @@
+{
+    "// notes": "VS Code IntelliSense — points the C/C++ extension at the CMake-generated compile_commands.json so it picks up the actual include paths (Vulkan SDK, FetchContent deps, project src/include) for every TU. Run the build at least once (`cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release` from a vcvars64-sourced shell) before opening the project — the file is generated under build/.",
+    "configurations": [
+        {
+            "name": "Win32",
+            "intelliSenseMode": "windows-msvc-x64",
+            "cStandard": "c17",
+            "cppStandard": "c++23",
+            "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+            "compilerPath": "cl.exe",
+            "includePath": [
+                "${workspaceFolder}/**"
+            ],
+            "defines": [
+                "_CRT_SECURE_NO_WARNINGS",
+                "NOMINMAX",
+                "WIN32_LEAN_AND_MEAN",
+                "GLFW_INCLUDE_VULKAN"
+            ]
+        },
+        {
+            "name": "Linux",
+            "intelliSenseMode": "linux-gcc-x64",
+            "cStandard": "c17",
+            "cppStandard": "c++23",
+            "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+            "compilerPath": "/usr/bin/g++-13",
+            "includePath": [
+                "${workspaceFolder}/**"
+            ],
+            "defines": [
+                "GLFW_INCLUDE_VULKAN"
+            ]
+        },
+        {
+            "name": "Mac",
+            "intelliSenseMode": "macos-clang-arm64",
+            "cStandard": "c17",
+            "cppStandard": "c++23",
+            "compileCommands": "${workspaceFolder}/build/compile_commands.json",
+            "compilerPath": "/usr/bin/clang++",
+            "includePath": [
+                "${workspaceFolder}/**"
+            ],
+            "defines": [
+                "GLFW_INCLUDE_VULKAN"
+            ]
+        }
+    ],
+    "version": 4
+}
