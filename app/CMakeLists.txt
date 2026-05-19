@@ -1,4 +1,15 @@
-add_executable(noted_app src/main.cpp)
+add_executable(noted_app
+    src/main.cpp
+    src/app.cpp
+    src/scene/demo_scene.cpp
+    src/io/font_probe.cpp
+    src/ui/document_session.cpp
+    src/ui/dirty_prompt.cpp
+)
+
+# App-internal headers (src/app.hpp, src/scene/*.hpp, ...) are
+# referenced as `"scene/demo_scene.hpp"` etc. — relative to `src/`.
+target_include_directories(noted_app PRIVATE src)
 
 target_link_libraries(noted_app PRIVATE
     noted::engine
@@ -7,6 +18,7 @@ target_link_libraries(noted_app PRIVATE
     noted::platform
     noted::plugin
     noted::ui
+    imgui
 )
 
 # Ensure the .spv files are built before noted_app links so they're on disk
