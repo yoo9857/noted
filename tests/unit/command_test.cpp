@@ -11,6 +11,7 @@ namespace {
 using noted::canvas::PageBackground;
 using noted::domain::AddBlockCommand;
 using noted::domain::AddPageCommand;
+using noted::domain::AddShapeCommand;
 using noted::domain::BlockId;
 using noted::domain::BlockKind;
 using noted::domain::Document;
@@ -20,6 +21,7 @@ using noted::domain::invalid_block_id;
 using noted::domain::MoveBlockCommand;
 using noted::domain::RemoveBlockCommand;
 using noted::domain::RemovePageCommand;
+using noted::domain::RemoveShapeCommand;
 using noted::domain::SetNameCommand;
 using noted::domain::SetPayloadCommand;
 using noted::domain::SetVisibleCommand;
@@ -505,4 +507,103 @@ TEST(UndoStackPages, MixedBlockAndPageHistoryUndoRedoes) {
     ASSERT_TRUE(stack.redo(doc));
     EXPECT_EQ(doc.pages().size(), 2U);
     EXPECT_EQ(doc.find(doc.root())->children.size(), 1U);
+}
+
+// ============================================================================
+// AddShapeCommand / RemoveShapeCommand (persistence consolidation for B.5)
+// ============================================================================
+
+namespace {
+
+[[nodiscard]] auto make_rect_primitive(double x0,
+                                       double y0,
+                                       double x1,
+                                       double y1) noexcept -> noted::domain::tool::ShapePrimitive {
+    noted::domain::tool::ShapePrimitive p{};
+    p.kind = noted::domain::tool::ShapeKind::rectangle;
+    p.x0 = x0;
+    p.y0 = y0;
+    p.x1 = x1;
+    p.y1 = y1;
+    p.stroke_width_px = 2.0F;
+    p.stroke_r = 0.5F;
+    p.stroke_g = 0.25F;
+    p.stroke_b = 0.125F;
+    p.stroke_a = 1.0F;
+    return p;
+}
+
+}  // namespace
+
+TEST(AddShapeCommand, ApplyAddsShapeAndUndoRemovesIt) {
+    Document doc;
+    AddShapeCommand cmd(make_rect_primitive(10.0, 20.0, 110.0, 70.0));
+
+    ASSERT_TRUE(cmd.apply(doc));
+    ASSERT_EQ(doc.shapes().size(), 1U);
+    EXPECT_EQ(cmd.assigned_index(), 0U);
+    EXPECT_DOUBLE_EQ(doc.shapes()[0].x0, 10.0);
+    EXPECT_DOUBLE_EQ(doc.shapes()[0].x1, 110.0);
+
+    ASSERT_TRUE(cmd.undo(doc));
+    EXPECT_TRUE(doc.shapes().empty());
+}
+
+TEST(AddShapeCommand, RedoReappliesSameSnapshot) {
+    Document doc;
+    AddShapeCommand cmd(make_rect_primitive(0.0, 0.0, 50.0, 50.0));
+    ASSERT_TRUE(cmd.apply(doc));
+    ASSERT_TRUE(cmd.undo(doc));
+    ASSERT_TRUE(cmd.apply(doc));  // redo
+    ASSERT_EQ(doc.shapes().size(), 1U);
+    EXPECT_FLOAT_EQ(doc.shapes()[0].stroke_r, 0.5F);
+}
+
+TEST(AddShapeCommand, UndoBeforeApplyFailsWithInvalidState) {
+    Document doc;
+    AddShapeCommand cmd(make_rect_primitive(0.0, 0.0, 10.0, 10.0));
+    EXPECT_FALSE(cmd.undo(doc));
+}
+
+TEST(RemoveShapeCommand, ApplyRemovesAndUndoRestoresAtSameIndex) {
+    Document doc;
+    (void) doc.add_shape(make_rect_primitive(0.0, 0.0, 10.0, 10.0));
+    (void) doc.add_shape(make_rect_primitive(20.0, 20.0, 30.0, 30.0));
+    (void) doc.add_shape(make_rect_primitive(40.0, 40.0, 50.0, 50.0));
+
+    RemoveShapeCommand cmd(1);
+    ASSERT_TRUE(cmd.apply(doc));
+    ASSERT_EQ(doc.shapes().size(), 2U);
+    EXPECT_DOUBLE_EQ(doc.shapes()[0].x0, 0.0);
+    EXPECT_DOUBLE_EQ(doc.shapes()[1].x0, 40.0);
+
+    ASSERT_TRUE(cmd.undo(doc));
+    ASSERT_EQ(doc.shapes().size(), 3U);
+    EXPECT_DOUBLE_EQ(doc.shapes()[1].x0, 20.0);
+}
+
+TEST(RemoveShapeCommand, OutOfRangeIndexFailsWithInvalidArgument) {
+    Document doc;
+    RemoveShapeCommand cmd(0);
+    EXPECT_FALSE(cmd.apply(doc));
+}
+
+TEST(ShapeCommands, RoundTripThroughUndoStackAndDocument) {
+    Document doc;
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(
+        std::make_unique<AddShapeCommand>(make_rect_primitive(0.0, 0.0, 5.0, 5.0)), doc));
+    ASSERT_TRUE(stack.execute(
+        std::make_unique<AddShapeCommand>(make_rect_primitive(10.0, 10.0, 15.0, 15.0)), doc));
+    ASSERT_EQ(doc.shapes().size(), 2U);
+
+    ASSERT_TRUE(stack.undo(doc));
+    EXPECT_EQ(doc.shapes().size(), 1U);
+    ASSERT_TRUE(stack.undo(doc));
+    EXPECT_EQ(doc.shapes().size(), 0U);
+
+    ASSERT_TRUE(stack.redo(doc));
+    ASSERT_TRUE(stack.redo(doc));
+    EXPECT_EQ(doc.shapes().size(), 2U);
+    EXPECT_DOUBLE_EQ(doc.shapes()[1].x0, 10.0);
 }

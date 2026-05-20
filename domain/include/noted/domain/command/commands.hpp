@@ -181,6 +181,47 @@ private:
     bool applied_{false};
 };
 
+// Append a shape primitive to the document's shapes list. Records
+// the assigned index so `undo()` can remove the exact shape created.
+//
+// The primitive is taken by value at construction time; the snapshot
+// is what gets re-applied on redo (no in-flight stylus state
+// captured — the handler already committed the primitive before
+// building the command).
+class AddShapeCommand final : public Command {
+public:
+    explicit AddShapeCommand(noted::domain::tool::ShapePrimitive shape);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override { return "Add shape"; }
+
+    [[nodiscard]] auto assigned_index() const noexcept -> std::size_t { return assigned_index_; }
+
+private:
+    noted::domain::tool::ShapePrimitive shape_;
+    std::size_t assigned_index_{0};
+    bool applied_{false};
+};
+
+// Remove a shape at the given index. Snapshots the shape on apply so
+// undo can re-insert it at the same index.
+class RemoveShapeCommand final : public Command {
+public:
+    explicit RemoveShapeCommand(std::size_t index);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override {
+        return "Remove shape";
+    }
+
+private:
+    std::size_t target_index_;
+    noted::domain::tool::ShapePrimitive snapshot_{};
+    bool applied_{false};
+};
+
 // Rename a block.
 class SetNameCommand final : public Command {
 public:

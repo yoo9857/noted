@@ -25,13 +25,19 @@ using json = nlohmann::json;
 // Top-level keys we recognize. Strict parser rejects any other key.
 // `pages` is optional for v1 (back-compat) — its presence is not
 // itself an error at any version.
-constexpr std::array<std::string_view, 4> kTopLevelKeys{"version", "root", "blocks", "pages"};
+constexpr std::array<std::string_view, 5> kTopLevelKeys{
+    "version", "root", "blocks", "pages", "shapes"};
 
 // Per-pages-object keys.
 constexpr std::array<std::string_view, 2> kPagesKeys{"gap_px", "items"};
 
 // Per-page-item keys.
 constexpr std::array<std::string_view, 4> kPageItemKeys{"w", "h", "bg", "x"};
+
+// Per-shape-item keys. v3 schema; rectangle + ellipse share the
+// same key set (the `k` ordinal disambiguates).
+constexpr std::array<std::string_view, 10> kShapeItemKeys{
+    "k", "x0", "y0", "x1", "y1", "sw", "r", "g", "b", "a"};
 
 // Per-block keys we recognize.
 constexpr std::array<std::string_view, 7> kBlockKeys{
@@ -317,6 +323,26 @@ template <typename T>
 
 }  // namespace
 
+[[nodiscard]] auto serialize_shapes(const std::vector<noted::domain::tool::ShapePrimitive>& shapes)
+    -> json {
+    json arr = json::array();
+    for (const auto& s : shapes) {
+        arr.push_back({
+            {"k", static_cast<int>(s.kind)},
+            {"x0", s.x0},
+            {"y0", s.y0},
+            {"x1", s.x1},
+            {"y1", s.y1},
+            {"sw", s.stroke_width_px},
+            {"r", s.stroke_r},
+            {"g", s.stroke_g},
+            {"b", s.stroke_b},
+            {"a", s.stroke_a},
+        });
+    }
+    return arr;
+}
+
 [[nodiscard]] auto serialize_pages(const noted::canvas::PageList& pages) -> json {
     json items = json::array();
     for (const auto& p : pages.pages()) {
@@ -351,6 +377,7 @@ auto document_to_json(const Document& doc) -> std::string {
     }
     out["blocks"] = std::move(blocks);
     out["pages"] = serialize_pages(doc.pages());
+    out["shapes"] = serialize_shapes(doc.shapes());
 
     // 2-space indent — readable diffs at small document scale.
     return out.dump(2);
@@ -522,6 +549,89 @@ auto document_from_json(std::string_view json_text) -> Result<Document> {
             pages.set_page_origin_x(idx, *x);
         }
         doc.replace_pages(std::move(pages));
+    }
+
+    // Shapes — optional at every version. v1/v2 files have no
+    // `shapes` field; loader treats absent as empty.
+    if (root_obj.contains("shapes")) {
+        const auto& shapes_arr = root_obj.at("shapes");
+        if (!shapes_arr.is_array()) {
+            return std::unexpected(
+                noted::make_error(noted::ErrorCode::invalid_argument,
+                                  "document_from_json: 'shapes' is not an array"));
+        }
+        std::vector<noted::domain::tool::ShapePrimitive> shapes;
+        shapes.reserve(shapes_arr.size());
+        for (std::size_t i = 0; i < shapes_arr.size(); ++i) {
+            const std::string context = "shapes[" + std::to_string(i) + "]";
+            const auto& item = shapes_arr[i];
+            if (!item.is_object()) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": not an object"));
+            }
+            if (auto bad = find_unknown_key(item, kShapeItemKeys); !bad.empty()) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": unknown key '" + bad + "'"));
+            }
+            auto k = require<int>(item, "k", context);
+            auto x0 = require<double>(item, "x0", context);
+            auto y0 = require<double>(item, "y0", context);
+            auto x1 = require<double>(item, "x1", context);
+            auto y1 = require<double>(item, "y1", context);
+            auto sw = require<float>(item, "sw", context);
+            auto r = require<float>(item, "r", context);
+            auto g = require<float>(item, "g", context);
+            auto b = require<float>(item, "b", context);
+            auto a = require<float>(item, "a", context);
+            if (!k) {
+                return std::unexpected(std::move(k).error());
+            }
+            if (!x0) {
+                return std::unexpected(std::move(x0).error());
+            }
+            if (!y0) {
+                return std::unexpected(std::move(y0).error());
+            }
+            if (!x1) {
+                return std::unexpected(std::move(x1).error());
+            }
+            if (!y1) {
+                return std::unexpected(std::move(y1).error());
+            }
+            if (!sw) {
+                return std::unexpected(std::move(sw).error());
+            }
+            if (!r) {
+                return std::unexpected(std::move(r).error());
+            }
+            if (!g) {
+                return std::unexpected(std::move(g).error());
+            }
+            if (!b) {
+                return std::unexpected(std::move(b).error());
+            }
+            if (!a) {
+                return std::unexpected(std::move(a).error());
+            }
+            if (*k < 0 || *k > static_cast<int>(noted::domain::tool::ShapeKind::ellipse)) {
+                return std::unexpected(noted::make_error(
+                    noted::ErrorCode::invalid_argument,
+                    context + ": k ordinal " + std::to_string(*k) + " out of range"));
+            }
+            noted::domain::tool::ShapePrimitive s{};
+            s.kind = static_cast<noted::domain::tool::ShapeKind>(*k);
+            s.x0 = *x0;
+            s.y0 = *y0;
+            s.x1 = *x1;
+            s.y1 = *y1;
+            s.stroke_width_px = *sw;
+            s.stroke_r = *r;
+            s.stroke_g = *g;
+            s.stroke_b = *b;
+            s.stroke_a = *a;
+            shapes.push_back(s);
+        }
+        doc.replace_shapes(std::move(shapes));
     }
     return doc;
 }

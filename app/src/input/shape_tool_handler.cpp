@@ -1,10 +1,12 @@
 #include "input/shape_tool_handler.hpp"
 
+#include <utility>
+
 namespace noted::app::input {
 
-ShapeToolHandler::ShapeToolHandler(std::vector<noted::domain::tool::ShapePrimitive>& shapes,
+ShapeToolHandler::ShapeToolHandler(CommandSink sink,
                                    const noted::domain::tool::ToolState& tools) noexcept
-    : shapes_(shapes), tools_(tools) {}
+    : sink_(std::move(sink)), tools_(tools) {}
 
 auto ShapeToolHandler::handled_kind() const noexcept -> noted::domain::tool::ToolKind {
     return noted::domain::tool::ToolKind::shape;
@@ -17,8 +19,7 @@ void ShapeToolHandler::on_pressed(double cx, double cy, bool /*shift*/, bool /*a
     st.current_x = cx;
     st.current_y = cy;
     // Snapshot the live options at PRESS so mid-drag slider edits
-    // don't retroactively change THIS shape. Same discipline as
-    // `Stroke::mode` from Phase B.2.
+    // don't retroactively change THIS shape.
     st.options = tools_.shape;
     drag_ = st;
 }
@@ -39,17 +40,16 @@ void ShapeToolHandler::on_released(double cx, double cy) {
     drag_->current_y = cy;
     if (auto shape = noted::domain::tool::shape_from_drag(
             drag_->press_x, drag_->press_y, drag_->current_x, drag_->current_y, drag_->options);
-        shape.has_value()) {
-        shapes_.push_back(*shape);
+        shape.has_value() && sink_) {
+        sink_(std::make_unique<noted::domain::AddShapeCommand>(*shape));
     }
     drag_.reset();
 }
 
 void ShapeToolHandler::on_deactivated() noexcept {
-    // Mid-drag tool switch: discard the in-flight shape. The
-    // user's intent was a Shape-tool drag specifically; switching
-    // away dismisses it. Already-committed shapes in `shapes_`
-    // stay — they belong to the document, not the in-flight drag.
+    // Mid-drag tool switch: discard the in-flight shape. Already-
+    // committed shapes belong to the document, not the in-flight
+    // drag.
     drag_.reset();
 }
 

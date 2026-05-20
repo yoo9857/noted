@@ -356,6 +356,71 @@ auto RemovePageCommand::undo(Document& doc) -> Result<void> {
 }
 
 // ============================================================================
+// AddShapeCommand
+// ============================================================================
+
+AddShapeCommand::AddShapeCommand(noted::domain::tool::ShapePrimitive shape)
+    : shape_(std::move(shape)) {}
+
+auto AddShapeCommand::apply(Document& doc) -> Result<void> {
+    auto r = doc.add_shape(shape_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    assigned_index_ = *r;
+    applied_ = true;
+    return {};
+}
+
+auto AddShapeCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_state,
+                                                 "AddShapeCommand::undo: command was not applied"));
+    }
+    auto r = doc.remove_shape(assigned_index_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
+// RemoveShapeCommand
+// ============================================================================
+
+RemoveShapeCommand::RemoveShapeCommand(std::size_t index) : target_index_(index) {}
+
+auto RemoveShapeCommand::apply(Document& doc) -> Result<void> {
+    if (target_index_ >= doc.shapes().size()) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_argument,
+            "RemoveShapeCommand::apply: index " + std::to_string(target_index_) +
+                " out of range (size " + std::to_string(doc.shapes().size()) + ")"));
+    }
+    snapshot_ = doc.shapes()[target_index_];
+    auto r = doc.remove_shape(target_index_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = true;
+    return {};
+}
+
+auto RemoveShapeCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_state, "RemoveShapeCommand::undo: command was not applied"));
+    }
+    auto r = doc.insert_shape(target_index_, snapshot_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
 // UndoStack
 // ============================================================================
 

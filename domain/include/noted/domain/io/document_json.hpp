@@ -12,33 +12,27 @@
 // Schema summary (see ADR 0025 for the full spec):
 //
 //   {
-//     "version": 2,
+//     "version": 3,
 //     "root": <BlockId>,                 // 0 when document is empty
-//     "blocks": [
+//     "blocks": [ ... ],                 // same as prior versions
+//     "pages": { ... },                  // same as v2
+//     "shapes": [                        // v3+; optional (loader treats absent as empty)
 //       {
-//         "id":       <BlockId>,
-//         "kind":     <integer ordinal>, // BlockKind value, wire-stable per ADR 0023
-//         "visible":  <bool>,
-//         "name":     <string>,
-//         "parent":   <BlockId>,         // 0 for the root
-//         "children": [<BlockId>, ...],
-//         "payload":  { ...kind-specific... }
+//         "k":   <int>,                  // ShapeKind ordinal (rectangle=0, ellipse=1)
+//         "x0":  <float>, "y0": <float>,
+//         "x1":  <float>, "y1": <float>,
+//         "sw":  <float>,                // stroke_width_px
+//         "r":   <float>, "g": <float>, "b": <float>, "a": <float>
 //       },
 //       ...
-//     ],
-//     "pages": {                         // optional in v1; required in v2 (may be empty)
-//       "gap_px": <float>,
-//       "items": [
-//         { "w": <float>, "h": <float>, "bg": <int>, "x": <float> },
-//         ...
-//       ]
-//     }
+//     ]
 //   }
 //
 // Versions:
 //   - v1: blocks only. Loader accepts these for back-compat.
-//   - v2: adds `pages`. Writer always emits v2. v1 files load with an
-//     empty page list.
+//   - v2: adds `pages`. v1 files load with an empty page list.
+//   - v3: adds `shapes`. v1/v2 files load with an empty shape list.
+//   Writer always emits the current version.
 //
 // The payload object's keys depend on the block's kind. See ADR 0025
 // for the table. Group blocks emit `{}`.
@@ -62,8 +56,8 @@ class Document;
 namespace noted::domain::io {
 
 // On-disk schema version. Writer always emits this; reader accepts
-// this value AND every prior supported version (currently 1).
-inline constexpr int kDocumentJsonVersion = 2;
+// this value AND every prior supported version.
+inline constexpr int kDocumentJsonVersion = 3;
 inline constexpr int kDocumentJsonMinReadableVersion = 1;
 
 // Serialize `doc` to JSON. Output is pretty-printed with 2-space

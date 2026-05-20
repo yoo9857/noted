@@ -38,6 +38,7 @@
 #include <variant>
 #include <vector>
 
+#include "noted/domain/tool/shape_drag.hpp"
 #include "noted/engine/canvas/page.hpp"
 #include "noted/engine/error/error.hpp"
 
@@ -313,6 +314,45 @@ public:
     // continue to see them).
     void replace_pages(noted::canvas::PageList pages) noexcept;
 
+    // ---- Shapes ----------------------------------------------------------
+    //
+    // Committed shape primitives from the Shape tool (Phase B.5). Lives
+    // here rather than on the App so they (a) persist to `.noted` v3
+    // alongside blocks + pages, (b) participate in undo/redo via
+    // `Add*Command` / `Remove*Command`, and (c) flow through future
+    // CRDT replication on the same edge as the rest of the document.
+    //
+    // Read-only access via `shapes()`; mutation goes through the
+    // append-only `add_shape` / index-based `remove_shape` /
+    // `insert_shape` API, mirroring the PageList contract.
+
+    [[nodiscard]] auto shapes() const noexcept
+        -> const std::vector<noted::domain::tool::ShapePrimitive>& {
+        return shapes_;
+    }
+
+    // Append a shape at the end of the list. Returns the assigned
+    // index. The primitive is taken by value; degenerate shapes
+    // (zero-area bounding rect) are accepted — callers should guard
+    // upstream if they want a stricter validity rule. Result wrapper
+    // kept for API symmetry; this implementation cannot fail.
+    [[nodiscard]] auto add_shape(noted::domain::tool::ShapePrimitive shape) -> Result<std::size_t>;
+
+    // Remove the shape at `index`. Rejects:
+    //   - invalid_argument: `index >= shapes().size()`.
+    auto remove_shape(std::size_t index) -> Result<void>;
+
+    // Insert `shape` at `index` (`index == size()` appends). The
+    // precise inverse of `remove_shape` for undo. Returns
+    // invalid_argument when `index > shapes().size()`.
+    [[nodiscard]] auto insert_shape(std::size_t index, noted::domain::tool::ShapePrimitive shape)
+        -> Result<std::size_t>;
+
+    // Replace the entire shapes list. **File-format loader path only.**
+    // Regular mutation must go through add/remove/insert_shape (and
+    // ideally through Commands).
+    void replace_shapes(std::vector<noted::domain::tool::ShapePrimitive> shapes) noexcept;
+
 private:
     // Detach `id` from its parent's children list, leaving the node
     // itself otherwise intact. Returns the (parent, index) it was
@@ -330,6 +370,7 @@ private:
     BlockId root_{invalid_block_id};
     BlockId next_id_{1};  // 0 is reserved
     noted::canvas::PageList pages_{};
+    std::vector<noted::domain::tool::ShapePrimitive> shapes_{};
 };
 
 }  // namespace noted::domain
