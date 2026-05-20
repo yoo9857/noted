@@ -10,6 +10,7 @@ add_executable(noted_app
     src/input/selection_tool_handler.cpp
     src/input/camera_controller.cpp
     src/frame/render_passes.cpp
+    src/ui/ui_panels.cpp
 )
 
 # App-internal headers (src/app.hpp, src/scene/*.hpp, ...) are
