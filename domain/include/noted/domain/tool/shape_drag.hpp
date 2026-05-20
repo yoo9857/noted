@@ -37,6 +37,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <tuple>
 
 namespace noted::domain::tool {
 
