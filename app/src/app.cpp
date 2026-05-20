@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -620,75 +619,20 @@ void App::install_frame_hook() {
         debug_overlay_state_.push_sample(static_cast<float>(f.cpu_ms));
     });
 
-    // Pointer position tracker. The scroll handler reads the latest
-    // cursor pos so zoom anchors under the cursor (Goodnotes /
-    // Procreate behaviour). Also drives middle-drag panning when
-    // `panning_` is true.
-    (void) noted::hook::registry().on_pointer_moved.subscribe(
-        [this](const noted::hook::PointerMoved& e) {
-            if (panning_) {
-                const double dx = e.x - pan_last_x_;
-                const double dy = e.y - pan_last_y_;
-                camera_.translate_by(dx, dy);
-            }
-            cursor_x_ = e.x;
-            cursor_y_ = e.y;
-            pan_last_x_ = e.x;
-            pan_last_y_ = e.y;
-            // Left-button drag forwarding (selection / future tools)
-            // lives on `tool_input_router_` per Phase R.1 / ADR 0032.
-        });
+    // Camera input — pan + zoom + cursor tracking + framebuffer-
+    // resize all live on CameraController after Phase R.2 (ADR 0032).
+    // Built BEFORE the tool input router so the camera's subscriptions
+    // run first in the channel's insertion order; tools see the
+    // camera-side state (cursor, current scale) as already-current
+    // when their handlers fire.
+    camera_controller_ =
+        noted::app::input::CameraController::create(noted::hook::registry(), camera_, cfg_.canvas);
 
-    // Middle-button press / release toggles pan mode. Left button is
-    // handled by `tool_input_router_` — it subscribes separately and
-    // dispatches to the active `ToolInputHandler`. Right button is
-    // open for a future context menu.
-    (void) noted::hook::registry().on_pointer_pressed.subscribe(
-        [this](const noted::hook::PointerPressed& e) {
-            if (e.button != noted::hook::PointerButton::middle) {
-                return;
-            }
-            panning_ = true;
-            pan_last_x_ = e.x;
-            pan_last_y_ = e.y;
-        });
-    (void) noted::hook::registry().on_pointer_released.subscribe(
-        [this](const noted::hook::PointerReleased& e) {
-            if (e.button != noted::hook::PointerButton::middle) {
-                return;
-            }
-            panning_ = false;
-        });
-
-    // Scroll → zoom around the cursor. dy > 0 (wheel up) zooms in;
-    // dy < 0 (wheel down) zooms out. Multiplicative step `1.1 ^ dy`
-    // mirrors the perceptually-uniform feel of Photoshop / Figma.
-    // The Camera's internal floor / ceiling absorbs any runaway dy.
-    (void) noted::hook::registry().on_scrolled.subscribe([this](const noted::hook::Scrolled& e) {
-        // Re-read `cfg_` every event so a future Preferences UI /
-        // hot-reload can flip the feel without restart. The cost is
-        // negligible — a handful of doubles on the stack per scroll.
-        const double factor = std::pow(cfg_.canvas.zoom_step, e.dy);
-        camera_.zoom_around(cursor_x_, cursor_y_, factor);
-        camera_.clamp_scale(cfg_.canvas.zoom_min, cfg_.canvas.zoom_max);
-    });
-
-    // Framebuffer resize → keep camera's window extent in sync. The
-    // canvas extent matches the swapchain extent today; if a future
-    // PR makes them independent, this assignment splits.
-    (void) noted::hook::registry().on_framebuffer_resized.subscribe(
-        [this](const noted::hook::FramebufferResized& r) {
-            camera_.set_window_extent(r.width, r.height);
-            camera_.set_canvas_extent(r.width, r.height);
-        });
-
-    // Tool input router — owns left-button dispatch to per-tool
-    // handlers. Built AFTER the above subscriptions (which handle
-    // middle button for pan + cursor tracking) so the dispatch
-    // order in the hook channel is "App pan/track first, then
-    // router to the active tool"; same priority means stable
-    // insertion order in `Channel<E>::subscribe`. Heap-allocated for
-    // stable `this` (router's lambdas capture themselves).
+    // Tool input router — owns LEFT-button dispatch to per-tool
+    // handlers. Heap-allocated for stable `this` (router's lambdas
+    // capture themselves). Middle button is owned by the camera
+    // controller above; right button is open for a future context
+    // menu.
     tool_input_router_ =
         noted::app::input::ToolInputRouter::create(noted::hook::registry(), camera_);
     auto sel_handler = std::make_unique<noted::app::input::SelectionToolHandler>(selection_);

@@ -23,11 +23,16 @@ add_executable(noted_unit_tests
     tool_options_test.cpp
     selection_drag_test.cpp
     tool_input_router_test.cpp
+    camera_controller_test.cpp
     # App-private translation units exercised from tests. These compile
     # alongside `noted_app` (separate executable, no link conflict).
     # Tests reach them via the `app/src` include directory added below.
     ${CMAKE_SOURCE_DIR}/app/src/input/tool_input_router.cpp
     ${CMAKE_SOURCE_DIR}/app/src/input/selection_tool_handler.cpp
+    ${CMAKE_SOURCE_DIR}/app/src/input/camera_controller.cpp
+    # `app_config.cpp` pulls nlohmann/json (PRIVATE_DEP on domain).
+    # Tests only need the `CanvasConfig` struct from the header; the
+    # parser isn't exercised, so we don't compile the .cpp here.
 )
 
 target_include_directories(noted_unit_tests PRIVATE ${CMAKE_SOURCE_DIR}/app/src)
