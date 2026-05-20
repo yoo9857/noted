@@ -19,10 +19,12 @@
 #include "noted/ui/widget/selection_overlay.hpp"
 #include "noted/ui/widget/shape_overlay.hpp"
 #include "noted/ui/widget/status_bar.hpp"
+#include "noted/ui/widget/text_overlay.hpp"
 #include "noted/ui/widget/tool_palette.hpp"
 
 #include "input/selection_tool_handler.hpp"
 #include "input/shape_tool_handler.hpp"
+#include "input/text_tool_handler.hpp"
 #include "input/tool_input_router.hpp"
 
 namespace noted::app::ui {
@@ -80,6 +82,7 @@ UiPanels::UiPanels(Deps d) noexcept
       tool_input_router_(d.tool_input_router),
       selection_handler_(d.selection_handler),
       shape_handler_(d.shape_handler),
+      text_handler_(d.text_handler),
       camera_(d.camera),
       swapchain_(d.swapchain),
       cfg_(d.cfg),
@@ -267,6 +270,24 @@ void UiPanels::draw() {
                     static_cast<float>(camera_.project_y(cy))};
         };
         noted::ui::widget::shape_overlay(shapes_, preview, project, menu_state_.show_shape_overlay);
+    }
+
+    // Text overlay — interactive. Renders committed primitives via
+    // the background draw list AND hosts an in-flight InputText for
+    // typing. We translate Enter / Esc into TextToolHandler commit /
+    // cancel via lambdas, keeping the overlay pure-domain.
+    if (text_handler_ != nullptr) {
+        auto project = [this](double cx, double cy) -> std::pair<float, float> {
+            return {static_cast<float>(camera_.project_x(cx)),
+                    static_cast<float>(camera_.project_y(cy))};
+        };
+        noted::ui::widget::text_overlay(
+            text_handler_->texts(),
+            text_handler_->editing(),
+            project,
+            [h = text_handler_] { h->commit_editing(); },
+            [h = text_handler_] { h->cancel_editing(); },
+            menu_state_.show_text_overlay);
     }
 
     noted::ui::widget::debug_overlay(

@@ -66,6 +66,7 @@
 #include "input/camera_controller.hpp"
 #include "input/selection_tool_handler.hpp"
 #include "input/shape_tool_handler.hpp"
+#include "input/text_tool_handler.hpp"
 #include "input/tool_input_router.hpp"
 #include "scene/demo_scene.hpp"
 #include "ui/dirty_prompt.hpp"
@@ -263,6 +264,13 @@ private:
     // Commands (same pattern PageList followed in Phase A.3.d).
     std::vector<noted::domain::tool::ShapePrimitive> shapes_{};
 
+    // ---- Texts state (Phase B.6) --------------------------------------
+    // Committed text primitives from the Text tool. App-owned storage;
+    // `TextToolHandler` mutates the vector on commit; `text_overlay`
+    // reads it for the per-frame draw. Future PR promotes to
+    // `Document::texts()` with Commands.
+    std::vector<noted::domain::tool::TextPrimitive> texts_{};
+
     // ---- Tool input routing -------------------------------------------
     // Owns the LEFT-button pointer subscriptions and dispatches to the
     // registered handler matching the active tool. Heap-allocated for
@@ -275,6 +283,7 @@ private:
     // list.
     noted::app::input::SelectionToolHandler* selection_handler_{nullptr};
     noted::app::input::ShapeToolHandler* shape_handler_{nullptr};
+    noted::app::input::TextToolHandler* text_handler_{nullptr};
 
     // ---- Canvas view --------------------------------------------------
     // Pan + scale state shared by the composite pass (camera-projected

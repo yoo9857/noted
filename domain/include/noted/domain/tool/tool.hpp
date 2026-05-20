@@ -20,6 +20,7 @@
 
 #include "noted/domain/tool/options.hpp"
 #include "noted/domain/tool/shape_drag.hpp"
+#include "noted/domain/tool/text_input.hpp"
 
 namespace noted::domain::tool {
 
@@ -54,6 +55,7 @@ struct ToolState {
     PenOptions pen{};
     EraserOptions eraser{};
     ShapeOptions shape{};
+    TextOptions text{};
 
     [[nodiscard]] auto operator==(const ToolState&) const noexcept -> bool = default;
 };
