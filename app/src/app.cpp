@@ -180,8 +180,7 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
         .selection = raw->selection_,
         .shapes = raw->session_.document().shapes(),
         .texts = raw->session_.document().texts(),
-        .images = raw->images_,
-        // images_ stays App-owned until B.7.b graduates it
+        .images = raw->session_.document().images(),
         .prompt = raw->prompt_,
         .save_for_dirty_prompt = [raw]() -> bool { return raw->save_for_dirty_prompt(); },
         .execute_pending_dirty_action =
@@ -662,9 +661,14 @@ void App::install_frame_hook() {
         tools_);
     text_handler_ = text_handler.get();
     tool_input_router_->register_handler(std::move(text_handler));
-    // Phase B.7 — Image tool. Same pattern; placeholder rect for now,
-    // real raster upload lands in B.7.b.
-    auto image_handler = std::make_unique<noted::app::input::ImageToolHandler>(images_, tools_);
+    // Phase B.7 + persistence consolidation — Image tool emits
+    // `AddImageCommand`s via the session's execute path. Real GPU
+    // upload (raster body) still pending — see B.7.b.
+    auto image_handler = std::make_unique<noted::app::input::ImageToolHandler>(
+        [this](std::unique_ptr<noted::domain::Command> cmd) {
+            (void) session_.execute(std::move(cmd));
+        },
+        tools_);
     image_handler_ = image_handler.get();
     tool_input_router_->register_handler(std::move(image_handler));
     tool_input_router_->set_active(tools_.active);

@@ -1,26 +1,26 @@
 #include "input/image_tool_handler.hpp"
 
+#include <utility>
+
 namespace noted::app::input {
 
-ImageToolHandler::ImageToolHandler(std::vector<noted::domain::tool::ImagePrimitive>& images,
+ImageToolHandler::ImageToolHandler(CommandSink sink,
                                    const noted::domain::tool::ToolState& tools) noexcept
-    : images_(images), tools_(tools) {}
+    : sink_(std::move(sink)), tools_(tools) {}
 
 auto ImageToolHandler::handled_kind() const noexcept -> noted::domain::tool::ToolKind {
     return noted::domain::tool::ToolKind::image;
 }
 
 void ImageToolHandler::on_pressed(double cx, double cy, bool /*shift*/, bool /*alt*/) {
-    // Snapshot the current `ImageOptions` at press; image_primitive_from
-    // clamps degenerate sizes to a 1 px floor.
     auto p = noted::domain::tool::image_primitive_from(cx, cy, tools_.image);
-    if (!p.is_degenerate()) {
-        images_.push_back(p);
+    if (!p.is_degenerate() && sink_) {
+        sink_(std::make_unique<noted::domain::AddImageCommand>(std::move(p)));
     }
 }
 
 void ImageToolHandler::on_moved(double /*cx*/, double /*cy*/) {
-    // Click-to-place — no drag state.
+    // Click-to-place — no drag.
 }
 
 void ImageToolHandler::on_released(double /*cx*/, double /*cy*/) {

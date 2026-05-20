@@ -10,6 +10,7 @@ namespace {
 
 using noted::canvas::PageBackground;
 using noted::domain::AddBlockCommand;
+using noted::domain::AddImageCommand;
 using noted::domain::AddPageCommand;
 using noted::domain::AddShapeCommand;
 using noted::domain::AddTextCommand;
@@ -21,6 +22,7 @@ using noted::domain::InsertBlockCommand;
 using noted::domain::invalid_block_id;
 using noted::domain::MoveBlockCommand;
 using noted::domain::RemoveBlockCommand;
+using noted::domain::RemoveImageCommand;
 using noted::domain::RemovePageCommand;
 using noted::domain::RemoveShapeCommand;
 using noted::domain::RemoveTextCommand;
@@ -683,4 +685,70 @@ TEST(TextCommands, RoundTripThroughUndoStack) {
     ASSERT_TRUE(stack.redo(doc));
     ASSERT_TRUE(stack.redo(doc));
     EXPECT_EQ(doc.texts()[1].content, "two");
+}
+
+// ============================================================================
+// AddImageCommand / RemoveImageCommand (persistence consolidation for B.7)
+// ============================================================================
+
+namespace {
+
+[[nodiscard]] auto make_image_primitive(double x,
+                                        double y,
+                                        float w,
+                                        float h) noexcept -> noted::domain::tool::ImagePrimitive {
+    noted::domain::tool::ImagePrimitive p{};
+    p.x = x;
+    p.y = y;
+    p.width_px = w;
+    p.height_px = h;
+    p.a = 1.0F;
+    return p;
+}
+
+}  // namespace
+
+TEST(AddImageCommand, ApplyAddsImageAndUndoRemovesIt) {
+    Document doc;
+    AddImageCommand cmd(make_image_primitive(50.0, 60.0, 200.0F, 100.0F));
+    ASSERT_TRUE(cmd.apply(doc));
+    ASSERT_EQ(doc.images().size(), 1U);
+    EXPECT_EQ(cmd.assigned_index(), 0U);
+    ASSERT_TRUE(cmd.undo(doc));
+    EXPECT_TRUE(doc.images().empty());
+}
+
+TEST(RemoveImageCommand, ApplyRemovesAndUndoRestoresAtSameIndex) {
+    Document doc;
+    (void) doc.add_image(make_image_primitive(0.0, 0.0, 10.0F, 10.0F));
+    (void) doc.add_image(make_image_primitive(20.0, 20.0, 20.0F, 20.0F));
+    RemoveImageCommand cmd(0);
+    ASSERT_TRUE(cmd.apply(doc));
+    ASSERT_EQ(doc.images().size(), 1U);
+    EXPECT_DOUBLE_EQ(doc.images()[0].x, 20.0);
+    ASSERT_TRUE(cmd.undo(doc));
+    EXPECT_EQ(doc.images().size(), 2U);
+    EXPECT_DOUBLE_EQ(doc.images()[0].x, 0.0);
+}
+
+TEST(RemoveImageCommand, OutOfRangeIndexFails) {
+    Document doc;
+    RemoveImageCommand cmd(0);
+    EXPECT_FALSE(cmd.apply(doc));
+}
+
+TEST(ImageCommands, RoundTripThroughUndoStack) {
+    Document doc;
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(
+        std::make_unique<AddImageCommand>(make_image_primitive(0.0, 0.0, 50.0F, 50.0F)), doc));
+    ASSERT_TRUE(stack.execute(
+        std::make_unique<AddImageCommand>(make_image_primitive(100.0, 100.0, 50.0F, 50.0F)), doc));
+    ASSERT_EQ(doc.images().size(), 2U);
+    ASSERT_TRUE(stack.undo(doc));
+    ASSERT_TRUE(stack.undo(doc));
+    EXPECT_TRUE(doc.images().empty());
+    ASSERT_TRUE(stack.redo(doc));
+    ASSERT_TRUE(stack.redo(doc));
+    EXPECT_EQ(doc.images().size(), 2U);
 }

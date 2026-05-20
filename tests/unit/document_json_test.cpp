@@ -330,13 +330,14 @@ TEST(DocumentJson, EmittedJsonContainsVersionAndKindOrdinal) {
     (void) h;
     const auto text = document_to_json(src);
     // The output should include the wire-stable version + heading ordinal (2).
-    EXPECT_NE(text.find("\"version\": 4"), std::string::npos);
+    EXPECT_NE(text.find("\"version\": 5"), std::string::npos);
     EXPECT_NE(text.find("\"kind\": 0"), std::string::npos);  // group
     EXPECT_NE(text.find("\"kind\": 2"), std::string::npos);  // heading
-    // v2+ pages, v3+ shapes, v4+ texts — writer emits all three.
+    // v2+ pages, v3+ shapes, v4+ texts, v5+ images — writer emits all four.
     EXPECT_NE(text.find("\"pages\""), std::string::npos);
     EXPECT_NE(text.find("\"shapes\""), std::string::npos);
     EXPECT_NE(text.find("\"texts\""), std::string::npos);
+    EXPECT_NE(text.find("\"images\""), std::string::npos);
 }
 
 // ---- v1 back-compat --------------------------------------------------------
@@ -601,6 +602,90 @@ TEST(DocumentJsonReject, TextMissingRequiredKey) {
         "pages": {"gap_px": 0.0, "items": []},
         "shapes": [],
         "texts": [{"x": 0, "y": 0, "s": ""}]
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+// ---- v5 images round-trip --------------------------------------------------
+
+TEST(DocumentJson, ImagesRoundTripPreservesGeometryAndTint) {
+    Document src;
+    noted::domain::tool::ImagePrimitive a{};
+    a.x = 10.0;
+    a.y = 20.0;
+    a.width_px = 300.0F;
+    a.height_px = 200.0F;
+    a.r = 0.9F;
+    a.g = 0.5F;
+    a.b = 0.1F;
+    a.a = 1.0F;
+    ASSERT_TRUE(src.add_image(a));
+
+    noted::domain::tool::ImagePrimitive b{};
+    b.x = -5.5;
+    b.y = 100.5;
+    b.width_px = 50.0F;
+    b.height_px = 75.0F;
+    b.r = 0.0F;
+    b.g = 0.0F;
+    b.b = 0.0F;
+    b.a = 0.5F;
+    ASSERT_TRUE(src.add_image(b));
+
+    auto loaded = document_from_json(document_to_json(src));
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->images().size(), 2U);
+    EXPECT_DOUBLE_EQ(loaded->images()[0].x, 10.0);
+    EXPECT_FLOAT_EQ(loaded->images()[0].width_px, 300.0F);
+    EXPECT_FLOAT_EQ(loaded->images()[0].r, 0.9F);
+    EXPECT_DOUBLE_EQ(loaded->images()[1].x, -5.5);
+    EXPECT_FLOAT_EQ(loaded->images()[1].a, 0.5F);
+}
+
+TEST(DocumentJson, V4FileLoadsWithEmptyImages) {
+    const auto v4 = R"({
+        "version": 4, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [],
+        "texts": []
+    })";
+    auto loaded = document_from_json(v4);
+    ASSERT_TRUE(loaded);
+    EXPECT_TRUE(loaded->images().empty());
+}
+
+TEST(DocumentJson, V5LoaderClampsCorruptDimensions) {
+    const auto bad_dims = R"({
+        "version": 5, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [],
+        "images": [{"x": 0, "y": 0, "w": -50, "h": 0,
+                    "r": 1, "g": 1, "b": 1, "a": 1}]
+    })";
+    auto loaded = document_from_json(bad_dims);
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->images().size(), 1U);
+    EXPECT_FLOAT_EQ(loaded->images()[0].width_px, 1.0F);
+    EXPECT_FLOAT_EQ(loaded->images()[0].height_px, 1.0F);
+}
+
+TEST(DocumentJsonReject, ImageUnknownKey) {
+    const auto bad = R"({
+        "version": 5, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [],
+        "images": [{"x": 0, "y": 0, "w": 1, "h": 1,
+                    "r": 0, "g": 0, "b": 0, "a": 1, "extra": true}]
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+TEST(DocumentJsonReject, ImageMissingRequiredKey) {
+    const auto bad = R"({
+        "version": 5, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [],
+        "images": [{"x": 0, "y": 0, "w": 1}]
     })";
     EXPECT_FALSE(document_from_json(bad));
 }

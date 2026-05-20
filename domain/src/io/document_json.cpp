@@ -26,8 +26,8 @@ using json = nlohmann::json;
 // Top-level keys we recognize. Strict parser rejects any other key.
 // `pages` is optional for v1 (back-compat) — its presence is not
 // itself an error at any version.
-constexpr std::array<std::string_view, 6> kTopLevelKeys{
-    "version", "root", "blocks", "pages", "shapes", "texts"};
+constexpr std::array<std::string_view, 7> kTopLevelKeys{
+    "version", "root", "blocks", "pages", "shapes", "texts", "images"};
 
 // Per-pages-object keys.
 constexpr std::array<std::string_view, 2> kPagesKeys{"gap_px", "items"};
@@ -42,6 +42,9 @@ constexpr std::array<std::string_view, 10> kShapeItemKeys{
 
 // Per-text-item keys. v4 schema.
 constexpr std::array<std::string_view, 8> kTextItemKeys{"x", "y", "s", "fs", "r", "g", "b", "a"};
+
+// Per-image-item keys. v5 schema.
+constexpr std::array<std::string_view, 8> kImageItemKeys{"x", "y", "w", "h", "r", "g", "b", "a"};
 
 // Per-block keys we recognize.
 constexpr std::array<std::string_view, 7> kBlockKeys{
@@ -327,6 +330,24 @@ template <typename T>
 
 }  // namespace
 
+[[nodiscard]] auto serialize_images(const std::vector<noted::domain::tool::ImagePrimitive>& images)
+    -> json {
+    json arr = json::array();
+    for (const auto& im : images) {
+        arr.push_back({
+            {"x", im.x},
+            {"y", im.y},
+            {"w", im.width_px},
+            {"h", im.height_px},
+            {"r", im.r},
+            {"g", im.g},
+            {"b", im.b},
+            {"a", im.a},
+        });
+    }
+    return arr;
+}
+
 [[nodiscard]] auto serialize_texts(const std::vector<noted::domain::tool::TextPrimitive>& texts)
     -> json {
     json arr = json::array();
@@ -401,6 +422,7 @@ auto document_to_json(const Document& doc) -> std::string {
     out["pages"] = serialize_pages(doc.pages());
     out["shapes"] = serialize_shapes(doc.shapes());
     out["texts"] = serialize_texts(doc.texts());
+    out["images"] = serialize_images(doc.images());
 
     // 2-space indent — readable diffs at small document scale.
     return out.dump(2);
@@ -727,6 +749,80 @@ auto document_from_json(std::string_view json_text) -> Result<Document> {
             texts.push_back(std::move(t));
         }
         doc.replace_texts(std::move(texts));
+    }
+
+    // Images — optional at every version. v1..v4 have no `images`
+    // field; loader treats absent as empty.
+    if (root_obj.contains("images")) {
+        const auto& images_arr = root_obj.at("images");
+        if (!images_arr.is_array()) {
+            return std::unexpected(
+                noted::make_error(noted::ErrorCode::invalid_argument,
+                                  "document_from_json: 'images' is not an array"));
+        }
+        std::vector<noted::domain::tool::ImagePrimitive> images;
+        images.reserve(images_arr.size());
+        for (std::size_t i = 0; i < images_arr.size(); ++i) {
+            const std::string context = "images[" + std::to_string(i) + "]";
+            const auto& item = images_arr[i];
+            if (!item.is_object()) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": not an object"));
+            }
+            if (auto bad = find_unknown_key(item, kImageItemKeys); !bad.empty()) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": unknown key '" + bad + "'"));
+            }
+            auto x = require<double>(item, "x", context);
+            auto y = require<double>(item, "y", context);
+            auto w = require<float>(item, "w", context);
+            auto h = require<float>(item, "h", context);
+            auto r = require<float>(item, "r", context);
+            auto g = require<float>(item, "g", context);
+            auto b = require<float>(item, "b", context);
+            auto a = require<float>(item, "a", context);
+            if (!x) {
+                return std::unexpected(std::move(x).error());
+            }
+            if (!y) {
+                return std::unexpected(std::move(y).error());
+            }
+            if (!w) {
+                return std::unexpected(std::move(w).error());
+            }
+            if (!h) {
+                return std::unexpected(std::move(h).error());
+            }
+            if (!r) {
+                return std::unexpected(std::move(r).error());
+            }
+            if (!g) {
+                return std::unexpected(std::move(g).error());
+            }
+            if (!b) {
+                return std::unexpected(std::move(b).error());
+            }
+            if (!a) {
+                return std::unexpected(std::move(a).error());
+            }
+            // Clamp dimensions to a 1-px floor — matches the runtime
+            // clamp `image_primitive_from` applies on the commit path.
+            // Hostile / corrupted files cannot smuggle a zero-area
+            // primitive past the loader.
+            const float clamped_w = (std::isnan(*w) || *w < 1.0F) ? 1.0F : *w;
+            const float clamped_h = (std::isnan(*h) || *h < 1.0F) ? 1.0F : *h;
+            noted::domain::tool::ImagePrimitive im{};
+            im.x = *x;
+            im.y = *y;
+            im.width_px = clamped_w;
+            im.height_px = clamped_h;
+            im.r = *r;
+            im.g = *g;
+            im.b = *b;
+            im.a = *a;
+            images.push_back(im);
+        }
+        doc.replace_images(std::move(images));
     }
     return doc;
 }

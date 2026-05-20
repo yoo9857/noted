@@ -38,6 +38,7 @@
 #include <variant>
 #include <vector>
 
+#include "noted/domain/tool/image_input.hpp"
 #include "noted/domain/tool/shape_drag.hpp"
 #include "noted/domain/tool/text_input.hpp"
 #include "noted/engine/canvas/page.hpp"
@@ -373,6 +374,28 @@ public:
 
     void replace_texts(std::vector<noted::domain::tool::TextPrimitive> texts) noexcept;
 
+    // ---- Images ----------------------------------------------------------
+    //
+    // Committed image placeholders from the Image tool (Phase B.7).
+    // Same ownership / mutation contract as shapes + texts. v0.x
+    // stores the placeholder geometry + tint; B.7.b extends this
+    // primitive with a real raster reference (asset_id + decoded
+    // bitmap held in an external asset registry).
+
+    [[nodiscard]] auto images() const noexcept
+        -> const std::vector<noted::domain::tool::ImagePrimitive>& {
+        return images_;
+    }
+
+    [[nodiscard]] auto add_image(noted::domain::tool::ImagePrimitive image) -> Result<std::size_t>;
+
+    auto remove_image(std::size_t index) -> Result<void>;
+
+    [[nodiscard]] auto insert_image(std::size_t index, noted::domain::tool::ImagePrimitive image)
+        -> Result<std::size_t>;
+
+    void replace_images(std::vector<noted::domain::tool::ImagePrimitive> images) noexcept;
+
 private:
     // Detach `id` from its parent's children list, leaving the node
     // itself otherwise intact. Returns the (parent, index) it was
@@ -392,6 +415,7 @@ private:
     noted::canvas::PageList pages_{};
     std::vector<noted::domain::tool::ShapePrimitive> shapes_{};
     std::vector<noted::domain::tool::TextPrimitive> texts_{};
+    std::vector<noted::domain::tool::ImagePrimitive> images_{};
 };
 
 }  // namespace noted::domain
