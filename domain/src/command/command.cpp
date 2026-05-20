@@ -421,6 +421,70 @@ auto RemoveShapeCommand::undo(Document& doc) -> Result<void> {
 }
 
 // ============================================================================
+// AddTextCommand
+// ============================================================================
+
+AddTextCommand::AddTextCommand(noted::domain::tool::TextPrimitive text) : text_(std::move(text)) {}
+
+auto AddTextCommand::apply(Document& doc) -> Result<void> {
+    auto r = doc.add_text(text_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    assigned_index_ = *r;
+    applied_ = true;
+    return {};
+}
+
+auto AddTextCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_state,
+                                                 "AddTextCommand::undo: command was not applied"));
+    }
+    auto r = doc.remove_text(assigned_index_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
+// RemoveTextCommand
+// ============================================================================
+
+RemoveTextCommand::RemoveTextCommand(std::size_t index) : target_index_(index) {}
+
+auto RemoveTextCommand::apply(Document& doc) -> Result<void> {
+    if (target_index_ >= doc.texts().size()) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_argument,
+            "RemoveTextCommand::apply: index " + std::to_string(target_index_) +
+                " out of range (size " + std::to_string(doc.texts().size()) + ")"));
+    }
+    snapshot_ = doc.texts()[target_index_];
+    auto r = doc.remove_text(target_index_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = true;
+    return {};
+}
+
+auto RemoveTextCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_state, "RemoveTextCommand::undo: command was not applied"));
+    }
+    auto r = doc.insert_text(target_index_, snapshot_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
 // UndoStack
 // ============================================================================
 

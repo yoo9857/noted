@@ -25,6 +25,15 @@
 //         "r":   <float>, "g": <float>, "b": <float>, "a": <float>
 //       },
 //       ...
+//     ],
+//     "texts": [                         // v4+; optional (loader treats absent as empty)
+//       {
+//         "x":   <float>, "y": <float>,
+//         "s":   <string>,               // content (UTF-8)
+//         "fs":  <float>,                // font_size_px (>= 1)
+//         "r":   <float>, "g": <float>, "b": <float>, "a": <float>
+//       },
+//       ...
 //     ]
 //   }
 //
@@ -32,6 +41,7 @@
 //   - v1: blocks only. Loader accepts these for back-compat.
 //   - v2: adds `pages`. v1 files load with an empty page list.
 //   - v3: adds `shapes`. v1/v2 files load with an empty shape list.
+//   - v4: adds `texts`. v1/v2/v3 files load with an empty text list.
 //   Writer always emits the current version.
 //
 // The payload object's keys depend on the block's kind. See ADR 0025
@@ -57,7 +67,7 @@ namespace noted::domain::io {
 
 // On-disk schema version. Writer always emits this; reader accepts
 // this value AND every prior supported version.
-inline constexpr int kDocumentJsonVersion = 3;
+inline constexpr int kDocumentJsonVersion = 4;
 inline constexpr int kDocumentJsonMinReadableVersion = 1;
 
 // Serialize `doc` to JSON. Output is pretty-printed with 2-space

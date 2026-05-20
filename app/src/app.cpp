@@ -179,7 +179,9 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
         .tools = raw->tools_,
         .selection = raw->selection_,
         .shapes = raw->session_.document().shapes(),
+        .texts = raw->session_.document().texts(),
         .images = raw->images_,
+        // images_ stays App-owned until B.7.b graduates it
         .prompt = raw->prompt_,
         .save_for_dirty_prompt = [raw]() -> bool { return raw->save_for_dirty_prompt(); },
         .execute_pending_dirty_action =
@@ -650,8 +652,14 @@ void App::install_frame_hook() {
         tools_);
     shape_handler_ = shape_handler.get();
     tool_input_router_->register_handler(std::move(shape_handler));
-    // Phase B.6 — Text tool. Same pattern.
-    auto text_handler = std::make_unique<noted::app::input::TextToolHandler>(texts_, tools_);
+    // Phase B.6 + persistence consolidation — Text tool emits
+    // `AddTextCommand`s via the session's execute path so undo /
+    // .noted round-trip work.
+    auto text_handler = std::make_unique<noted::app::input::TextToolHandler>(
+        [this](std::unique_ptr<noted::domain::Command> cmd) {
+            (void) session_.execute(std::move(cmd));
+        },
+        tools_);
     text_handler_ = text_handler.get();
     tool_input_router_->register_handler(std::move(text_handler));
     // Phase B.7 — Image tool. Same pattern; placeholder rect for now,

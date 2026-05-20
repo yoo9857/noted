@@ -296,6 +296,7 @@ void Document::clear() noexcept {
     root_ = invalid_block_id;
     pages_ = noted::canvas::PageList{};
     shapes_.clear();
+    texts_.clear();
     // next_id_ is intentionally NOT reset — IDs stay monotonic across
     // clears so any history / undo references survive the wipe.
 }
@@ -365,6 +366,38 @@ auto Document::insert_shape(std::size_t index,
 
 void Document::replace_shapes(std::vector<noted::domain::tool::ShapePrimitive> shapes) noexcept {
     shapes_ = std::move(shapes);
+}
+
+auto Document::add_text(noted::domain::tool::TextPrimitive text) -> Result<std::size_t> {
+    texts_.push_back(std::move(text));
+    return texts_.size() - 1;
+}
+
+auto Document::remove_text(std::size_t index) -> Result<void> {
+    if (index >= texts_.size()) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument,
+                              "Document::remove_text: index " + std::to_string(index) +
+                                  " out of range (size " + std::to_string(texts_.size()) + ")"));
+    }
+    texts_.erase(texts_.begin() + static_cast<std::ptrdiff_t>(index));
+    return {};
+}
+
+auto Document::insert_text(std::size_t index,
+                           noted::domain::tool::TextPrimitive text) -> Result<std::size_t> {
+    if (index > texts_.size()) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument,
+                              "Document::insert_text: index " + std::to_string(index) +
+                                  " out of range (size " + std::to_string(texts_.size()) + ")"));
+    }
+    texts_.insert(texts_.begin() + static_cast<std::ptrdiff_t>(index), std::move(text));
+    return index;
+}
+
+void Document::replace_texts(std::vector<noted::domain::tool::TextPrimitive> texts) noexcept {
+    texts_ = std::move(texts);
 }
 
 auto Document::move_to(BlockId id, BlockId new_parent, std::size_t index) -> Result<void> {

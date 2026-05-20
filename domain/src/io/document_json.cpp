@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -25,8 +26,8 @@ using json = nlohmann::json;
 // Top-level keys we recognize. Strict parser rejects any other key.
 // `pages` is optional for v1 (back-compat) — its presence is not
 // itself an error at any version.
-constexpr std::array<std::string_view, 5> kTopLevelKeys{
-    "version", "root", "blocks", "pages", "shapes"};
+constexpr std::array<std::string_view, 6> kTopLevelKeys{
+    "version", "root", "blocks", "pages", "shapes", "texts"};
 
 // Per-pages-object keys.
 constexpr std::array<std::string_view, 2> kPagesKeys{"gap_px", "items"};
@@ -38,6 +39,9 @@ constexpr std::array<std::string_view, 4> kPageItemKeys{"w", "h", "bg", "x"};
 // same key set (the `k` ordinal disambiguates).
 constexpr std::array<std::string_view, 10> kShapeItemKeys{
     "k", "x0", "y0", "x1", "y1", "sw", "r", "g", "b", "a"};
+
+// Per-text-item keys. v4 schema.
+constexpr std::array<std::string_view, 8> kTextItemKeys{"x", "y", "s", "fs", "r", "g", "b", "a"};
 
 // Per-block keys we recognize.
 constexpr std::array<std::string_view, 7> kBlockKeys{
@@ -323,6 +327,24 @@ template <typename T>
 
 }  // namespace
 
+[[nodiscard]] auto serialize_texts(const std::vector<noted::domain::tool::TextPrimitive>& texts)
+    -> json {
+    json arr = json::array();
+    for (const auto& t : texts) {
+        arr.push_back({
+            {"x", t.x},
+            {"y", t.y},
+            {"s", t.content},
+            {"fs", t.font_size_px},
+            {"r", t.r},
+            {"g", t.g},
+            {"b", t.b},
+            {"a", t.a},
+        });
+    }
+    return arr;
+}
+
 [[nodiscard]] auto serialize_shapes(const std::vector<noted::domain::tool::ShapePrimitive>& shapes)
     -> json {
     json arr = json::array();
@@ -378,6 +400,7 @@ auto document_to_json(const Document& doc) -> std::string {
     out["blocks"] = std::move(blocks);
     out["pages"] = serialize_pages(doc.pages());
     out["shapes"] = serialize_shapes(doc.shapes());
+    out["texts"] = serialize_texts(doc.texts());
 
     // 2-space indent — readable diffs at small document scale.
     return out.dump(2);
@@ -632,6 +655,78 @@ auto document_from_json(std::string_view json_text) -> Result<Document> {
             shapes.push_back(s);
         }
         doc.replace_shapes(std::move(shapes));
+    }
+
+    // Texts — optional at every version. v1/v2/v3 files have no
+    // `texts` field; loader treats absent as empty.
+    if (root_obj.contains("texts")) {
+        const auto& texts_arr = root_obj.at("texts");
+        if (!texts_arr.is_array()) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::invalid_argument, "document_from_json: 'texts' is not an array"));
+        }
+        std::vector<noted::domain::tool::TextPrimitive> texts;
+        texts.reserve(texts_arr.size());
+        for (std::size_t i = 0; i < texts_arr.size(); ++i) {
+            const std::string context = "texts[" + std::to_string(i) + "]";
+            const auto& item = texts_arr[i];
+            if (!item.is_object()) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": not an object"));
+            }
+            if (auto bad = find_unknown_key(item, kTextItemKeys); !bad.empty()) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": unknown key '" + bad + "'"));
+            }
+            auto x = require<double>(item, "x", context);
+            auto y = require<double>(item, "y", context);
+            auto s = require<std::string>(item, "s", context);
+            auto fs = require<float>(item, "fs", context);
+            auto r = require<float>(item, "r", context);
+            auto g = require<float>(item, "g", context);
+            auto b = require<float>(item, "b", context);
+            auto a = require<float>(item, "a", context);
+            if (!x) {
+                return std::unexpected(std::move(x).error());
+            }
+            if (!y) {
+                return std::unexpected(std::move(y).error());
+            }
+            if (!s) {
+                return std::unexpected(std::move(s).error());
+            }
+            if (!fs) {
+                return std::unexpected(std::move(fs).error());
+            }
+            if (!r) {
+                return std::unexpected(std::move(r).error());
+            }
+            if (!g) {
+                return std::unexpected(std::move(g).error());
+            }
+            if (!b) {
+                return std::unexpected(std::move(b).error());
+            }
+            if (!a) {
+                return std::unexpected(std::move(a).error());
+            }
+            // Clamp font size at load time so a corrupted / hostile
+            // file (e.g. `"fs": -3` or `"fs": NaN`) cannot smuggle a
+            // degenerate primitive past the loader. Matches the 1 px
+            // floor `text_primitive_from` applies on the commit path.
+            const float clamped_fs = (std::isnan(*fs) || *fs < 1.0F) ? 1.0F : *fs;
+            noted::domain::tool::TextPrimitive t{};
+            t.x = *x;
+            t.y = *y;
+            t.content = std::move(*s);
+            t.font_size_px = clamped_fs;
+            t.r = *r;
+            t.g = *g;
+            t.b = *b;
+            t.a = *a;
+            texts.push_back(std::move(t));
+        }
+        doc.replace_texts(std::move(texts));
     }
     return doc;
 }

@@ -70,6 +70,7 @@ class ToolInputRouter;
 
 namespace noted::domain::tool {
 struct ImagePrimitive;
+struct TextPrimitive;
 }  // namespace noted::domain::tool
 
 namespace noted::app::ui {
@@ -107,11 +108,11 @@ public:
         // ---- mutable tool + selection + shapes state -------------------
         noted::domain::tool::ToolState& tools;
         noted::domain::Selection& selection;
-        // App owns the shapes vector; the ShapeToolHandler mutates it
-        // on commit; the shape_overlay reads it each frame.
+        // Shapes / texts live on `Document` (persistence
+        // consolidation PRs). Images still live on App until B.7.b's
+        // follow-up moves them too.
         const std::vector<noted::domain::tool::ShapePrimitive>& shapes;
-        // App owns the images vector (B.7). ImageToolHandler pushes
-        // on press; image_overlay reads each frame.
+        const std::vector<noted::domain::tool::TextPrimitive>& texts;
         const std::vector<noted::domain::tool::ImagePrimitive>& images;
 
         // ---- dirty-prompt + callbacks back into App --------------------
@@ -165,6 +166,7 @@ private:
     noted::domain::tool::ToolState& tools_;
     noted::domain::Selection& selection_;
     const std::vector<noted::domain::tool::ShapePrimitive>& shapes_;
+    const std::vector<noted::domain::tool::TextPrimitive>& texts_;
     const std::vector<noted::domain::tool::ImagePrimitive>& images_;
 
     noted::app::DirtyPrompt& prompt_;

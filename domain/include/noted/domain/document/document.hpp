@@ -39,6 +39,7 @@
 #include <vector>
 
 #include "noted/domain/tool/shape_drag.hpp"
+#include "noted/domain/tool/text_input.hpp"
 #include "noted/engine/canvas/page.hpp"
 #include "noted/engine/error/error.hpp"
 
@@ -353,6 +354,25 @@ public:
     // ideally through Commands).
     void replace_shapes(std::vector<noted::domain::tool::ShapePrimitive> shapes) noexcept;
 
+    // ---- Texts -----------------------------------------------------------
+    //
+    // Committed text primitives from the Text tool (Phase B.6). Same
+    // ownership / mutation contract as shapes.
+
+    [[nodiscard]] auto texts() const noexcept
+        -> const std::vector<noted::domain::tool::TextPrimitive>& {
+        return texts_;
+    }
+
+    [[nodiscard]] auto add_text(noted::domain::tool::TextPrimitive text) -> Result<std::size_t>;
+
+    auto remove_text(std::size_t index) -> Result<void>;
+
+    [[nodiscard]] auto insert_text(std::size_t index,
+                                   noted::domain::tool::TextPrimitive text) -> Result<std::size_t>;
+
+    void replace_texts(std::vector<noted::domain::tool::TextPrimitive> texts) noexcept;
+
 private:
     // Detach `id` from its parent's children list, leaving the node
     // itself otherwise intact. Returns the (parent, index) it was
@@ -371,6 +391,7 @@ private:
     BlockId next_id_{1};  // 0 is reserved
     noted::canvas::PageList pages_{};
     std::vector<noted::domain::tool::ShapePrimitive> shapes_{};
+    std::vector<noted::domain::tool::TextPrimitive> texts_{};
 };
 
 }  // namespace noted::domain

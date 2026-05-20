@@ -222,6 +222,39 @@ private:
     bool applied_{false};
 };
 
+// Append a text primitive to the document's texts list. Same shape
+// as `AddShapeCommand`.
+class AddTextCommand final : public Command {
+public:
+    explicit AddTextCommand(noted::domain::tool::TextPrimitive text);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override { return "Add text"; }
+
+    [[nodiscard]] auto assigned_index() const noexcept -> std::size_t { return assigned_index_; }
+
+private:
+    noted::domain::tool::TextPrimitive text_;
+    std::size_t assigned_index_{0};
+    bool applied_{false};
+};
+
+// Remove a text primitive at the given index.
+class RemoveTextCommand final : public Command {
+public:
+    explicit RemoveTextCommand(std::size_t index);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override { return "Remove text"; }
+
+private:
+    std::size_t target_index_;
+    noted::domain::tool::TextPrimitive snapshot_{};
+    bool applied_{false};
+};
+
 // Rename a block.
 class SetNameCommand final : public Command {
 public:
