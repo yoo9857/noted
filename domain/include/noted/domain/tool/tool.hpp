@@ -19,6 +19,7 @@
 #include <string_view>
 
 #include "noted/domain/tool/options.hpp"
+#include "noted/domain/tool/shape_drag.hpp"
 
 namespace noted::domain::tool {
 
@@ -47,10 +48,12 @@ struct ToolState {
     // forget the Pen's colour. Memory cost is a handful of floats
     // per tool, well worth the ergonomic win.
     //
-    // Select / shape / text / image will gain their own option
-    // structs as their behavioural integrations land (Phase B.4+).
+    // Select / shape / text / image gain their own option structs
+    // as their behavioural integrations land. Shape (Phase B.5) is
+    // the first to populate.
     PenOptions pen{};
     EraserOptions eraser{};
+    ShapeOptions shape{};
 
     [[nodiscard]] auto operator==(const ToolState&) const noexcept -> bool = default;
 };

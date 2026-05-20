@@ -167,6 +167,7 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
         .stroke_engine = *raw->stroke_engine_,
         .tool_input_router = *raw->tool_input_router_,
         .selection_handler = raw->selection_handler_,
+        .shape_handler = raw->shape_handler_,
         .camera = raw->camera_,
         .swapchain = *raw->swapchain_,
         .cfg = raw->cfg_,
@@ -175,6 +176,7 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
         .outline_rename = raw->outline_rename_,
         .tools = raw->tools_,
         .selection = raw->selection_,
+        .shapes = raw->shapes_,
         .prompt = raw->prompt_,
         .save_for_dirty_prompt = [raw]() -> bool { return raw->save_for_dirty_prompt(); },
         .execute_pending_dirty_action =
@@ -633,6 +635,12 @@ void App::install_frame_hook() {
     auto sel_handler = std::make_unique<noted::app::input::SelectionToolHandler>(selection_);
     selection_handler_ = sel_handler.get();
     tool_input_router_->register_handler(std::move(sel_handler));
+    // Phase B.5 — Shape tool registers under the new pattern: ONE
+    // new handler subclass + ONE register_handler line. App.cpp
+    // doesn't grow on the input axis.
+    auto shape_handler = std::make_unique<noted::app::input::ShapeToolHandler>(shapes_, tools_);
+    shape_handler_ = shape_handler.get();
+    tool_input_router_->register_handler(std::move(shape_handler));
     tool_input_router_->set_active(tools_.active);
 }
 

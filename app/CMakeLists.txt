@@ -8,6 +8,7 @@ add_executable(noted_app
     src/ui/dirty_prompt.cpp
     src/input/tool_input_router.cpp
     src/input/selection_tool_handler.cpp
+    src/input/shape_tool_handler.cpp
     src/input/camera_controller.cpp
     src/frame/render_passes.cpp
     src/ui/ui_panels.cpp

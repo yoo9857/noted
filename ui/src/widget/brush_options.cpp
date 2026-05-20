@@ -44,6 +44,33 @@ void draw_placeholder(const char* tool_name) {
     ImGui::TextWrapped("(no options yet — coming in a later phase)");
 }
 
+void draw_shape(noted::domain::tool::ShapeOptions& opt) {
+    ImGui::TextDisabled("Shape");
+    ImGui::Spacing();
+
+    // Kind picker — combo over the wire-stable enum. Append-only
+    // ordinals (see `shape_drag.hpp`), so the labels' index matches
+    // the ordinal exactly.
+    using noted::domain::tool::ShapeKind;
+    constexpr const char* kKindLabels[] = {"Rectangle", "Ellipse"};
+    int kind_idx = static_cast<int>(opt.kind);
+    if (ImGui::Combo("Kind", &kind_idx, kKindLabels, IM_ARRAYSIZE(kKindLabels))) {
+        opt.kind = static_cast<ShapeKind>(kind_idx);
+    }
+
+    ImGui::SliderFloat("Stroke width", &opt.stroke_width_px, 0.5F, 16.0F, "%.1f px");
+
+    ImGui::Spacing();
+    float colour[4] = {opt.stroke_r, opt.stroke_g, opt.stroke_b, opt.stroke_a};
+    if (ImGui::ColorEdit4(
+            "Stroke colour", colour, ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_Float)) {
+        opt.stroke_r = colour[0];
+        opt.stroke_g = colour[1];
+        opt.stroke_b = colour[2];
+        opt.stroke_a = colour[3];
+    }
+}
+
 }  // namespace
 
 void brush_options(noted::domain::tool::ToolState& tools, bool* open) {
@@ -67,7 +94,7 @@ void brush_options(noted::domain::tool::ToolState& tools, bool* open) {
             draw_placeholder("Select");
             break;
         case ToolKind::shape:
-            draw_placeholder("Shape");
+            draw_shape(tools.shape);
             break;
         case ToolKind::text:
             draw_placeholder("Text");

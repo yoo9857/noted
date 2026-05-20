@@ -26,6 +26,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <vulkan/vulkan.h>
 
@@ -64,6 +65,7 @@
 #include "frame/render_passes.hpp"
 #include "input/camera_controller.hpp"
 #include "input/selection_tool_handler.hpp"
+#include "input/shape_tool_handler.hpp"
 #include "input/tool_input_router.hpp"
 #include "scene/demo_scene.hpp"
 #include "ui/dirty_prompt.hpp"
@@ -253,6 +255,14 @@ private:
     // `SelectionToolHandler` after Phase R.1 — see `tool_input_router_`
     // below.)
 
+    // ---- Shapes state (Phase B.5) -------------------------------------
+    // Committed shapes from the Shape tool. App owns the storage;
+    // `ShapeToolHandler` mutates the vector on each release;
+    // `shape_overlay` reads it for the per-frame draw. Future PR
+    // promotes shapes into a `Document::shapes()` list with proper
+    // Commands (same pattern PageList followed in Phase A.3.d).
+    std::vector<noted::domain::tool::ShapePrimitive> shapes_{};
+
     // ---- Tool input routing -------------------------------------------
     // Owns the LEFT-button pointer subscriptions and dispatches to the
     // registered handler matching the active tool. Heap-allocated for
@@ -260,10 +270,11 @@ private:
     // capture it). Built in `install_frame_hook` after the engine /
     // hook registry is alive.
     std::unique_ptr<noted::app::input::ToolInputRouter> tool_input_router_;
-    // Non-owning — owned by the router. Cached so `selection_overlay`
+    // Non-owning — owned by the router. Cached so the overlay widgets
     // can read `current_drag()` per frame without walking the handler
     // list.
     noted::app::input::SelectionToolHandler* selection_handler_{nullptr};
+    noted::app::input::ShapeToolHandler* shape_handler_{nullptr};
 
     // ---- Canvas view --------------------------------------------------
     // Pan + scale state shared by the composite pass (camera-projected

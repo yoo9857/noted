@@ -29,8 +29,10 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <vector>
 
 #include "noted/domain/selection/selection.hpp"
+#include "noted/domain/tool/shape_drag.hpp"
 #include "noted/domain/tool/tool.hpp"
 #include "noted/engine/engine.hpp"
 #include "noted/ui/widget/debug_overlay.hpp"
@@ -60,6 +62,7 @@ class StrokeEngine;
 
 namespace noted::app::input {
 class SelectionToolHandler;
+class ShapeToolHandler;
 class ToolInputRouter;
 }  // namespace noted::app::input
 
@@ -77,8 +80,10 @@ public:
         // ---- input subsystems R.4 talks to -----------------------------
         noted::stroke::StrokeEngine& stroke_engine;
         noted::app::input::ToolInputRouter& tool_input_router;
-        // Nullable — `nullptr` when no selection tool is registered.
+        // Nullable — `nullptr` when the respective tool isn't
+        // registered with the router.
         noted::app::input::SelectionToolHandler* selection_handler{nullptr};
+        noted::app::input::ShapeToolHandler* shape_handler{nullptr};
 
         // Camera is non-const — the page-strip handler translates the
         // camera vertically when the user clicks a row or adds a page.
@@ -91,9 +96,12 @@ public:
         noted::ui::widget::DebugOverlayState& debug_overlay_state;
         noted::ui::widget::OutlineRenameState& outline_rename;
 
-        // ---- mutable tool + selection state ----------------------------
+        // ---- mutable tool + selection + shapes state -------------------
         noted::domain::tool::ToolState& tools;
         noted::domain::Selection& selection;
+        // App owns the shapes vector; the ShapeToolHandler mutates it
+        // on commit; the shape_overlay reads it each frame.
+        const std::vector<noted::domain::tool::ShapePrimitive>& shapes;
 
         // ---- dirty-prompt + callbacks back into App --------------------
         noted::app::DirtyPrompt& prompt;
@@ -131,6 +139,7 @@ private:
     noted::stroke::StrokeEngine& stroke_engine_;
     noted::app::input::ToolInputRouter& tool_input_router_;
     noted::app::input::SelectionToolHandler* selection_handler_;
+    noted::app::input::ShapeToolHandler* shape_handler_;
 
     noted::canvas::Camera& camera_;
     const noted::gpu::Swapchain& swapchain_;
@@ -142,6 +151,7 @@ private:
 
     noted::domain::tool::ToolState& tools_;
     noted::domain::Selection& selection_;
+    const std::vector<noted::domain::tool::ShapePrimitive>& shapes_;
 
     noted::app::DirtyPrompt& prompt_;
     std::function<bool()> save_for_dirty_prompt_;
