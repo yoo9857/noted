@@ -18,6 +18,8 @@
 #include <cstdint>
 #include <string_view>
 
+#include "noted/domain/tool/options.hpp"
+
 namespace noted::domain::tool {
 
 enum class ToolKind : std::uint8_t {
@@ -38,6 +40,17 @@ inline constexpr std::size_t kToolCount = 6;
 
 struct ToolState {
     ToolKind active{ToolKind::pen};
+
+    // Per-tool option payloads. Stored side-by-side rather than inside
+    // a `std::variant` so the inactive tools' state persists across
+    // switches — flipping from Pen to Eraser and back should not
+    // forget the Pen's colour. Memory cost is a handful of floats
+    // per tool, well worth the ergonomic win.
+    //
+    // Select / shape / text / image will gain their own option
+    // structs as their behavioural integrations land (Phase B.4+).
+    PenOptions pen{};
+    EraserOptions eraser{};
 
     [[nodiscard]] auto operator==(const ToolState&) const noexcept -> bool = default;
 };

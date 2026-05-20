@@ -20,12 +20,14 @@
 #include "noted/compositor/layer_payload.hpp"
 #include "noted/domain/command/commands.hpp"
 #include "noted/domain/document/document.hpp"
+#include "noted/domain/tool/options.hpp"
 #include "noted/engine/harness/harness.hpp"
 #include "noted/engine/hook/registry.hpp"
 #include "noted/engine/profile.hpp"
 #include "noted/platform/fs/fs.hpp"
 #include "noted/platform/io/file_picker.hpp"
 #include "noted/platform/io/noted_file.hpp"
+#include "noted/ui/widget/brush_options.hpp"
 #include "noted/ui/widget/layer_panel.hpp"
 #include "noted/ui/widget/outline_panel.hpp"
 #include "noted/ui/widget/page_strip.hpp"
@@ -78,39 +80,45 @@ noted::harness::FeatureFlag flag_force_vsync{"gpu.force_vsync_fifo", /*default=*
 
 constexpr VkFormat kCanvasFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
-// Settings the stroke engine consumes when the active tool changes:
-// the brush style (colour + radii + alpha curve) and the draw mode
-// (normal alpha blend vs destination-out erase).
+// Settings the stroke engine consumes for the active tool: the brush
+// style (colour + radii + alpha curve) and the draw mode (normal
+// alpha blend vs destination-out erase).
 //
-// Phase B.2: the eraser stops being a paper-colour placeholder. It
-// uses `DrawMode::erase` so destination-out blend in the strokes
-// target zeros alpha at the eraser footprint, and the overlay step
-// lets the page pattern show through. The eraser brush colour is
-// irrelevant under destination-out (only the alpha is read), so it
-// keeps the default brush.
+// Phase B.3: the brush style comes from the active tool's per-tool
+// payload on `ToolState` (PenOptions / EraserOptions), so the user's
+// slider drags + colour-picker edits flow into the engine. The
+// caller pushes these every frame — `set_brush` only affects future
+// presses (the in-flight stroke holds its snapshotted style), so a
+// per-frame push has no risk of corrupting an in-flight stroke and
+// is too cheap (~32 B memcpy) to bother with change detection.
 struct ToolSettings {
     noted::stroke::BrushStyle brush;
     noted::stroke::DrawMode mode;
 };
 
-[[nodiscard]] auto tool_settings_for_tool(noted::domain::tool::ToolKind kind) noexcept
+[[nodiscard]] auto tool_settings_for_tool(const noted::domain::tool::ToolState& tools) noexcept
     -> ToolSettings {
     using noted::domain::tool::ToolKind;
-    noted::stroke::BrushStyle b{};
-    switch (kind) {
+    switch (tools.active) {
         case ToolKind::eraser:
-            return {.brush = b, .mode = noted::stroke::DrawMode::erase};
+            return {.brush = noted::domain::tool::brush_from_eraser(tools.eraser),
+                    .mode = noted::stroke::DrawMode::erase};
         case ToolKind::pen:
+            return {.brush = noted::domain::tool::brush_from_pen(tools.pen),
+                    .mode = noted::stroke::DrawMode::draw};
         case ToolKind::select:
         case ToolKind::shape:
         case ToolKind::text:
         case ToolKind::image:
-            // Default (black) brush + draw mode. The not-yet-implemented
-            // tools fall through to Pen behaviour until their
-            // behavioural integration lands.
-            return {.brush = b, .mode = noted::stroke::DrawMode::draw};
+            // Not-yet-implemented tools fall through to Pen behaviour
+            // until their behavioural integration lands. Reading from
+            // tools.pen so they share the user's pen settings — feels
+            // less surprising than reverting to defaults mid-session.
+            return {.brush = noted::domain::tool::brush_from_pen(tools.pen),
+                    .mode = noted::stroke::DrawMode::draw};
     }
-    return {.brush = b, .mode = noted::stroke::DrawMode::draw};
+    return {.brush = noted::domain::tool::brush_from_pen(tools.pen),
+            .mode = noted::stroke::DrawMode::draw};
 }
 
 }  // namespace
@@ -917,7 +925,17 @@ void App::draw_widgets() {
         noted::ui::widget::tool_palette(tools_.active, &menu_state_.show_tool_palette);
     if (tool_result.switch_request && *tool_result.switch_request != tools_.active) {
         tools_.active = *tool_result.switch_request;
-        const auto settings = tool_settings_for_tool(tools_.active);
+    }
+    // Brush options panel — slider / colour-picker writes mutate
+    // `tools_.pen` / `tools_.eraser` in place.
+    noted::ui::widget::brush_options(tools_, &menu_state_.show_brush_options);
+    // Per-frame push of the active tool's brush + mode into the
+    // stroke engine. Live-update: slider drags and colour-picker
+    // edits take effect on the very next stroke. The in-flight
+    // stroke (if any) is unaffected — its style is snapshotted at
+    // press time.
+    {
+        const auto settings = tool_settings_for_tool(tools_);
         stroke_engine_->set_brush(settings.brush);
         stroke_engine_->set_mode(settings.mode);
     }
