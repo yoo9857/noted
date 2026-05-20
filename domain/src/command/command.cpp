@@ -485,6 +485,71 @@ auto RemoveTextCommand::undo(Document& doc) -> Result<void> {
 }
 
 // ============================================================================
+// AddImageCommand
+// ============================================================================
+
+AddImageCommand::AddImageCommand(noted::domain::tool::ImagePrimitive image)
+    : image_(std::move(image)) {}
+
+auto AddImageCommand::apply(Document& doc) -> Result<void> {
+    auto r = doc.add_image(image_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    assigned_index_ = *r;
+    applied_ = true;
+    return {};
+}
+
+auto AddImageCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_state,
+                                                 "AddImageCommand::undo: command was not applied"));
+    }
+    auto r = doc.remove_image(assigned_index_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
+// RemoveImageCommand
+// ============================================================================
+
+RemoveImageCommand::RemoveImageCommand(std::size_t index) : target_index_(index) {}
+
+auto RemoveImageCommand::apply(Document& doc) -> Result<void> {
+    if (target_index_ >= doc.images().size()) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_argument,
+            "RemoveImageCommand::apply: index " + std::to_string(target_index_) +
+                " out of range (size " + std::to_string(doc.images().size()) + ")"));
+    }
+    snapshot_ = doc.images()[target_index_];
+    auto r = doc.remove_image(target_index_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = true;
+    return {};
+}
+
+auto RemoveImageCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_state, "RemoveImageCommand::undo: command was not applied"));
+    }
+    auto r = doc.insert_image(target_index_, snapshot_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
 // UndoStack
 // ============================================================================
 
