@@ -169,6 +169,7 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
         .selection_handler = raw->selection_handler_,
         .shape_handler = raw->shape_handler_,
         .text_handler = raw->text_handler_,
+        .image_handler = raw->image_handler_,
         .camera = raw->camera_,
         .swapchain = *raw->swapchain_,
         .cfg = raw->cfg_,
@@ -178,6 +179,7 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
         .tools = raw->tools_,
         .selection = raw->selection_,
         .shapes = raw->shapes_,
+        .images = raw->images_,
         .prompt = raw->prompt_,
         .save_for_dirty_prompt = [raw]() -> bool { return raw->save_for_dirty_prompt(); },
         .execute_pending_dirty_action =
@@ -646,6 +648,11 @@ void App::install_frame_hook() {
     auto text_handler = std::make_unique<noted::app::input::TextToolHandler>(texts_, tools_);
     text_handler_ = text_handler.get();
     tool_input_router_->register_handler(std::move(text_handler));
+    // Phase B.7 — Image tool. Same pattern; placeholder rect for now,
+    // real raster upload lands in B.7.b.
+    auto image_handler = std::make_unique<noted::app::input::ImageToolHandler>(images_, tools_);
+    image_handler_ = image_handler.get();
+    tool_input_router_->register_handler(std::move(image_handler));
     tool_input_router_->set_active(tools_.active);
 }
 

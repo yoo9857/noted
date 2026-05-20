@@ -24,6 +24,7 @@ add_executable(noted_unit_tests
     selection_drag_test.cpp
     shape_drag_test.cpp
     text_input_test.cpp
+    image_input_test.cpp
     tool_input_router_test.cpp
     camera_controller_test.cpp
     # App-private translation units exercised from tests. These compile

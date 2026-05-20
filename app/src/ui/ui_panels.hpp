@@ -61,11 +61,16 @@ class StrokeEngine;
 }  // namespace noted::stroke
 
 namespace noted::app::input {
+class ImageToolHandler;
 class SelectionToolHandler;
 class ShapeToolHandler;
 class TextToolHandler;
 class ToolInputRouter;
 }  // namespace noted::app::input
+
+namespace noted::domain::tool {
+struct ImagePrimitive;
+}  // namespace noted::domain::tool
 
 namespace noted::app::ui {
 
@@ -86,6 +91,7 @@ public:
         noted::app::input::SelectionToolHandler* selection_handler{nullptr};
         noted::app::input::ShapeToolHandler* shape_handler{nullptr};
         noted::app::input::TextToolHandler* text_handler{nullptr};
+        noted::app::input::ImageToolHandler* image_handler{nullptr};
 
         // Camera is non-const — the page-strip handler translates the
         // camera vertically when the user clicks a row or adds a page.
@@ -104,6 +110,9 @@ public:
         // App owns the shapes vector; the ShapeToolHandler mutates it
         // on commit; the shape_overlay reads it each frame.
         const std::vector<noted::domain::tool::ShapePrimitive>& shapes;
+        // App owns the images vector (B.7). ImageToolHandler pushes
+        // on press; image_overlay reads each frame.
+        const std::vector<noted::domain::tool::ImagePrimitive>& images;
 
         // ---- dirty-prompt + callbacks back into App --------------------
         noted::app::DirtyPrompt& prompt;
@@ -143,6 +152,7 @@ private:
     noted::app::input::SelectionToolHandler* selection_handler_;
     noted::app::input::ShapeToolHandler* shape_handler_;
     noted::app::input::TextToolHandler* text_handler_;
+    noted::app::input::ImageToolHandler* image_handler_;
 
     noted::canvas::Camera& camera_;
     const noted::gpu::Swapchain& swapchain_;
@@ -155,6 +165,7 @@ private:
     noted::domain::tool::ToolState& tools_;
     noted::domain::Selection& selection_;
     const std::vector<noted::domain::tool::ShapePrimitive>& shapes_;
+    const std::vector<noted::domain::tool::ImagePrimitive>& images_;
 
     noted::app::DirtyPrompt& prompt_;
     std::function<bool()> save_for_dirty_prompt_;

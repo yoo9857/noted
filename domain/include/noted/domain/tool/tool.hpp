@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <string_view>
 
+#include "noted/domain/tool/image_input.hpp"
 #include "noted/domain/tool/options.hpp"
 #include "noted/domain/tool/shape_drag.hpp"
 #include "noted/domain/tool/text_input.hpp"
@@ -56,6 +57,7 @@ struct ToolState {
     EraserOptions eraser{};
     ShapeOptions shape{};
     TextOptions text{};
+    ImageOptions image{};
 
     [[nodiscard]] auto operator==(const ToolState&) const noexcept -> bool = default;
 };
