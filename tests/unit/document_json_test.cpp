@@ -330,12 +330,13 @@ TEST(DocumentJson, EmittedJsonContainsVersionAndKindOrdinal) {
     (void) h;
     const auto text = document_to_json(src);
     // The output should include the wire-stable version + heading ordinal (2).
-    EXPECT_NE(text.find("\"version\": 3"), std::string::npos);
+    EXPECT_NE(text.find("\"version\": 4"), std::string::npos);
     EXPECT_NE(text.find("\"kind\": 0"), std::string::npos);  // group
     EXPECT_NE(text.find("\"kind\": 2"), std::string::npos);  // heading
-    // v2+ always emits a (possibly empty) pages object; v3+ adds shapes.
+    // v2+ pages, v3+ shapes, v4+ texts — writer emits all three.
     EXPECT_NE(text.find("\"pages\""), std::string::npos);
     EXPECT_NE(text.find("\"shapes\""), std::string::npos);
+    EXPECT_NE(text.find("\"texts\""), std::string::npos);
 }
 
 // ---- v1 back-compat --------------------------------------------------------
@@ -512,6 +513,94 @@ TEST(DocumentJsonReject, ShapeMissingRequiredKey) {
         "version": 3, "root": 0, "blocks": [],
         "pages": {"gap_px": 0.0, "items": []},
         "shapes": [{"k": 0, "x0": 0, "y0": 0, "x1": 1, "y1": 1}]
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+// ---- v4 texts round-trip ---------------------------------------------------
+
+TEST(DocumentJson, TextsRoundTripPreservesContentAndStyle) {
+    Document src;
+    noted::domain::tool::TextPrimitive a{};
+    a.x = 50.0;
+    a.y = 80.0;
+    a.content = "Hello, world!";
+    a.font_size_px = 24.0F;
+    a.r = 0.5F;
+    a.g = 0.0F;
+    a.b = 0.5F;
+    a.a = 1.0F;
+    ASSERT_TRUE(src.add_text(a));
+
+    noted::domain::tool::TextPrimitive b{};
+    b.x = -10.5;
+    b.y = 200.5;
+    b.content = "\xED\x95\x9C\xEA\xB8\x80 / \xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E / mixed";
+    b.font_size_px = 16.0F;
+    b.r = 0.1F;
+    b.g = 0.2F;
+    b.b = 0.3F;
+    b.a = 0.5F;
+    ASSERT_TRUE(src.add_text(b));
+
+    auto loaded = document_from_json(document_to_json(src));
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->texts().size(), 2U);
+    EXPECT_DOUBLE_EQ(loaded->texts()[0].x, 50.0);
+    EXPECT_EQ(loaded->texts()[0].content, "Hello, world!");
+    EXPECT_FLOAT_EQ(loaded->texts()[0].font_size_px, 24.0F);
+    EXPECT_FLOAT_EQ(loaded->texts()[0].r, 0.5F);
+
+    EXPECT_DOUBLE_EQ(loaded->texts()[1].x, -10.5);
+    EXPECT_EQ(loaded->texts()[1].content,
+              "\xED\x95\x9C\xEA\xB8\x80 / \xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E / mixed");
+    EXPECT_FLOAT_EQ(loaded->texts()[1].font_size_px, 16.0F);
+}
+
+TEST(DocumentJson, V3FileLoadsWithEmptyTexts) {
+    const auto v3 = R"({
+        "version": 3, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": []
+    })";
+    auto loaded = document_from_json(v3);
+    ASSERT_TRUE(loaded);
+    EXPECT_TRUE(loaded->texts().empty());
+}
+
+TEST(DocumentJson, V4LoaderClampsCorruptFontSize) {
+    // A hostile / corrupted file with a negative font size must not
+    // smuggle a degenerate primitive past the loader.
+    const auto bad_fs = R"({
+        "version": 4, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [],
+        "texts": [{"x": 0, "y": 0, "s": "hi", "fs": -7,
+                   "r": 0, "g": 0, "b": 0, "a": 1}]
+    })";
+    auto loaded = document_from_json(bad_fs);
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->texts().size(), 1U);
+    EXPECT_FLOAT_EQ(loaded->texts()[0].font_size_px, 1.0F);
+}
+
+TEST(DocumentJsonReject, TextUnknownKey) {
+    const auto bad = R"({
+        "version": 4, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [],
+        "texts": [{"x": 0, "y": 0, "s": "", "fs": 16,
+                   "r": 0, "g": 0, "b": 0, "a": 1, "extra": true}]
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+TEST(DocumentJsonReject, TextMissingRequiredKey) {
+    const auto bad = R"({
+        "version": 4, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [],
+        "texts": [{"x": 0, "y": 0, "s": ""}]
     })";
     EXPECT_FALSE(document_from_json(bad));
 }

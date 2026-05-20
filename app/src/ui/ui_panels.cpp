@@ -94,6 +94,7 @@ UiPanels::UiPanels(Deps d) noexcept
       tools_(d.tools),
       selection_(d.selection),
       shapes_(d.shapes),
+      texts_(d.texts),
       images_(d.images),
       prompt_(d.prompt),
       save_for_dirty_prompt_(std::move(d.save_for_dirty_prompt)),
@@ -285,7 +286,7 @@ void UiPanels::draw() {
                     static_cast<float>(camera_.project_y(cy))};
         };
         noted::ui::widget::text_overlay(
-            text_handler_->texts(),
+            texts_,
             text_handler_->editing(),
             project,
             [h = text_handler_] { h->commit_editing(); },

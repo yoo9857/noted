@@ -263,12 +263,9 @@ private:
     // mutating a local vector; the overlay reads `session_.document()
     // .shapes()` each frame.
 
-    // ---- Texts state (Phase B.6) --------------------------------------
-    // Committed text primitives from the Text tool. App-owned storage;
-    // `TextToolHandler` mutates the vector on commit; `text_overlay`
-    // reads it for the per-frame draw. Future PR promotes to
-    // `Document::texts()` with Commands.
-    std::vector<noted::domain::tool::TextPrimitive> texts_{};
+    // Texts have moved into `Document::texts()` (persistence
+    // consolidation, part 2). `TextToolHandler` emits
+    // `AddTextCommand`s via `DocumentSession::execute`.
 
     // ---- Images state (Phase B.7) -------------------------------------
     // Committed image placeholders from the Image tool. App-owned;

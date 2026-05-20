@@ -12,6 +12,7 @@ using noted::canvas::PageBackground;
 using noted::domain::AddBlockCommand;
 using noted::domain::AddPageCommand;
 using noted::domain::AddShapeCommand;
+using noted::domain::AddTextCommand;
 using noted::domain::BlockId;
 using noted::domain::BlockKind;
 using noted::domain::Document;
@@ -22,6 +23,7 @@ using noted::domain::MoveBlockCommand;
 using noted::domain::RemoveBlockCommand;
 using noted::domain::RemovePageCommand;
 using noted::domain::RemoveShapeCommand;
+using noted::domain::RemoveTextCommand;
 using noted::domain::SetNameCommand;
 using noted::domain::SetPayloadCommand;
 using noted::domain::SetVisibleCommand;
@@ -606,4 +608,79 @@ TEST(ShapeCommands, RoundTripThroughUndoStackAndDocument) {
     ASSERT_TRUE(stack.redo(doc));
     EXPECT_EQ(doc.shapes().size(), 2U);
     EXPECT_DOUBLE_EQ(doc.shapes()[1].x0, 10.0);
+}
+
+// ============================================================================
+// AddTextCommand / RemoveTextCommand (persistence consolidation for B.6)
+// ============================================================================
+
+namespace {
+
+[[nodiscard]] auto make_text_primitive(double x, double y, std::string content) noexcept
+    -> noted::domain::tool::TextPrimitive {
+    noted::domain::tool::TextPrimitive p{};
+    p.x = x;
+    p.y = y;
+    p.content = std::move(content);
+    p.font_size_px = 16.0F;
+    p.a = 1.0F;
+    return p;
+}
+
+}  // namespace
+
+TEST(AddTextCommand, ApplyAddsTextAndUndoRemovesIt) {
+    Document doc;
+    AddTextCommand cmd(make_text_primitive(10.0, 20.0, "hello"));
+    ASSERT_TRUE(cmd.apply(doc));
+    ASSERT_EQ(doc.texts().size(), 1U);
+    EXPECT_EQ(cmd.assigned_index(), 0U);
+    EXPECT_EQ(doc.texts()[0].content, "hello");
+    ASSERT_TRUE(cmd.undo(doc));
+    EXPECT_TRUE(doc.texts().empty());
+}
+
+TEST(AddTextCommand, RedoReappliesSameSnapshot) {
+    Document doc;
+    AddTextCommand cmd(make_text_primitive(0.0, 0.0, "x"));
+    ASSERT_TRUE(cmd.apply(doc));
+    ASSERT_TRUE(cmd.undo(doc));
+    ASSERT_TRUE(cmd.apply(doc));
+    EXPECT_EQ(doc.texts()[0].content, "x");
+}
+
+TEST(RemoveTextCommand, ApplyRemovesAndUndoRestoresAtSameIndex) {
+    Document doc;
+    (void) doc.add_text(make_text_primitive(0.0, 0.0, "a"));
+    (void) doc.add_text(make_text_primitive(1.0, 1.0, "b"));
+    (void) doc.add_text(make_text_primitive(2.0, 2.0, "c"));
+    RemoveTextCommand cmd(1);
+    ASSERT_TRUE(cmd.apply(doc));
+    ASSERT_EQ(doc.texts().size(), 2U);
+    EXPECT_EQ(doc.texts()[1].content, "c");
+    ASSERT_TRUE(cmd.undo(doc));
+    EXPECT_EQ(doc.texts()[1].content, "b");
+}
+
+TEST(RemoveTextCommand, OutOfRangeIndexFails) {
+    Document doc;
+    RemoveTextCommand cmd(0);
+    EXPECT_FALSE(cmd.apply(doc));
+}
+
+TEST(TextCommands, RoundTripThroughUndoStack) {
+    Document doc;
+    UndoStack stack;
+    ASSERT_TRUE(
+        stack.execute(std::make_unique<AddTextCommand>(make_text_primitive(0.0, 0.0, "one")), doc));
+    ASSERT_TRUE(
+        stack.execute(std::make_unique<AddTextCommand>(make_text_primitive(1.0, 1.0, "two")), doc));
+    ASSERT_EQ(doc.texts().size(), 2U);
+    ASSERT_TRUE(stack.undo(doc));
+    EXPECT_EQ(doc.texts().size(), 1U);
+    ASSERT_TRUE(stack.undo(doc));
+    EXPECT_TRUE(doc.texts().empty());
+    ASSERT_TRUE(stack.redo(doc));
+    ASSERT_TRUE(stack.redo(doc));
+    EXPECT_EQ(doc.texts()[1].content, "two");
 }
