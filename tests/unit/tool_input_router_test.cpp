@@ -199,4 +199,3 @@ TEST(ToolInputRouter, SwitchToUnregisteredKindDeactivatesWithoutNewActive) {
     EXPECT_EQ(raw->deactivate_count, 1);
     EXPECT_EQ(r->active(), nullptr);
 }
-
