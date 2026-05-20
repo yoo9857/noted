@@ -31,7 +31,6 @@
 
 #include "noted/compositor/layer_compositor.hpp"
 #include "noted/domain/selection/selection.hpp"
-#include "noted/domain/tool/selection_drag.hpp"
 #include "noted/domain/tool/tool.hpp"
 #include "noted/engine/canvas/camera.hpp"
 #include "noted/engine/canvas/page_renderer.hpp"
@@ -62,6 +61,8 @@
 #include "noted/ui/widget/outline_panel.hpp"
 
 #include "config/app_config.hpp"
+#include "input/selection_tool_handler.hpp"
+#include "input/tool_input_router.hpp"
 #include "scene/demo_scene.hpp"
 #include "ui/dirty_prompt.hpp"
 #include "ui/document_session.hpp"
@@ -250,16 +251,21 @@ private:
     noted::domain::Selection selection_{};
     // In-flight drag — `nullopt` between drags. Populated on Left-down
     // while the Select tool is active; updated on PointerMoved; applied
-    // to `selection_` on PointerReleased.
-    struct SelectionDragState {
-        double press_canvas_x{0.0};
-        double press_canvas_y{0.0};
-        double current_canvas_x{0.0};
-        double current_canvas_y{0.0};
-        noted::domain::tool::SelectionDragMode mode{
-            noted::domain::tool::SelectionDragMode::replace};
-    };
-    std::optional<SelectionDragState> selection_drag_{};
+    // to `selection_` on PointerReleased. (Drag state now lives on the
+    // `SelectionToolHandler` after Phase R.1 — see `tool_input_router_`
+    // below.)
+
+    // ---- Tool input routing -------------------------------------------
+    // Owns the LEFT-button pointer subscriptions and dispatches to the
+    // registered handler matching the active tool. Heap-allocated for
+    // stable `this` (lambdas inside router's hook subscriptions
+    // capture it). Built in `install_frame_hook` after the engine /
+    // hook registry is alive.
+    std::unique_ptr<noted::app::input::ToolInputRouter> tool_input_router_;
+    // Non-owning — owned by the router. Cached so `selection_overlay`
+    // can read `current_drag()` per frame without walking the handler
+    // list.
+    noted::app::input::SelectionToolHandler* selection_handler_{nullptr};
 
     // ---- Canvas view --------------------------------------------------
     // Pan + scale state shared by the composite pass (camera-projected

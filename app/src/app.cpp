@@ -21,7 +21,6 @@
 #include "noted/domain/command/commands.hpp"
 #include "noted/domain/document/document.hpp"
 #include "noted/domain/tool/options.hpp"
-#include "noted/domain/tool/selection_drag.hpp"
 #include "noted/engine/harness/harness.hpp"
 #include "noted/engine/hook/registry.hpp"
 #include "noted/engine/profile.hpp"
@@ -636,73 +635,29 @@ void App::install_frame_hook() {
             cursor_y_ = e.y;
             pan_last_x_ = e.x;
             pan_last_y_ = e.y;
-            if (selection_drag_.has_value()) {
-                // Selection drag uses canvas-pixel coords so it survives
-                // a camera pan / zoom that happens mid-drag.
-                selection_drag_->current_canvas_x = camera_.unproject_x(e.x);
-                selection_drag_->current_canvas_y = camera_.unproject_y(e.y);
-            }
+            // Left-button drag forwarding (selection / future tools)
+            // lives on `tool_input_router_` per Phase R.1 / ADR 0032.
         });
 
     // Middle-button press / release toggles pan mode. Left button is
-    // reserved for the active tool: stroke engine when active is Pen
-    // or Eraser, App's selection-drag handler when active is Select.
-    // Right button is open for a future context menu.
+    // handled by `tool_input_router_` — it subscribes separately and
+    // dispatches to the active `ToolInputHandler`. Right button is
+    // open for a future context menu.
     (void) noted::hook::registry().on_pointer_pressed.subscribe(
         [this](const noted::hook::PointerPressed& e) {
-            if (e.button == noted::hook::PointerButton::middle) {
-                panning_ = true;
-                pan_last_x_ = e.x;
-                pan_last_y_ = e.y;
+            if (e.button != noted::hook::PointerButton::middle) {
                 return;
             }
-            if (e.button != noted::hook::PointerButton::left) {
-                return;
-            }
-            if (tools_.active != noted::domain::tool::ToolKind::select) {
-                return;
-            }
-            // Start a selection drag. Press point unprojected through
-            // the camera so the rect lives in canvas pixels — same
-            // coordinate space the existing `domain::Selection` and
-            // `SelectionRasterizer` consume.
-            //
-            // Modifier-key snapshot at PRESS time (not release) — a
-            // user who lets go of Shift mid-drag keeps the union
-            // operation they meant when they started. Matches
-            // Photoshop / Figma behaviour.
-            const auto& io = ImGui::GetIO();
-            SelectionDragState st{};
-            st.press_canvas_x = camera_.unproject_x(e.x);
-            st.press_canvas_y = camera_.unproject_y(e.y);
-            st.current_canvas_x = st.press_canvas_x;
-            st.current_canvas_y = st.press_canvas_y;
-            st.mode = noted::domain::tool::drag_mode_from_modifiers(io.KeyShift, io.KeyAlt);
-            selection_drag_ = st;
+            panning_ = true;
+            pan_last_x_ = e.x;
+            pan_last_y_ = e.y;
         });
     (void) noted::hook::registry().on_pointer_released.subscribe(
         [this](const noted::hook::PointerReleased& e) {
-            if (e.button == noted::hook::PointerButton::middle) {
-                panning_ = false;
+            if (e.button != noted::hook::PointerButton::middle) {
                 return;
             }
-            if (e.button != noted::hook::PointerButton::left) {
-                return;
-            }
-            if (!selection_drag_.has_value()) {
-                return;
-            }
-            // Commit the drag rect to the live selection through the
-            // pure-logic apply_drag helper. Empty rects (sub-pixel
-            // clicks) are dropped by apply_drag so a stationary click
-            // doesn't wipe an existing selection in replace mode.
-            const auto rect =
-                noted::domain::tool::rect_from_drag(selection_drag_->press_canvas_x,
-                                                    selection_drag_->press_canvas_y,
-                                                    selection_drag_->current_canvas_x,
-                                                    selection_drag_->current_canvas_y);
-            noted::domain::tool::apply_drag(selection_, rect, selection_drag_->mode);
-            selection_drag_.reset();
+            panning_ = false;
         });
 
     // Scroll → zoom around the cursor. dy > 0 (wheel up) zooms in;
@@ -726,6 +681,20 @@ void App::install_frame_hook() {
             camera_.set_window_extent(r.width, r.height);
             camera_.set_canvas_extent(r.width, r.height);
         });
+
+    // Tool input router — owns left-button dispatch to per-tool
+    // handlers. Built AFTER the above subscriptions (which handle
+    // middle button for pan + cursor tracking) so the dispatch
+    // order in the hook channel is "App pan/track first, then
+    // router to the active tool"; same priority means stable
+    // insertion order in `Channel<E>::subscribe`. Heap-allocated for
+    // stable `this` (router's lambdas capture themselves).
+    tool_input_router_ =
+        noted::app::input::ToolInputRouter::create(noted::hook::registry(), camera_);
+    auto sel_handler = std::make_unique<noted::app::input::SelectionToolHandler>(selection_);
+    selection_handler_ = sel_handler.get();
+    tool_input_router_->register_handler(std::move(sel_handler));
+    tool_input_router_->set_active(tools_.active);
 }
 
 // ---- Frame loop -----------------------------------------------------------
@@ -1004,13 +973,14 @@ void App::draw_widgets() {
     // Switching back re-enables it. set_active is idempotent so
     // calling every frame costs only a bool compare.
     stroke_engine_->set_active(is_stroke_tool(tools_.active));
-    // Mid-drag tool switches: dump any selection drag in progress
-    // when we're no longer in Select mode. Without this the drag
-    // state lingers and the next "release" elsewhere would commit a
-    // stale rectangle.
-    if (tools_.active != noted::domain::tool::ToolKind::select && selection_drag_.has_value()) {
-        selection_drag_.reset();
-    }
+    // Tool input router: sync the active handler with the user's
+    // current tool. The router's `set_active` is idempotent on a
+    // no-op switch (matching kind), and triggers `on_deactivated`
+    // on the previously-active handler on a real switch — which is
+    // how the SelectionToolHandler drops its in-flight drag on a
+    // mid-drag tool switch (no more `selection_drag_.reset()` in
+    // App after R.1).
+    tool_input_router_->set_active(tools_.active);
 
     auto selected = session_.selected_block();
     noted::ui::widget::outline_panel(
@@ -1098,17 +1068,20 @@ void App::draw_widgets() {
 
     // Selection overlay — draws committed selection rects + the
     // in-progress drag preview on top of the canvas via ImGui's
-    // background draw list. The widget needs canvas → screen
-    // projection; the camera gives us that.
+    // background draw list. After Phase R.1 the in-flight drag
+    // lives on `SelectionToolHandler::current_drag()`; the overlay
+    // queries it via the cached non-owning pointer.
     {
         std::optional<noted::ui::widget::SelectionDragPreview> preview;
-        if (selection_drag_.has_value()) {
-            noted::ui::widget::SelectionDragPreview p{};
-            p.press_canvas_x = selection_drag_->press_canvas_x;
-            p.press_canvas_y = selection_drag_->press_canvas_y;
-            p.current_canvas_x = selection_drag_->current_canvas_x;
-            p.current_canvas_y = selection_drag_->current_canvas_y;
-            preview = p;
+        if (selection_handler_ != nullptr) {
+            if (auto d = selection_handler_->current_drag(); d.has_value()) {
+                noted::ui::widget::SelectionDragPreview p{};
+                p.press_canvas_x = d->press_x;
+                p.press_canvas_y = d->press_y;
+                p.current_canvas_x = d->current_x;
+                p.current_canvas_y = d->current_y;
+                preview = p;
+            }
         }
         auto project = [this](double cx, double cy) -> std::pair<float, float> {
             return {static_cast<float>(camera_.project_x(cx)),
