@@ -60,6 +60,26 @@ void read_path(const nlohmann::json& j, const char* key, std::filesystem::path& 
     }
 }
 
+void read_page_background(const nlohmann::json& j,
+                          const char* key,
+                          noted::canvas::PageBackground& out) {
+    if (auto it = j.find(key); it != j.end() && it->is_string()) {
+        const auto s = it->template get<std::string>();
+        if (s == "blank") {
+            out = noted::canvas::PageBackground::blank;
+        } else if (s == "lined") {
+            out = noted::canvas::PageBackground::lined;
+        } else if (s == "grid") {
+            out = noted::canvas::PageBackground::grid;
+        } else if (s == "dotted") {
+            out = noted::canvas::PageBackground::dotted;
+        } else {
+            std::cerr << "[config] unknown page background '" << s
+                      << "' — falling back to default\n";
+        }
+    }
+}
+
 }  // namespace
 
 auto AppConfig::load_from_file(const std::filesystem::path& path) -> Result<AppConfig> {
@@ -94,6 +114,9 @@ auto AppConfig::load_from_file(const std::filesystem::path& path) -> Result<AppC
             read_opt(*it, "zoomStep", cfg.canvas.zoom_step);
             read_opt(*it, "zoomMin", cfg.canvas.zoom_min);
             read_opt(*it, "zoomMax", cfg.canvas.zoom_max);
+            read_opt(*it, "defaultPageWidthPx", cfg.canvas.default_page_extent_w_px);
+            read_opt(*it, "defaultPageHeightPx", cfg.canvas.default_page_extent_h_px);
+            read_page_background(*it, "defaultPageBackground", cfg.canvas.default_page_background);
         }
         if (auto it = root.find("font"); it != root.end() && it->is_object()) {
             read_path(*it, "cjkPath", cfg.font.cjk_font_path);
@@ -104,6 +127,7 @@ auto AppConfig::load_from_file(const std::filesystem::path& path) -> Result<AppC
         }
         if (auto it = root.find("ui"); it != root.end() && it->is_object()) {
             read_theme(*it, "theme", cfg.ui.default_theme);
+            read_opt(*it, "showPageStrip", cfg.ui.show_page_strip);
         }
     } catch (const nlohmann::json::exception& e) {
         return std::unexpected(

@@ -35,6 +35,7 @@
 #include <filesystem>
 #include <string>
 
+#include "noted/engine/canvas/page.hpp"
 #include "noted/engine/error/error.hpp"
 #include "noted/ui/theme/theme.hpp"
 
@@ -60,6 +61,15 @@ struct CanvasConfig {
     // dot; above `zoom_max` pixels become house-sized.
     double zoom_min{0.1};
     double zoom_max{32.0};
+
+    // Default extent + background for newly added pages — both for
+    // the initial demo seed and for the "+ Add page" button in the
+    // page strip. US Letter at 72 DPI matches `Page`'s in-struct
+    // defaults; surfacing them here lets a future Preferences UI
+    // flip the default without recompiling.
+    float default_page_extent_w_px{612.0F};
+    float default_page_extent_h_px{792.0F};
+    noted::canvas::PageBackground default_page_background{noted::canvas::PageBackground::grid};
 };
 
 struct FontConfig {
@@ -86,6 +96,10 @@ struct AssetConfig {
 
 struct UiConfig {
     noted::ui::theme::ThemeKind default_theme{noted::ui::theme::ThemeKind::dark};
+    // Whether the page strip side rail is visible on startup. The
+    // user can still toggle it via View → Page strip; this just
+    // picks the initial state.
+    bool show_page_strip{true};
 };
 
 struct AppConfig {

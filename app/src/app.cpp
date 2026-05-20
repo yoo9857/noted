@@ -28,6 +28,7 @@
 #include "noted/platform/io/noted_file.hpp"
 #include "noted/ui/widget/layer_panel.hpp"
 #include "noted/ui/widget/outline_panel.hpp"
+#include "noted/ui/widget/page_strip.hpp"
 #include "noted/ui/widget/status_bar.hpp"
 
 #include "io/font_probe.hpp"
@@ -116,6 +117,10 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
     app->applied_theme_ = app->cfg_.ui.default_theme;
     app->menu_state_.theme = app->cfg_.ui.default_theme;
     noted::ui::theme::apply(app->applied_theme_);
+
+    // Seed the page-strip toggle from config — user can still flip
+    // it at runtime via View → Page strip.
+    app->menu_state_.show_page_strip = app->cfg_.ui.show_page_strip;
 
     // Seed the camera's canvas + window extents from the swapchain
     // before the first frame. The `framebuffer_resized` hook only
@@ -392,21 +397,25 @@ auto App::init_page_renderer() -> noted::Result<void> {
     }
     page_renderer_.emplace(std::move(*pr));
 
-    // Seed with a single demo page — US Letter at 72 DPI, grid
-    // background, centred-ish in the initial swapchain extent so
-    // the user sees paper immediately on first paint. The page's
-    // `add_page` clamps + reflows so this works regardless of the
-    // canvas size at startup.
+    // Seed with three demo pages — mixed backgrounds so the page
+    // strip has something distinct to show on first run, all
+    // horizontally centred at the identity camera transform. Page
+    // dimensions + initial backgrounds come from AppConfig so a
+    // future Preferences UI can flip them without recompiling.
     const auto canvas = swapchain_->summary().extent;
-    const float page_w = 612.0F;
-    const float page_h = 792.0F;
+    const float page_w = cfg_.canvas.default_page_extent_w_px;
+    const float page_h = cfg_.canvas.default_page_extent_h_px;
     const float origin_x = std::max(20.0F, (static_cast<float>(canvas.width) - page_w) * 0.5F);
     pages_ = noted::canvas::PageList{24.0F};
-    const auto idx = pages_.add_page(page_w, page_h, noted::canvas::PageBackground::grid);
-    // `add_page` puts the page at x=0; nudge it to a horizontally
-    // centred position so the user sees it immediately at the
-    // identity camera transform.
-    pages_.set_page_origin_x(idx, origin_x);
+    constexpr std::array<noted::canvas::PageBackground, 3> kDemoBackgrounds{{
+        noted::canvas::PageBackground::grid,
+        noted::canvas::PageBackground::lined,
+        noted::canvas::PageBackground::dotted,
+    }};
+    for (const auto bg : kDemoBackgrounds) {
+        const auto idx = pages_.add_page(page_w, page_h, bg);
+        pages_.set_page_origin_x(idx, origin_x);
+    }
     return {};
 }
 
@@ -814,6 +823,52 @@ void App::draw_widgets() {
         session_.document(), selected, &outline_rename_, &menu_state_.show_outline_panel);
     session_.set_selected_block(selected);
 
+    // Page strip — observes pages_, surfaces user intent as a
+    // PageStripResult. Sequenced as: apply structural mutations
+    // first (add / remove), then resolve focus against the now-
+    // current list. add_request + focus_request can co-occur if
+    // the user double-clicked; mutate-then-focus keeps the index
+    // semantics sane (focus_request always refers to the post-add
+    // list because no remove competes in the same frame).
+    auto strip = noted::ui::widget::page_strip(pages_, &menu_state_.show_page_strip);
+    // Park the focused page just below the menu bar with a bit of
+    // breathing room. Shared by both add-then-auto-focus and the
+    // explicit row-click focus so the camera lands at the same y.
+    constexpr double kFocusTargetScreenY = 80.0;
+    if (strip.add_request) {
+        const auto idx = pages_.add_page(cfg_.canvas.default_page_extent_w_px,
+                                         cfg_.canvas.default_page_extent_h_px,
+                                         cfg_.canvas.default_page_background);
+        // Match the demo seed's centring so newly added pages line
+        // up with the existing ones at the identity camera transform.
+        const auto canvas = swapchain_->summary().extent;
+        const float origin_x = std::max(
+            20.0F,
+            (static_cast<float>(canvas.width) - cfg_.canvas.default_page_extent_w_px) * 0.5F);
+        pages_.set_page_origin_x(idx, origin_x);
+        // Auto-focus the newly-added page. Without this the new page
+        // lands below the visible camera region and the click feels
+        // like a no-op — the user-reported bug that motivated this.
+        const double new_y = noted::ui::widget::camera_translation_y_for_page(
+            pages_, idx, camera_.translation_y(), camera_.scale(), kFocusTargetScreenY);
+        camera_.set_translation(camera_.translation_x(), new_y);
+    }
+    if (strip.remove_request) {
+        pages_.remove_page(*strip.remove_request);
+    }
+    if (strip.focus_request) {
+        // The current camera translation_y is returned unchanged if
+        // the index is now stale (e.g. the page got removed in the
+        // same frame), so this is safe.
+        const double new_y =
+            noted::ui::widget::camera_translation_y_for_page(pages_,
+                                                             *strip.focus_request,
+                                                             camera_.translation_y(),
+                                                             camera_.scale(),
+                                                             kFocusTargetScreenY);
+        camera_.set_translation(camera_.translation_x(), new_y);
+    }
+
     // Drain rename outputs into the command stream. Both flags are
     // mutually exclusive in practice (the widget never sets both in
     // the same frame); check Commit first so an Enter + Escape race
@@ -956,7 +1011,13 @@ void App::record_swapchain_pass(VkCommandBuffer cb, VkExtent2D /*ext*/) {
     push.translation[1] = camera_.shader_translation_y();
     vkCmdPushConstants(cb, layout_h, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(CompositePush), &push);
 
-    vkCmdDraw(cb, /*vertexCount=*/3, /*instanceCount=*/1, 0, 0);
+    // 6 vertices = a quad (two triangles, uv ∈ [0,1]²). See the
+    // `fullscreen.slang` comment for why we don't use the classic
+    // fullscreen-triangle here — camera scale < 1 shrinks the
+    // triangle's NDC bounding box, exposing a triangular cut. A
+    // quad shrinks to a rectangle, which is the correct "zoomed
+    // out" view.
+    vkCmdDraw(cb, /*vertexCount=*/6, /*instanceCount=*/1, 0, 0);
     // ImGui draws on top of the composited canvas. The surrounding
     // vkCmdBeginRendering (owned by the renderer) is the right
     // context for ImGui_ImplVulkan_RenderDrawData. finalize_frame()

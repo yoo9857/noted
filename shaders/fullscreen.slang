@@ -30,9 +30,24 @@ struct VOut {
 [shader("vertex")]
 VOut vs_main(uint vid : SV_VertexID) {
     VOut o;
-    o.uv  = float2(float((vid << 1) & 2), float(vid & 2));
+    // 6-vertex quad (two triangles, uv ∈ [0,1]²) — NOT the classic
+    // fullscreen-triangle pattern. The fullscreen-triangle relies on
+    // the GPU clipping the over-spilling vertices against the NDC
+    // [-1, 1] box. When the camera applies scale < 1, the over-spill
+    // disappears and the triangle stops covering the visible area —
+    // the user sees a triangle-shaped canvas with the swapchain
+    // clear color in the missing corner. A quad has no over-spill
+    // to begin with, so shrinking it just produces a smaller
+    // rectangle (the correct "zoomed out" view).
+    //
+    // Caller draws with `vkCmdDraw(6, 1, 0, 0)` on TRIANGLE_LIST.
+    static const float2 kQuadUVs[6] = {
+        float2(0.0, 0.0), float2(1.0, 0.0), float2(0.0, 1.0),
+        float2(1.0, 0.0), float2(1.0, 1.0), float2(0.0, 1.0),
+    };
+    o.uv  = kQuadUVs[vid];
     // o.pos.xy = uv * scale + translation; at identity that reduces
-    // to uv * 2 - 1 — the standard fullscreen-triangle mapping.
+    // to uv * 2 - 1, mapping uv ∈ [0,1]² to ndc ∈ [-1,1]².
     o.pos = float4(o.uv * u_view.scale + u_view.translation, 0.0, 1.0);
     return o;
 }
