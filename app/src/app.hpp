@@ -257,13 +257,11 @@ private:
     // `SelectionToolHandler` after Phase R.1 — see `tool_input_router_`
     // below.)
 
-    // ---- Shapes state (Phase B.5) -------------------------------------
-    // Committed shapes from the Shape tool. App owns the storage;
-    // `ShapeToolHandler` mutates the vector on each release;
-    // `shape_overlay` reads it for the per-frame draw. Future PR
-    // promotes shapes into a `Document::shapes()` list with proper
-    // Commands (same pattern PageList followed in Phase A.3.d).
-    std::vector<noted::domain::tool::ShapePrimitive> shapes_{};
+    // Shapes have moved into `Document::shapes()` (persistence
+    // consolidation PR after B.7). `ShapeToolHandler` now pushes
+    // `AddShapeCommand`s via `DocumentSession::execute` instead of
+    // mutating a local vector; the overlay reads `session_.document()
+    // .shapes()` each frame.
 
     // ---- Texts state (Phase B.6) --------------------------------------
     // Committed text primitives from the Text tool. App-owned storage;

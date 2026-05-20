@@ -19,6 +19,7 @@ add_executable(noted_unit_tests
     page_test.cpp
     page_strip_test.cpp
     document_pages_test.cpp
+    document_shapes_test.cpp
     tool_test.cpp
     tool_options_test.cpp
     selection_drag_test.cpp

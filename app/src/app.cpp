@@ -178,7 +178,7 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
         .outline_rename = raw->outline_rename_,
         .tools = raw->tools_,
         .selection = raw->selection_,
-        .shapes = raw->shapes_,
+        .shapes = raw->session_.document().shapes(),
         .images = raw->images_,
         .prompt = raw->prompt_,
         .save_for_dirty_prompt = [raw]() -> bool { return raw->save_for_dirty_prompt(); },
@@ -638,10 +638,16 @@ void App::install_frame_hook() {
     auto sel_handler = std::make_unique<noted::app::input::SelectionToolHandler>(selection_);
     selection_handler_ = sel_handler.get();
     tool_input_router_->register_handler(std::move(sel_handler));
-    // Phase B.5 — Shape tool registers under the new pattern: ONE
-    // new handler subclass + ONE register_handler line. App.cpp
-    // doesn't grow on the input axis.
-    auto shape_handler = std::make_unique<noted::app::input::ShapeToolHandler>(shapes_, tools_);
+    // Phase B.5 + persistence consolidation — Shape tool emits
+    // `AddShapeCommand`s via the session's execute path. The lambda
+    // captures `this` so undo / redo / dirty all route through the
+    // single session, and a future load/save round-trips shapes
+    // through `.noted` v3.
+    auto shape_handler = std::make_unique<noted::app::input::ShapeToolHandler>(
+        [this](std::unique_ptr<noted::domain::Command> cmd) {
+            (void) session_.execute(std::move(cmd));
+        },
+        tools_);
     shape_handler_ = shape_handler.get();
     tool_input_router_->register_handler(std::move(shape_handler));
     // Phase B.6 — Text tool. Same pattern.

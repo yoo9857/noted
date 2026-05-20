@@ -330,11 +330,12 @@ TEST(DocumentJson, EmittedJsonContainsVersionAndKindOrdinal) {
     (void) h;
     const auto text = document_to_json(src);
     // The output should include the wire-stable version + heading ordinal (2).
-    EXPECT_NE(text.find("\"version\": 2"), std::string::npos);
+    EXPECT_NE(text.find("\"version\": 3"), std::string::npos);
     EXPECT_NE(text.find("\"kind\": 0"), std::string::npos);  // group
     EXPECT_NE(text.find("\"kind\": 2"), std::string::npos);  // heading
-    // v2 always emits a (possibly empty) pages object.
+    // v2+ always emits a (possibly empty) pages object; v3+ adds shapes.
     EXPECT_NE(text.find("\"pages\""), std::string::npos);
+    EXPECT_NE(text.find("\"shapes\""), std::string::npos);
 }
 
 // ---- v1 back-compat --------------------------------------------------------
@@ -416,6 +417,101 @@ TEST(DocumentJsonReject, PagesMissingItems) {
     const auto bad = R"({
         "version": 2, "root": 0, "blocks": [],
         "pages": {"gap_px": 0.0}
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+// ---- v3 shapes round-trip --------------------------------------------------
+
+TEST(DocumentJson, ShapesRoundTripWithMixedKinds) {
+    using noted::domain::tool::ShapeKind;
+    Document src;
+    noted::domain::tool::ShapePrimitive rect{};
+    rect.kind = ShapeKind::rectangle;
+    rect.x0 = 10.0;
+    rect.y0 = 20.0;
+    rect.x1 = 110.0;
+    rect.y1 = 70.0;
+    rect.stroke_width_px = 2.5F;
+    rect.stroke_r = 0.5F;
+    rect.stroke_g = 0.25F;
+    rect.stroke_b = 0.125F;
+    rect.stroke_a = 0.9F;
+    ASSERT_TRUE(src.add_shape(rect));
+
+    noted::domain::tool::ShapePrimitive ell{};
+    ell.kind = ShapeKind::ellipse;
+    ell.x0 = -5.5;
+    ell.y0 = -7.5;
+    ell.x1 = 100.5;
+    ell.y1 = 50.5;
+    ell.stroke_width_px = 4.0F;
+    ell.stroke_a = 1.0F;
+    ASSERT_TRUE(src.add_shape(ell));
+
+    auto loaded = document_from_json(document_to_json(src));
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->shapes().size(), 2U);
+
+    const auto& got = loaded->shapes();
+    EXPECT_EQ(got[0].kind, ShapeKind::rectangle);
+    EXPECT_DOUBLE_EQ(got[0].x0, 10.0);
+    EXPECT_DOUBLE_EQ(got[0].x1, 110.0);
+    EXPECT_FLOAT_EQ(got[0].stroke_width_px, 2.5F);
+    EXPECT_FLOAT_EQ(got[0].stroke_r, 0.5F);
+    EXPECT_FLOAT_EQ(got[0].stroke_a, 0.9F);
+
+    EXPECT_EQ(got[1].kind, ShapeKind::ellipse);
+    EXPECT_DOUBLE_EQ(got[1].x0, -5.5);
+    EXPECT_DOUBLE_EQ(got[1].y1, 50.5);
+    EXPECT_FLOAT_EQ(got[1].stroke_width_px, 4.0F);
+}
+
+TEST(DocumentJson, V1FileLoadsWithEmptyShapes) {
+    // v1 has no shapes field; loader treats absent as empty.
+    const auto v1 = R"({
+        "version": 1, "root": 0, "blocks": []
+    })";
+    auto loaded = document_from_json(v1);
+    ASSERT_TRUE(loaded);
+    EXPECT_TRUE(loaded->shapes().empty());
+}
+
+TEST(DocumentJson, V2FileLoadsWithEmptyShapes) {
+    const auto v2 = R"({
+        "version": 2, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []}
+    })";
+    auto loaded = document_from_json(v2);
+    ASSERT_TRUE(loaded);
+    EXPECT_TRUE(loaded->shapes().empty());
+}
+
+TEST(DocumentJsonReject, ShapeUnknownKey) {
+    const auto bad = R"({
+        "version": 3, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [{"k": 0, "x0": 0, "y0": 0, "x1": 1, "y1": 1,
+                    "sw": 1, "r": 0, "g": 0, "b": 0, "a": 1, "extra": true}]
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+TEST(DocumentJsonReject, ShapeKindOutOfRange) {
+    const auto bad = R"({
+        "version": 3, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [{"k": 99, "x0": 0, "y0": 0, "x1": 1, "y1": 1,
+                    "sw": 1, "r": 0, "g": 0, "b": 0, "a": 1}]
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+TEST(DocumentJsonReject, ShapeMissingRequiredKey) {
+    const auto bad = R"({
+        "version": 3, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [{"k": 0, "x0": 0, "y0": 0, "x1": 1, "y1": 1}]
     })";
     EXPECT_FALSE(document_from_json(bad));
 }
