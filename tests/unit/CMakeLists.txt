@@ -22,9 +22,16 @@ add_executable(noted_unit_tests
     tool_test.cpp
     tool_options_test.cpp
     selection_drag_test.cpp
+    tool_input_router_test.cpp
+    # App-private translation units exercised from tests. These compile
+    # alongside `noted_app` (separate executable, no link conflict).
+    # Tests reach them via the `app/src` include directory added below.
+    ${CMAKE_SOURCE_DIR}/app/src/input/tool_input_router.cpp
+    ${CMAKE_SOURCE_DIR}/app/src/input/selection_tool_handler.cpp
 )
 
-target_link_libraries(noted_unit_tests PRIVATE noted_test_harness noted::domain noted::compositor noted::platform noted::ui)
+target_include_directories(noted_unit_tests PRIVATE ${CMAKE_SOURCE_DIR}/app/src)
+target_link_libraries(noted_unit_tests PRIVATE noted_test_harness noted::domain noted::compositor noted::platform noted::ui imgui)
 target_compile_features(noted_unit_tests PRIVATE cxx_std_23)
 noted_apply_warnings(noted_unit_tests)
 

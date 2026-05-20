@@ -6,6 +6,8 @@ add_executable(noted_app
     src/io/font_probe.cpp
     src/ui/document_session.cpp
     src/ui/dirty_prompt.cpp
+    src/input/tool_input_router.cpp
+    src/input/selection_tool_handler.cpp
 )
 
 # App-internal headers (src/app.hpp, src/scene/*.hpp, ...) are
