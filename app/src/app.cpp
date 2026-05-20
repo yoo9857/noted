@@ -30,6 +30,7 @@
 #include "noted/ui/widget/outline_panel.hpp"
 #include "noted/ui/widget/page_strip.hpp"
 #include "noted/ui/widget/status_bar.hpp"
+#include "noted/ui/widget/tool_palette.hpp"
 
 #include "io/font_probe.hpp"
 
@@ -76,6 +77,40 @@ noted::harness::FeatureFlag flag_force_vsync{"gpu.force_vsync_fifo", /*default=*
 }
 
 constexpr VkFormat kCanvasFormat = VK_FORMAT_R8G8B8A8_UNORM;
+
+// Brush style for each tool. Pen = default (black tip); Eraser =
+// paper colour so a stroke "erases" by repainting the canvas to look
+// like blank paper. NOT true destination-out — that requires
+// splitting the stroke layer from the page-background pass (Phase
+// B.2). For B.1 this is the visible-but-imperfect placeholder. The
+// other tools fall through to Pen because their behavioural
+// integration (selection rect, shape primitives, text input, image
+// placement) comes in later PRs.
+[[nodiscard]] auto brush_for_tool(noted::domain::tool::ToolKind kind) noexcept
+    -> noted::stroke::BrushStyle {
+    using noted::domain::tool::ToolKind;
+    noted::stroke::BrushStyle b{};
+    switch (kind) {
+        case ToolKind::eraser:
+            // Match the `kPaper` constant in page_strip.cpp's preview
+            // and page_bg.slang's paper colour so the erased region
+            // visually merges with the page background.
+            b.r = 245.0F / 255.0F;
+            b.g = 243.0F / 255.0F;
+            b.b = 235.0F / 255.0F;
+            b.a = 1.0F;
+            return b;
+        case ToolKind::pen:
+        case ToolKind::select:
+        case ToolKind::shape:
+        case ToolKind::text:
+        case ToolKind::image:
+            // Default (black) for Pen and the not-yet-implemented
+            // tools — their behavioural divergence lands in later PRs.
+            return b;
+    }
+    return b;
+}
 
 }  // namespace
 
@@ -822,6 +857,17 @@ void App::draw_widgets() {
                  [this](DirtyPrompt::PendingAction a) { execute_pending_dirty_action(a); });
 
     noted::ui::widget::layer_panel(scene_->graph, &menu_state_.show_layer_panel);
+
+    // Tool palette — switching tools swaps the stroke engine's brush
+    // (Pen = default black, Eraser = paper colour). Other tools fall
+    // through to Pen until their behavioural integration lands.
+    auto tool_result =
+        noted::ui::widget::tool_palette(tools_.active, &menu_state_.show_tool_palette);
+    if (tool_result.switch_request && *tool_result.switch_request != tools_.active) {
+        tools_.active = *tool_result.switch_request;
+        stroke_engine_->set_brush(brush_for_tool(tools_.active));
+    }
+
     auto selected = session_.selected_block();
     noted::ui::widget::outline_panel(
         session_.document(), selected, &outline_rename_, &menu_state_.show_outline_panel);

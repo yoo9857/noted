@@ -30,6 +30,7 @@
 #include <vulkan/vulkan.h>
 
 #include "noted/compositor/layer_compositor.hpp"
+#include "noted/domain/tool/tool.hpp"
 #include "noted/engine/canvas/camera.hpp"
 #include "noted/engine/canvas/page_renderer.hpp"
 #include "noted/engine/engine.hpp"
@@ -199,6 +200,12 @@ private:
     noted::ui::widget::OutlineRenameState outline_rename_{};
     noted::ui::theme::ThemeKind applied_theme_{noted::ui::theme::ThemeKind::dark};
     std::string last_window_title_{};
+
+    // ---- Tool state ---------------------------------------------------
+    // The active editing tool. Mutated by the tool palette widget; the
+    // stroke engine re-reads its brush from `brush_for_tool(active)` on
+    // every switch so Pen draws black and Eraser draws paper colour.
+    noted::domain::tool::ToolState tools_{};
 
     // ---- Canvas view --------------------------------------------------
     // Pan + scale state shared by the composite pass (camera-projected
