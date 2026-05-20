@@ -122,20 +122,8 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
         return std::unexpected(std::move(layout).error());
     }
 
-    // Pipeline: triangle strip + alpha blend over the canvas. Vertex
-    // input layout mirrors `RibbonVertex` — pos(float2) at offset 0,
-    // col(float4) at offset 8, stride 24.
-    VkPipelineColorBlendAttachmentState blend{};
-    blend.blendEnable = VK_TRUE;
-    blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    blend.colorBlendOp = VK_BLEND_OP_ADD;
-    blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    blend.alphaBlendOp = VK_BLEND_OP_ADD;
-    blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-                           VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-
+    // Vertex input layout mirrors `RibbonVertex` — pos(float2) at offset
+    // 0, col(float4) at offset 8, stride 24. Shared by both pipelines.
     const std::array<noted::gpu::VertexInputBinding, 1> vb_bindings{{{
         .binding = 0,
         .stride = sizeof(RibbonVertex),
@@ -156,8 +144,41 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
         },
     }};
 
-    auto pipeline =
-        noted::gpu::GraphicsPipelineBuilder{}
+    constexpr VkColorComponentFlags kRgbaMask = VK_COLOR_COMPONENT_R_BIT |
+                                                VK_COLOR_COMPONENT_G_BIT |
+                                                VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    // Draw pipeline: normal painter's-algorithm alpha blend.
+    //   color: dst = src * src.a + dst * (1 - src.a)
+    //   alpha: dst.a = src.a + dst.a * (1 - src.a)  (premultiplied-correct)
+    VkPipelineColorBlendAttachmentState draw_blend{};
+    draw_blend.blendEnable = VK_TRUE;
+    draw_blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    draw_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    draw_blend.colorBlendOp = VK_BLEND_OP_ADD;
+    draw_blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    draw_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    draw_blend.alphaBlendOp = VK_BLEND_OP_ADD;
+    draw_blend.colorWriteMask = kRgbaMask;
+
+    // Erase pipeline: destination-out on BOTH colour and alpha so the
+    // multiplicative wipe is symmetric. The stroke's RGB is ignored;
+    // only its alpha matters as the "how much to remove" weight.
+    //   color: dst = dst * (1 - src.a)
+    //   alpha: dst.a = dst.a * (1 - src.a)
+    VkPipelineColorBlendAttachmentState erase_blend{};
+    erase_blend.blendEnable = VK_TRUE;
+    erase_blend.srcColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+    erase_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    erase_blend.colorBlendOp = VK_BLEND_OP_ADD;
+    erase_blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    erase_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    erase_blend.alphaBlendOp = VK_BLEND_OP_ADD;
+    erase_blend.colorWriteMask = kRgbaMask;
+
+    const auto build_with_blend =
+        [&](VkPipelineColorBlendAttachmentState blend) -> Result<noted::gpu::GraphicsPipeline> {
+        return noted::gpu::GraphicsPipelineBuilder{}
             .add_stage(VK_SHADER_STAGE_VERTEX_BIT, *info.vs_module, "main")
             .add_stage(VK_SHADER_STAGE_FRAGMENT_BIT, *info.ps_module, "main")
             .vertex_input(vb_bindings, vb_attrs)
@@ -166,8 +187,15 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
             .color_blend_attachment(blend)
             .color_format(info.canvas_format)
             .build(*info.device, *layout);
-    if (!pipeline) {
-        return std::unexpected(std::move(pipeline).error());
+    };
+
+    auto draw_pipeline = build_with_blend(draw_blend);
+    if (!draw_pipeline) {
+        return std::unexpected(std::move(draw_pipeline).error());
+    }
+    auto erase_pipeline = build_with_blend(erase_blend);
+    if (!erase_pipeline) {
+        return std::unexpected(std::move(erase_pipeline).error());
     }
 
     // Persistently-mapped vertex buffer. HOST_VISIBLE+HOST_COHERENT
@@ -190,7 +218,8 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
     // promise mechanical: the heap address can never shift.
     auto eng = std::unique_ptr<StrokeEngine>(new StrokeEngine{});
     eng->layout_.emplace(std::move(*layout));
-    eng->pipeline_.emplace(std::move(*pipeline));
+    eng->pipeline_draw_.emplace(std::move(*draw_pipeline));
+    eng->pipeline_erase_.emplace(std::move(*erase_pipeline));
     eng->vertex_buffer_.emplace(std::move(*vbuf));
     eng->allocator_ = info.allocator;
     eng->brush_ = info.brush;
@@ -255,17 +284,20 @@ namespace {
 // One stroke's slice inside the engine's shared vertex buffer —
 // what `record()` per-stroke uses to issue a single `vkCmdDraw`.
 // Captured during the tessellation pass; consumed during the draw
-// pass.
+// pass. Mode is carried alongside so the draw loop can pick the
+// right pipeline per stroke without re-looking-up.
 struct StrokeSlice {
     std::uint32_t first_vertex;
     std::uint32_t vertex_count;
+    DrawMode mode;
 };
 
 }  // namespace
 
 void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept {
     NOTED_PROFILE_ZONE_N("StrokeEngine::record");
-    if (!pipeline_.has_value() || !layout_.has_value() || !vertex_buffer_.has_value()) {
+    if (!pipeline_draw_.has_value() || !pipeline_erase_.has_value() || !layout_.has_value() ||
+        !vertex_buffer_.has_value()) {
         return;
     }
     if (strokes_.empty() && current_stroke_.samples.empty()) {
@@ -287,7 +319,7 @@ void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept
         const auto first = static_cast<std::uint32_t>(all_vertices.size());
         const auto count = static_cast<std::uint32_t>(ribbon.size());
         all_vertices.insert(all_vertices.end(), ribbon.begin(), ribbon.end());
-        slices.push_back({first, count});
+        slices.push_back({first, count, stroke.mode});
     };
 
     for (const auto& stroke : strokes_) {
@@ -359,9 +391,12 @@ void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept
         std::memcpy(vertex_buffer_->mapped(), all_vertices.data(), used_bytes);
     }
 
-    // ---- Pass 3: bind once, draw per slice ------------------------------
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_->handle());
-
+    // ---- Pass 3: bind vertex buffer + push, draw per slice with the
+    // pipeline matching that stroke's snapshotted mode. Rebinding only
+    // happens when the mode changes between adjacent slices, which is
+    // the common case for a user who batches their pen-then-eraser
+    // work. The two pipelines share everything except blend state, so
+    // a rebind is cheap.
     const VkBuffer vb_handle = vertex_buffer_->handle();
     const VkDeviceSize vb_offset = 0;
     vkCmdBindVertexBuffers(cb, /*firstBinding=*/0, /*bindingCount=*/1, &vb_handle, &vb_offset);
@@ -372,6 +407,10 @@ void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept
     vkCmdPushConstants(
         cb, layout_->handle(), VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PolylinePush), &push);
 
+    // Track which pipeline is currently bound so we only emit a
+    // vkCmdBindPipeline when the mode actually changes. The sentinel
+    // ensures the first slice always binds.
+    const noted::gpu::GraphicsPipeline* bound_pipeline = nullptr;
     for (const auto& slice : slices) {
         if (slice.first_vertex >= used_verts) {
             break;  // truncation cap reached
@@ -384,6 +423,12 @@ void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept
             // already filters 0/1-sample strokes; this guards
             // against a truncation that left an oddly tiny tail.
             continue;
+        }
+        const auto* want_pipeline =
+            (slice.mode == DrawMode::erase) ? &*pipeline_erase_ : &*pipeline_draw_;
+        if (want_pipeline != bound_pipeline) {
+            vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, want_pipeline->handle());
+            bound_pipeline = want_pipeline;
         }
         vkCmdDraw(cb,
                   /*vertexCount=*/draw_count,
@@ -400,11 +445,14 @@ void StrokeEngine::on_pressed(const noted::hook::PointerPressed& e) noexcept {
         return;
     }
     drawing_ = true;
-    // Snapshot the brush style at stroke start — later mid-stroke
-    // edits to `brush_` (debug UI sliders, brush presets) do NOT
-    // retroactively change this stroke. Matches Goodnotes /
-    // Photoshop expectations.
+    // Snapshot the brush style + draw mode at stroke start — later
+    // mid-stroke edits to `brush_` / `mode_` (tool switches, debug
+    // UI sliders, brush presets) do NOT retroactively change this
+    // stroke. Matches Goodnotes / Photoshop expectations and is the
+    // mechanism that lets the eraser tool punch through ink without
+    // also rewriting every previously-drawn pen stroke's pipeline.
     current_stroke_.style = brush_;
+    current_stroke_.mode = mode_;
     current_stroke_.samples.clear();
     // Screen → canvas: subtract camera translation, divide by scale.
     // Identity view (default) reduces to s.x = e.x.

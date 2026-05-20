@@ -23,9 +23,29 @@
 // tests verify centerline → ribbon invariants without a GPU.
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 namespace noted::stroke {
+
+// How a stroke's pixels combine with whatever is already in the
+// strokes target. Snapshotted on each Stroke at press time so a
+// user toggling tools mid-document never retroactively rewrites an
+// already-committed stroke's behaviour.
+//
+// `draw`   — normal painter's-algorithm alpha blend.
+// `erase`  — destination-out: the target pixel is multiplied by
+//            `(1 - src.alpha)`. With the strokes target composited
+//            onto the canvas via SRC_OVER, this reveals the paper
+//            + layers below — Goodnotes-style eraser.
+//
+// Wire-stable ordinals — `.noted` schema may persist per-stroke
+// mode in a future bump. New modes append; existing values never
+// reorder.
+enum class DrawMode : std::uint8_t {
+    draw = 0,
+    erase = 1,
+};
 
 // Per-engine brush style.
 //
@@ -100,6 +120,10 @@ struct StrokeSample {
 struct Stroke {
     std::vector<StrokeSample> samples{};
     BrushStyle style{};
+    // Per-stroke render mode. Set by `StrokeEngine::on_pressed` from
+    // the engine's live `mode_` so tool toggling never rewrites a
+    // committed stroke's behaviour.
+    DrawMode mode{DrawMode::draw};
 };
 
 // One ribbon vertex. The tessellator emits these in

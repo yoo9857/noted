@@ -262,3 +262,41 @@ TEST(StrokeEnginePressure, SetBrushMutatesLiveStyle) {
     EXPECT_FLOAT_EQ(eng.brush().min_radius_px, 5.0F);
     EXPECT_FLOAT_EQ(eng.brush().max_radius_px, 5.0F);
 }
+
+// ---- DrawMode (Phase B.2) --------------------------------------------------
+
+TEST(StrokeEngineMode, DefaultsToDraw) {
+    StrokeEngine eng{StrokeEngine::TestingTag{}};
+    EXPECT_EQ(eng.mode(), noted::stroke::DrawMode::draw);
+}
+
+TEST(StrokeEngineMode, SetModeRoundTrips) {
+    StrokeEngine eng{StrokeEngine::TestingTag{}};
+    eng.set_mode(noted::stroke::DrawMode::erase);
+    EXPECT_EQ(eng.mode(), noted::stroke::DrawMode::erase);
+    eng.set_mode(noted::stroke::DrawMode::draw);
+    EXPECT_EQ(eng.mode(), noted::stroke::DrawMode::draw);
+}
+
+TEST(StrokeEngineMode, SetModeDoesNotAffectAccumulatedStrokes) {
+    // Pen-then-erase should not retroactively rewrite the prior
+    // stroke's pipeline — accumulated samples are mode-agnostic
+    // pixels; the pipeline choice is per-record() not per-stroke.
+    StrokeEngine eng{StrokeEngine::TestingTag{}};
+    eng.inject_press_(10.0, 10.0, PB::left, 1.0F);
+    eng.inject_move_(20.0, 20.0, 1.0F);
+    eng.inject_release_(20.0, 20.0, PB::left);
+    EXPECT_EQ(eng.stroke_count(), 1U);
+    const auto sample_count_before = eng.total_sample_count();
+
+    eng.set_mode(noted::stroke::DrawMode::erase);
+    EXPECT_EQ(eng.stroke_count(), 1U);
+    EXPECT_EQ(eng.total_sample_count(), sample_count_before);
+}
+
+TEST(StrokeEngineMode, WireStableOrdinals) {
+    // Pinned for the future schema bump that persists per-stroke
+    // mode in the .noted format.
+    EXPECT_EQ(static_cast<int>(noted::stroke::DrawMode::draw), 0);
+    EXPECT_EQ(static_cast<int>(noted::stroke::DrawMode::erase), 1);
+}

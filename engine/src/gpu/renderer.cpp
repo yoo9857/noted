@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "noted/engine/gpu/canvas_render_target.hpp"
+#include "noted/engine/gpu/stroke_target.hpp"
 #include "noted/engine/profile.hpp"
 
 namespace noted::gpu {
@@ -446,7 +447,10 @@ auto Renderer::render_frame_with(const Device& device,
 auto Renderer::render_with_canvas(const Device& device,
                                   const Swapchain& swapchain,
                                   CanvasRenderTarget& canvas,
+                                  StrokeTarget& strokes_target,
                                   const CanvasPassDesc& canvas_pass,
+                                  const StrokesPassDesc& strokes_pass,
+                                  const OverlayPassDesc& overlay_pass,
                                   const SwapchainPassDesc& swapchain_pass) -> Result<void> {
     NOTED_PROFILE_ZONE_N("Renderer::render_with_canvas");
     const auto slot_idx = frame_counter_ % frames_.size();
@@ -498,7 +502,20 @@ auto Renderer::render_with_canvas(const Device& device,
     const auto sc_image = swapchain.images()[image_index];
     const auto sc_view = swapchain.views()[image_index];
 
-    // ---- Pass 1: Canvas ---------------------------------------------------
+    // Viewport / scissor are the same for every canvas-sized pass.
+    // Hoisted so each pass body stays readable.
+    VkViewport cv_vp{};
+    cv_vp.x = 0.0F;
+    cv_vp.y = 0.0F;
+    cv_vp.width = static_cast<float>(cv_extent.width);
+    cv_vp.height = static_cast<float>(cv_extent.height);
+    cv_vp.minDepth = 0.0F;
+    cv_vp.maxDepth = 1.0F;
+    VkRect2D cv_scissor{};
+    cv_scissor.offset = {0, 0};
+    cv_scissor.extent = cv_extent;
+
+    // ---- Pass 1: Canvas (paper + layers) --------------------------------
     canvas.transition_to(slot.cb.handle(),
                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                          VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
@@ -514,18 +531,8 @@ auto Renderer::render_with_canvas(const Device& device,
         ri.pColorAttachments = &canvas_attach;
         vkCmdBeginRendering(slot.cb.handle(), &ri);
 
-        VkViewport vp{};
-        vp.x = 0.0F;
-        vp.y = 0.0F;
-        vp.width = static_cast<float>(cv_extent.width);
-        vp.height = static_cast<float>(cv_extent.height);
-        vp.minDepth = 0.0F;
-        vp.maxDepth = 1.0F;
-        vkCmdSetViewport(slot.cb.handle(), 0, 1, &vp);
-        VkRect2D scissor{};
-        scissor.offset = {0, 0};
-        scissor.extent = cv_extent;
-        vkCmdSetScissor(slot.cb.handle(), 0, 1, &scissor);
+        vkCmdSetViewport(slot.cb.handle(), 0, 1, &cv_vp);
+        vkCmdSetScissor(slot.cb.handle(), 0, 1, &cv_scissor);
 
         if (canvas_pass.draw) {
             NOTED_PROFILE_ZONE_N("canvas_pass.draw");
@@ -534,13 +541,73 @@ auto Renderer::render_with_canvas(const Device& device,
         vkCmdEndRendering(slot.cb.handle());
     }
 
-    // Canvas → SHADER_READ for the composite pass that follows.
+    // Canvas stays in COLOR_ATTACHMENT_OPTIMAL for the overlay pass
+    // (LOAD_OP_LOAD) — no transition between pass 1 and pass 3.
+
+    // ---- Pass 2: Strokes target -----------------------------------------
+    strokes_target.transition_to(slot.cb.handle(),
+                                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+
+    {
+        auto strokes_attach = strokes_target.color_attachment(strokes_pass.clear);
+        VkRenderingInfo ri{};
+        ri.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+        ri.renderArea.extent = cv_extent;
+        ri.layerCount = 1;
+        ri.colorAttachmentCount = 1;
+        ri.pColorAttachments = &strokes_attach;
+        vkCmdBeginRendering(slot.cb.handle(), &ri);
+
+        vkCmdSetViewport(slot.cb.handle(), 0, 1, &cv_vp);
+        vkCmdSetScissor(slot.cb.handle(), 0, 1, &cv_scissor);
+
+        if (strokes_pass.draw) {
+            NOTED_PROFILE_ZONE_N("strokes_pass.draw");
+            strokes_pass.draw(slot.cb.handle(), cv_extent);
+        }
+        vkCmdEndRendering(slot.cb.handle());
+    }
+
+    // Strokes target → SHADER_READ for the overlay sample.
+    strokes_target.transition_to(slot.cb.handle(),
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                 VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                                 VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+
+    // ---- Pass 3: Overlay (strokes_target → canvas) ----------------------
+    {
+        // LOAD_OP_LOAD — preserve paper + layers from pass 1. The
+        // overlay shader samples strokes_target and writes alpha-
+        // blended pixels into the canvas.
+        auto canvas_attach =
+            canvas.color_attachment(VkClearColorValue{}, VK_ATTACHMENT_LOAD_OP_LOAD);
+        VkRenderingInfo ri{};
+        ri.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+        ri.renderArea.extent = cv_extent;
+        ri.layerCount = 1;
+        ri.colorAttachmentCount = 1;
+        ri.pColorAttachments = &canvas_attach;
+        vkCmdBeginRendering(slot.cb.handle(), &ri);
+
+        vkCmdSetViewport(slot.cb.handle(), 0, 1, &cv_vp);
+        vkCmdSetScissor(slot.cb.handle(), 0, 1, &cv_scissor);
+
+        if (overlay_pass.draw) {
+            NOTED_PROFILE_ZONE_N("overlay_pass.draw");
+            overlay_pass.draw(slot.cb.handle(), cv_extent);
+        }
+        vkCmdEndRendering(slot.cb.handle());
+    }
+
+    // Canvas → SHADER_READ for the swapchain composite pass that follows.
     canvas.transition_to(slot.cb.handle(),
                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
 
-    // ---- Pass 2: Swapchain (composite) -----------------------------------
+    // ---- Pass 4: Swapchain (composite) ----------------------------------
     image_layout_transition(slot.cb.handle(),
                             sc_image,
                             VK_IMAGE_LAYOUT_UNDEFINED,

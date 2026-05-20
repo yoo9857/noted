@@ -53,8 +53,10 @@ class Registry;
 namespace noted::stroke {
 
 // BrushStyle / Stamp / stamp_from_pressure / Stroke / StrokeSample /
-// RibbonVertex / tessellate_ribbon all live in `stroke_geometry.hpp`
-// — included above for use as `vector<Stroke>` members below.
+// RibbonVertex / tessellate_ribbon / DrawMode all live in
+// `stroke_geometry.hpp` — included above. The engine adds the GPU
+// pipeline + input-event accumulation; the geometry header owns the
+// pure-data + pure-logic side.
 
 struct StrokeEngineCreateInfo {
     // Allocator + device + shader modules are required. The allocator
@@ -137,6 +139,13 @@ public:
     [[nodiscard]] auto brush() const noexcept -> const BrushStyle& { return brush_; }
     void set_brush(const BrushStyle& b) noexcept { brush_ = b; }
 
+    // Active draw mode. Mutating swaps which pipeline `record()` binds
+    // next frame; in-flight + already-recorded strokes are unaffected.
+    // Like `set_brush`, only future presses see the change — the
+    // current stroke (if any) finishes in its starting mode.
+    [[nodiscard]] auto mode() const noexcept -> DrawMode { return mode_; }
+    void set_mode(DrawMode m) noexcept { mode_ = m; }
+
     // Test-only / no-hook constructor (production code goes through create()).
     // Build an engine with no pipeline + no subscriptions, just the
     // accumulation state. Lets unit tests exercise the pointer-event →
@@ -165,8 +174,16 @@ private:
     // Pipeline + layout — engaged after create() succeeds; disengaged
     // for TestingTag instances that never touch the GPU. The optional
     // wrapping side-steps PipelineLayout's private default constructor.
+    //
+    // Two pipelines, one per `DrawMode`. They share everything except
+    // the color-blend attachment state; `record()` picks the right
+    // pipeline based on `mode_` each frame. Building both at create()
+    // time avoids per-mode lazy initialisation (which would need
+    // immediate_submit + a mid-frame wait the first time the user
+    // touches the eraser).
     std::optional<noted::gpu::PipelineLayout> layout_;
-    std::optional<noted::gpu::GraphicsPipeline> pipeline_;
+    std::optional<noted::gpu::GraphicsPipeline> pipeline_draw_;
+    std::optional<noted::gpu::GraphicsPipeline> pipeline_erase_;
     // Persistently-mapped ribbon vertex buffer. Each `record()` walks
     // the strokes, tessellates them into `RibbonVertex` triangles,
     // and memcpys into the mapped pointer. The optional lets the
@@ -195,6 +212,7 @@ private:
     // next press from `brush_`.
     Stroke current_stroke_{};
     BrushStyle brush_{};
+    DrawMode mode_{DrawMode::draw};
 
     // RAII subscriptions — released when the engine goes out of scope.
     noted::hook::Subscription<noted::hook::PointerPressed> sub_pressed_;

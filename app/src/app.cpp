@@ -78,38 +78,39 @@ noted::harness::FeatureFlag flag_force_vsync{"gpu.force_vsync_fifo", /*default=*
 
 constexpr VkFormat kCanvasFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
-// Brush style for each tool. Pen = default (black tip); Eraser =
-// paper colour so a stroke "erases" by repainting the canvas to look
-// like blank paper. NOT true destination-out — that requires
-// splitting the stroke layer from the page-background pass (Phase
-// B.2). For B.1 this is the visible-but-imperfect placeholder. The
-// other tools fall through to Pen because their behavioural
-// integration (selection rect, shape primitives, text input, image
-// placement) comes in later PRs.
-[[nodiscard]] auto brush_for_tool(noted::domain::tool::ToolKind kind) noexcept
-    -> noted::stroke::BrushStyle {
+// Settings the stroke engine consumes when the active tool changes:
+// the brush style (colour + radii + alpha curve) and the draw mode
+// (normal alpha blend vs destination-out erase).
+//
+// Phase B.2: the eraser stops being a paper-colour placeholder. It
+// uses `DrawMode::erase` so destination-out blend in the strokes
+// target zeros alpha at the eraser footprint, and the overlay step
+// lets the page pattern show through. The eraser brush colour is
+// irrelevant under destination-out (only the alpha is read), so it
+// keeps the default brush.
+struct ToolSettings {
+    noted::stroke::BrushStyle brush;
+    noted::stroke::DrawMode mode;
+};
+
+[[nodiscard]] auto tool_settings_for_tool(noted::domain::tool::ToolKind kind) noexcept
+    -> ToolSettings {
     using noted::domain::tool::ToolKind;
     noted::stroke::BrushStyle b{};
     switch (kind) {
         case ToolKind::eraser:
-            // Match the `kPaper` constant in page_strip.cpp's preview
-            // and page_bg.slang's paper colour so the erased region
-            // visually merges with the page background.
-            b.r = 245.0F / 255.0F;
-            b.g = 243.0F / 255.0F;
-            b.b = 235.0F / 255.0F;
-            b.a = 1.0F;
-            return b;
+            return {.brush = b, .mode = noted::stroke::DrawMode::erase};
         case ToolKind::pen:
         case ToolKind::select:
         case ToolKind::shape:
         case ToolKind::text:
         case ToolKind::image:
-            // Default (black) for Pen and the not-yet-implemented
-            // tools — their behavioural divergence lands in later PRs.
-            return b;
+            // Default (black) brush + draw mode. The not-yet-implemented
+            // tools fall through to Pen behaviour until their
+            // behavioural integration lands.
+            return {.brush = b, .mode = noted::stroke::DrawMode::draw};
     }
-    return b;
+    return {.brush = b, .mode = noted::stroke::DrawMode::draw};
 }
 
 }  // namespace
@@ -274,13 +275,16 @@ auto App::init_canvas_pipeline() -> noted::Result<void> {
     }
     composite_set_layout_.emplace(std::move(*set_layout));
 
+    // Two descriptor sets: one for the canvas (sampled by the swapchain
+    // composite), one for the strokes target (sampled by the canvas
+    // overlay). Same layout, same sampler, different image view.
     const std::array<noted::gpu::DescriptorPoolSize, 1> pool_sizes{{{
         .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .count = 1,
+        .count = 2,
     }}};
     auto pool = noted::gpu::DescriptorPool::create(*device_,
                                                    noted::gpu::DescriptorPoolCreateInfo{
-                                                       .max_sets = 1,
+                                                       .max_sets = 2,
                                                        .pool_sizes = pool_sizes,
                                                    });
     if (!pool) {
@@ -294,6 +298,12 @@ auto App::init_canvas_pipeline() -> noted::Result<void> {
     }
     canvas_set_ = noted::gpu::DescriptorSet{device_->handle(), *raw_canvas_set};
 
+    auto raw_strokes_set = composite_descriptor_pool_->allocate(*composite_set_layout_);
+    if (!raw_strokes_set) {
+        return std::unexpected(std::move(raw_strokes_set).error());
+    }
+    strokes_set_ = noted::gpu::DescriptorSet{device_->handle(), *raw_strokes_set};
+
     auto canvas = noted::gpu::CanvasRenderTarget::create(*allocator_,
                                                          noted::gpu::CanvasCreateInfo{
                                                              .extent = swapchain_->summary().extent,
@@ -304,8 +314,21 @@ auto App::init_canvas_pipeline() -> noted::Result<void> {
     }
     canvas_.emplace(std::move(*canvas));
 
+    auto strokes = noted::gpu::StrokeTarget::create(*allocator_,
+                                                    noted::gpu::StrokeTargetCreateInfo{
+                                                        .extent = swapchain_->summary().extent,
+                                                        .format = kCanvasFormat,
+                                                    });
+    if (!strokes) {
+        return std::unexpected(std::move(strokes).error());
+    }
+    strokes_target_.emplace(std::move(*strokes));
+
     noted::gpu::DescriptorWriter{canvas_set_}
         .write_combined_image_sampler(0, canvas_->view(), sampler_->handle())
+        .commit();
+    noted::gpu::DescriptorWriter{strokes_set_}
+        .write_combined_image_sampler(0, strokes_target_->view(), sampler_->handle())
         .commit();
 
     // Composite pipeline (canvas → swapchain).
@@ -355,6 +378,35 @@ auto App::init_canvas_pipeline() -> noted::Result<void> {
         return std::unexpected(std::move(pipeline).error());
     }
     composite_pipeline_.emplace(std::move(*pipeline));
+
+    // Overlay pipeline — same shader, same layout, but different target
+    // format (canvas, not swapchain) and SRC_OVER blend so the
+    // strokes_target alpha controls how much of its colour reaches the
+    // canvas. Where strokes alpha=0 (no ink or fully erased), the canvas
+    // pixel is unchanged and the page pattern shows through.
+    VkPipelineColorBlendAttachmentState overlay_blend{};
+    overlay_blend.blendEnable = VK_TRUE;
+    overlay_blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    overlay_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    overlay_blend.colorBlendOp = VK_BLEND_OP_ADD;
+    overlay_blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    overlay_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    overlay_blend.alphaBlendOp = VK_BLEND_OP_ADD;
+    overlay_blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                   VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    auto overlay_pipeline =
+        noted::gpu::GraphicsPipelineBuilder{}
+            .add_stage(VK_SHADER_STAGE_VERTEX_BIT, *fullscreen_vs_, "main")
+            .add_stage(VK_SHADER_STAGE_FRAGMENT_BIT, *fullscreen_ps_, "main")
+            .rasterization(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
+            .color_blend_attachment(overlay_blend)
+            .color_format(kCanvasFormat)
+            .build(*device_, *composite_pipeline_layout_);
+    if (!overlay_pipeline) {
+        return std::unexpected(std::move(overlay_pipeline).error());
+    }
+    composite_overlay_pipeline_.emplace(std::move(*overlay_pipeline));
     return {};
 }
 
@@ -865,7 +917,9 @@ void App::draw_widgets() {
         noted::ui::widget::tool_palette(tools_.active, &menu_state_.show_tool_palette);
     if (tool_result.switch_request && *tool_result.switch_request != tools_.active) {
         tools_.active = *tool_result.switch_request;
-        stroke_engine_->set_brush(brush_for_tool(tools_.active));
+        const auto settings = tool_settings_for_tool(tools_.active);
+        stroke_engine_->set_brush(settings.brush);
+        stroke_engine_->set_mode(settings.mode);
     }
 
     auto selected = session_.selected_block();
@@ -994,14 +1048,21 @@ void App::refresh_window_title_if_changed() {
 }
 
 auto App::render_one_frame() -> noted::Result<void> {
-    // Canvas pass clears to opaque black — the source texture will
-    // overdraw the whole surface, but defending against pipeline-
-    // state surprises is cheap.
+    // Canvas pass clears to opaque black — paper + layers will fill
+    // most of it; the clear shows through outside the pages.
     VkClearColorValue canvas_clear{};
     canvas_clear.float32[0] = 0.0F;
     canvas_clear.float32[1] = 0.0F;
     canvas_clear.float32[2] = 0.0F;
     canvas_clear.float32[3] = 1.0F;
+
+    // Strokes target clears to transparent black every frame so eraser
+    // alpha doesn't persist into the next frame's stroke history.
+    VkClearColorValue strokes_clear{};
+    strokes_clear.float32[0] = 0.0F;
+    strokes_clear.float32[1] = 0.0F;
+    strokes_clear.float32[2] = 0.0F;
+    strokes_clear.float32[3] = 0.0F;
 
     // Swapchain pass clears to a dark teal — what shows through if
     // the composite quad ever leaves edges blank (it doesn't today,
@@ -1013,6 +1074,8 @@ auto App::render_one_frame() -> noted::Result<void> {
     swapchain_clear.float32[3] = 1.0F;
 
     auto canvas_cb = [this](VkCommandBuffer cb, VkExtent2D ext) { record_canvas_pass(cb, ext); };
+    auto strokes_cb = [this](VkCommandBuffer cb, VkExtent2D ext) { record_strokes_pass(cb, ext); };
+    auto overlay_cb = [this](VkCommandBuffer cb, VkExtent2D ext) { record_overlay_pass(cb, ext); };
     auto swapchain_cb = [this](VkCommandBuffer cb, VkExtent2D ext) {
         record_swapchain_pass(cb, ext);
     };
@@ -1021,7 +1084,10 @@ auto App::render_one_frame() -> noted::Result<void> {
         *device_,
         *swapchain_,
         *canvas_,
+        *strokes_target_,
         noted::gpu::Renderer::CanvasPassDesc{canvas_clear, canvas_cb},
+        noted::gpu::Renderer::StrokesPassDesc{strokes_clear, strokes_cb},
+        noted::gpu::Renderer::OverlayPassDesc{overlay_cb},
         noted::gpu::Renderer::SwapchainPassDesc{swapchain_clear, swapchain_cb});
     if (!rr) {
         const auto code = rr.error().code;
@@ -1035,16 +1101,62 @@ auto App::render_one_frame() -> noted::Result<void> {
 }
 
 void App::record_canvas_pass(VkCommandBuffer cb, VkExtent2D ext) {
-    // Order matters:
+    // Phase 1 of the four-pass canvas pipeline (Phase B.2, ADR 0031).
+    // Paper + layers go into the canvas; ink lands in a separate
+    // strokes target rendered by `record_strokes_pass`.
+    //
+    // Order matters within this pass:
     //   1. Page backgrounds — paper rectangles. The canvas pass's
     //      clear colour shows through everywhere outside the pages.
     //   2. Layer compositor — adjustment / image layers within
     //      pages (none today; demo payloads were dropped in
     //      A.3.b so pages stay visible).
-    //   3. Stroke engine — vector ink ribbons on top.
     page_renderer_->render(cb, ext, session_.document().pages());
     layer_compositor_->composite(cb, ext, scene_->graph, scene_->store);
+}
+
+void App::record_strokes_pass(VkCommandBuffer cb, VkExtent2D ext) {
+    // Phase 2: the stroke engine writes into `strokes_target` (cleared
+    // to transparent black each frame by the renderer). Draw strokes
+    // accumulate alpha; eraser strokes subtract alpha — both behaviours
+    // come from the engine's two pipelines + the active `DrawMode`.
     stroke_engine_->record(cb, ext);
+}
+
+void App::record_overlay_pass(VkCommandBuffer cb, VkExtent2D /*ext*/) {
+    // Phase 3: composite the strokes target onto the canvas with
+    // SRC_OVER blend. The canvas attachment is LOAD_OP_LOAD (paper +
+    // layers from phase 1 survive); where strokes_target alpha=0, the
+    // canvas is unchanged → page pattern shows through erased regions.
+    //
+    // Identity transform: scale=(2,2), translation=(-1,-1) reproduces
+    // the standard `uv → ndc = uv * 2 - 1` mapping, so the strokes
+    // target fills the canvas at 1:1 with no camera projection.
+    const auto layout_h = composite_pipeline_layout_->handle();
+    const auto pipeline_h = composite_overlay_pipeline_->handle();
+    const VkDescriptorSet set_h = strokes_set_.handle();
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_h);
+    vkCmdBindDescriptorSets(cb,
+                            VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            layout_h,
+                            /*firstSet=*/0,
+                            /*setCount=*/1,
+                            &set_h,
+                            /*dynamicOffsetCount=*/0,
+                            nullptr);
+
+    struct CompositePush {
+        float scale[2];
+        float translation[2];
+    };
+    CompositePush push{};
+    push.scale[0] = 2.0F;
+    push.scale[1] = 2.0F;
+    push.translation[0] = -1.0F;
+    push.translation[1] = -1.0F;
+    vkCmdPushConstants(cb, layout_h, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(CompositePush), &push);
+
+    vkCmdDraw(cb, /*vertexCount=*/6, /*instanceCount=*/1, 0, 0);
 }
 
 void App::record_swapchain_pass(VkCommandBuffer cb, VkExtent2D /*ext*/) {
@@ -1114,9 +1226,15 @@ auto App::recreate_swapchain() -> noted::Result<void> {
     if (auto r = canvas_->resize(*allocator_, swapchain_->summary().extent); !r) {
         return std::unexpected(std::move(r).error());
     }
-    // canvas->view() is now a fresh handle — re-point the descriptor.
+    if (auto r = strokes_target_->resize(*allocator_, swapchain_->summary().extent); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    // Image views are fresh after resize — re-point both descriptors.
     noted::gpu::DescriptorWriter{canvas_set_}
         .write_combined_image_sampler(0, canvas_->view(), sampler_->handle())
+        .commit();
+    noted::gpu::DescriptorWriter{strokes_set_}
+        .write_combined_image_sampler(0, strokes_target_->view(), sampler_->handle())
         .commit();
     // Keep the camera's notion of window / canvas extent aligned
     // with the live swapchain. The framebuffer_resized hook also
