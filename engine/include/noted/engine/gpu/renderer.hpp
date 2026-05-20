@@ -16,6 +16,7 @@
 namespace noted::gpu {
 
 class CanvasRenderTarget;
+class StrokeTarget;
 
 // Orchestrates the acquire → record → submit → present cycle.
 //
@@ -67,25 +68,42 @@ public:
                                          VkClearColorValue clear_color,
                                          const DrawCallback& draw_callback) -> Result<void>;
 
-    // Two-pass canvas pipeline:
-    //   1) Canvas pass — caller's `canvas_pass.draw` records into the
-    //      offscreen canvas. The renderer transitions the canvas to
-    //      COLOR_ATTACHMENT_OPTIMAL, begins dynamic rendering with the
-    //      caller-supplied clear color, invokes the callback, ends
-    //      rendering, and transitions the canvas to SHADER_READ_ONLY_OPTIMAL.
-    //   2) Swapchain pass — exactly the existing render_frame_with body.
-    //      Callers typically bind a descriptor sampling `canvas.view()`
-    //      and draw a fullscreen quad.
+    // Four-pass layered-canvas pipeline (Phase B.2, per ADR 0031):
     //
-    // Both passes run inside the same command buffer / same submit, so
-    // the canvas-to-swapchain handoff is one barrier away — no extra
-    // semaphore needed.
+    //   1) Canvas pass — caller's `canvas_pass.draw` records paper +
+    //      layer composite into the offscreen canvas. Clear → draw.
+    //      Canvas stays in COLOR_ATTACHMENT_OPTIMAL afterwards because
+    //      the overlay pass below loads it back.
+    //   2) Strokes pass — caller's `strokes_pass.draw` records the
+    //      stroke engine output into `strokes_target`. The renderer
+    //      transitions `strokes_target` to COLOR_ATTACHMENT_OPTIMAL and
+    //      clears (typically to transparent black) so eraser strokes
+    //      can write alpha=0 without leaking through prior frames.
+    //   3) Overlay pass — caller's `overlay_pass.draw` samples
+    //      `strokes_target` and composites it onto the canvas via a
+    //      LOAD_OP_LOAD render pass. Strokes appear on top of paper +
+    //      layers without destroying them. The renderer transitions
+    //      `strokes_target` to SHADER_READ_ONLY before this pass.
+    //   4) Swapchain pass — caller composites canvas onto the
+    //      swapchain. Canvas is transitioned to SHADER_READ_ONLY first.
     //
-    // Same recoverable Error codes as render_frame_with (OUT_OF_DATE /
+    // All four passes share one command buffer / one submit. The
+    // strokes-target split is what makes a proper destination-out
+    // eraser possible: the eraser zeros alpha in strokes_target
+    // without touching the paper / layer pixels below.
+    //
+    // Recoverable Error codes: same as render_frame_with (OUT_OF_DATE /
     // SUBOPTIMAL).
     struct CanvasPassDesc {
         VkClearColorValue clear{};
-        DrawCallback draw{};  // records into the canvas
+        DrawCallback draw{};  // paper + layers
+    };
+    struct StrokesPassDesc {
+        VkClearColorValue clear{};  // transparent black for normal use
+        DrawCallback draw{};        // stroke engine record (draw or erase)
+    };
+    struct OverlayPassDesc {
+        DrawCallback draw{};  // composites strokes_target onto canvas
     };
     struct SwapchainPassDesc {
         VkClearColorValue clear{};
@@ -94,7 +112,10 @@ public:
     [[nodiscard]] auto render_with_canvas(const Device& device,
                                           const Swapchain& swapchain,
                                           CanvasRenderTarget& canvas,
+                                          StrokeTarget& strokes_target,
                                           const CanvasPassDesc& canvas_pass,
+                                          const StrokesPassDesc& strokes_pass,
+                                          const OverlayPassDesc& overlay_pass,
                                           const SwapchainPassDesc& swapchain_pass) -> Result<void>;
 
     // Tell the renderer the swapchain has been recreated. Internal per-image

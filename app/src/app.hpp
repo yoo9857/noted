@@ -48,6 +48,7 @@
 #include "noted/engine/gpu/renderer.hpp"
 #include "noted/engine/gpu/sampler.hpp"
 #include "noted/engine/gpu/shader_module.hpp"
+#include "noted/engine/gpu/stroke_target.hpp"
 #include "noted/engine/gpu/surface.hpp"
 #include "noted/engine/gpu/swapchain.hpp"
 #include "noted/engine/stroke/stroke_engine.hpp"
@@ -105,9 +106,16 @@ private:
     void refresh_window_title_if_changed();
     [[nodiscard]] auto render_one_frame() -> noted::Result<void>;
 
-    // Renderer DrawCallback bodies, called from inside the
-    // surrounding `vkCmdBeginRendering` the renderer owns.
+    // Renderer DrawCallback bodies, called from inside the surrounding
+    // `vkCmdBeginRendering` the renderer owns. Four passes (per ADR
+    // 0031 / Phase B.2):
+    //   1. canvas — paper + layers
+    //   2. strokes — stroke engine writes into strokes_target
+    //   3. overlay — strokes_target sampled, SRC_OVER blended into canvas
+    //   4. swapchain — canvas sampled + ImGui
     void record_canvas_pass(VkCommandBuffer cb, VkExtent2D extent);
+    void record_strokes_pass(VkCommandBuffer cb, VkExtent2D extent);
+    void record_overlay_pass(VkCommandBuffer cb, VkExtent2D extent);
     void record_swapchain_pass(VkCommandBuffer cb, VkExtent2D extent);
 
     // Dirty-prompt callbacks installed into `prompt_.draw()`.
@@ -152,14 +160,35 @@ private:
     std::optional<noted::gpu::Sampler> sampler_;
     std::optional<noted::gpu::DescriptorSetLayout> composite_set_layout_;
     std::optional<noted::gpu::DescriptorPool> composite_descriptor_pool_;
+    // Two descriptor sets bound to two different sampled images:
+    //   canvas_set_       — samples the canvas (used by the swapchain
+    //                       composite pass).
+    //   strokes_set_      — samples the strokes target (used by the
+    //                       canvas overlay pass).
+    // Both sets use the same layout + sampler.
     noted::gpu::DescriptorSet canvas_set_{};
+    noted::gpu::DescriptorSet strokes_set_{};
 
     std::optional<noted::gpu::CanvasRenderTarget> canvas_;
+    // Strokes target — second offscreen image, same extent + format as
+    // the canvas. The stroke engine renders ink into here; the overlay
+    // pass composites it onto the canvas. Decoupling these two layers
+    // is what makes the destination-out eraser preserve the page
+    // pattern. See ADR 0031.
+    std::optional<noted::gpu::StrokeTarget> strokes_target_;
 
     std::optional<noted::gpu::ShaderModule> fullscreen_vs_;
     std::optional<noted::gpu::ShaderModule> fullscreen_ps_;
     std::optional<noted::gpu::PipelineLayout> composite_pipeline_layout_;
+    // Two composite-shader pipelines built from the same `fullscreen.slang`:
+    //   composite_pipeline_         — targets the swapchain format,
+    //                                 opaque (canvas already opaque).
+    //   composite_overlay_pipeline_ — targets the canvas format with
+    //                                 SRC_OVER blend; samples
+    //                                 strokes_target and blends onto
+    //                                 the canvas in the overlay pass.
     std::optional<noted::gpu::GraphicsPipeline> composite_pipeline_;
+    std::optional<noted::gpu::GraphicsPipeline> composite_overlay_pipeline_;
 
     std::optional<noted::gpu::ShaderModule> layer_vs_;
     std::optional<noted::gpu::ShaderModule> layer_ps_;
