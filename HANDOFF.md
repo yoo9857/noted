@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-19 · **main HEAD:** `8e84d3b` (clean, 0 open PRs)
+**Last updated:** 2026-05-20 · **main HEAD:** `5fbba5f` · **Open PRs:** #68 (Phase A.3.d, CI green), #69 (Phase B.1, CI green, stacked on #68)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -14,8 +14,9 @@ exception handling.
 **The app builds, runs, and is interactive end-to-end** (within v0.x
 demo scope). A 1600×1000 window opens, the GPU is picked, a
 `LayerCompositor` walks a 4-layer demo `LayerGraph` (normal / multiply
-/ linear_dodge blend modes), the stroke engine overlays pen-input ink
-on top, and a Dear ImGui-driven product shell renders on top with:
+/ linear_dodge blend modes), the stroke engine overlays vector-ink
+polyline ribbons (pressure-modulated width) on top, and a Dear ImGui-
+driven product shell renders on top with:
 
   - **Menu bar** (File / Edit / View / About). File's New / Open /
     Save / Save As back the `.noted` JSON+zip format via a native
@@ -26,6 +27,12 @@ on top, and a Dear ImGui-driven product shell renders on top with:
     fire the same signals as the menu items. A modal asks
     Save / Discard / Cancel when the user closes the window or
     starts a New on a dirty document.
+  - **Page strip** — left-rail panel listing every page in the
+    current document. Each row shows "Page N (background-name)",
+    a mini preview of the actual page pattern (grid / lined /
+    dotted), and surfaces add / remove via "+ Add page" footer +
+    right-click → Remove context menu. Clicking a row jumps the
+    camera to that page; "+ Add page" auto-focuses the new page.
   - **Debug overlay** (View → Debug overlay; off by default) — small
     floating window with frame index + FPS, a 120-sample CPU-time
     line plot, the LayerCompositor fallback count, and every
@@ -33,8 +40,8 @@ on top, and a Dear ImGui-driven product shell renders on top with:
   - **Layer panel** — visibility checkbox per layer wires through
     `LayerGraph::set_visible`; compositor reflects next frame.
   - **Outline panel** — tree view of `Document.preorder` with
-    click-to-select.
-  - **Status bar** — frame index + FPS pinned to bottom.
+    click-to-select + F2 inline rename via `SetNameCommand`.
+  - **Status bar** — frame index + FPS + zoom % pinned to bottom.
 
 The frame loop ticks at ~0.5 ms CPU on a GTX 1050 Ti (240-frame
 sample) with **zero Vulkan validation errors** — the LayerCompositor
@@ -56,6 +63,9 @@ every other engine assertion (ADR 0027).
 - **VMA** (AMD GPUOpen) for GPU memory
 - **GLFW 3.4** for windowing + input
 - **stb_image** for PNG/JPG decode
+- **nlohmann/json** for `.noted` document serialization
+- **miniz** for the `.noted` zip container
+- **Dear ImGui** (docking branch) for the v0.x product shell
 - **CMake 3.28+** with `FetchContent` for deps
 - **GoogleTest** for unit tests
 
@@ -69,20 +79,25 @@ every other engine assertion (ADR 0027).
 
 All checks block PRs. `clang-format-18` enforces the project style on
 every push (see `.clang-format`, `.github/workflows/lint.yml`).
+Conventional-commit subjects enforced by the `commit message lint`
+job — pattern `^(feat|fix|chore|refactor|docs|test|perf|build|ci|style)(\([a-z0-9._-]+\))?!?: .+`.
+Scopes must use only `[a-z0-9._-]` — no `+`, no spaces.
 
 ### Repo layout
 
 ```
-engine/       Core: Vulkan, allocator, hooks, error model, harness
-domain/       Pure logic: document, layer DAG, selection, commands, CRDT
+engine/       Core: Vulkan, allocator, hooks, error model, harness, canvas
+domain/       Pure logic: document, layer DAG, selection, commands, tool
 compositor/   GPU layer compositor (engine + domain bridge)
 plugin/       WASM plugin host (stubs)
 platform/     Windowing, input, fs, image_io
-ui/           View layer (stubs — UI tech TBD)
-app/          Executable entry (src/main.cpp)
-shaders/      Slang sources (fullscreen, stamp, layer)
+ui/           Dear ImGui host + widgets (menu_bar, layer_panel,
+              outline_panel, page_strip, tool_palette, status_bar,
+              debug_overlay, theme)
+app/          Executable entry (src/main.cpp) + App class
+shaders/      Slang sources (fullscreen, polyline, layer, page_bg)
 cmake/        CMake modules (CompilerWarnings, Hardening, NotedModule, Shaders)
-docs/architecture/  27 ADRs documenting every cross-cutting decision
+docs/architecture/  31 ADRs documenting every cross-cutting decision
 tests/        Unit + integration + bench + fuzz scaffolds
 ```
 
@@ -100,12 +115,14 @@ tests/        Unit + integration + bench + fuzz scaffolds
 ✅ Harness: FeatureFlag, Counter, ScopedTimer, Config, validate.
 ✅ Profiler: Tracy 0.11 (opt-in via `-DNOTED_ENABLE_TRACY=ON`,
    on-demand), ScopedTimer→zone and Counter→plot. See ADR 0013.
-✅ Canvas pipeline: offscreen `CanvasRenderTarget` + two-pass renderer
-   (canvas → composite). Foundation for strokes/layers. See ADR 0014.
-✅ Stroke engine (MVP): mouse drag draws anti-aliased SDF-disk stamps
-   into the canvas via a push-constant pipeline. Heap-allocated, RAII
-   hook subscriptions. See ADR 0015. Pressure-driven brush via
-   `BrushStyle` + `stamp_from_pressure()` curve. See ADR 0018.
+✅ Canvas pipeline: offscreen `CanvasRenderTarget` + composite pass
+   over a **6-vertex quad** so camera scale < 1 produces a smaller
+   rectangle (not a triangle-shaped cut). See ADR 0014 + fix from
+   PR #67.
+✅ Stroke engine: vector-ink polyline ribbon, Catmull-Rom centerline,
+   pressure-modulated width via `BrushStyle` + `stamp_from_pressure()`.
+   Persistently-mapped vertex buffer with geometric grow. Heap-
+   allocated, RAII hook subscriptions. See ADR 0015 / 0018 / 0029.
 ✅ Pen / stylus input: Win32 `WM_POINTER` subclass over GLFW.
    Real pressure + tilt flow through hook events. Synthetic
    mouse-from-pen messages suppressed via `MI_WP_SIGNATURE`. See
@@ -116,152 +133,105 @@ tests/        Unit + integration + bench + fuzz scaffolds
    fixed-function blend modes + counted fallback, single shader,
    per-mode pipelines. See ADR 0019.
 ✅ Selection domain: rect-list set algebra (add/intersect/subtract),
-   canonical normalization, half-open `contains`. Domain-only;
-   GPU rasterization PR is next. See ADR 0020.
+   canonical normalization, half-open `contains`. See ADR 0020.
 ✅ Selection GPU mask: `gpu::SelectionMask` (R8_UNORM image with
-   layout tracking) + `compositor::SelectionRasterizer`
-   (CPU rasterize → buffer-to-image copy). Pure rasterize step
-   unit-tested without a GPU. See ADR 0021.
+   layout tracking) + `compositor::SelectionRasterizer`. See ADR 0021.
 ✅ Compositor masking: `LayerCompositor::composite()` takes an
    optional `SelectionMask*`; layer shader multiplies output by
-   mask sample. Internal 1×1 "all selected" dummy keeps shader
-   unconditional when caller passes nullptr. Lazy dummy init on
-   first composite() call. See ADR 0022.
+   mask sample. See ADR 0022.
 ✅ Document block tree: unified `domain::Document` (group/text/heading/
-   code/canvas/image/embed) for notes AND image edits. Tree with
-   ordered children, parent pointers for O(1) up; payload variant
-   with side-store IDs for heavy data. 30 unit tests. See ADR 0023.
-✅ Command + undo / redo: `Command` abstract base + 7 concrete
-   commands (add/insert/remove/move/set_payload/set_visible/
-   set_name) over `Document`. Inverse-based (not snapshot) so the
-   stack stays small. `UndoStack` with bounded depth, redo
-   invalidation, atomicity. `Document::restore_subtree` as the
-   precise inverse of `remove_block`. 27 unit tests. See ADR 0024.
-✅ Document JSON serialization (v1 of `.noted`): `domain::io::
-   document_to_json` / `document_from_json` round-trip the block
-   tree. Schema is strict (unknown keys rejected), version-gated
-   (`"version": 1`), uses wire-stable integer kind ordinals
-   (ADR 0023). 26 unit tests. See ADR 0025.
+   code/canvas/image/embed) for notes AND image edits. See ADR 0023.
+✅ Command + undo / redo: `Command` abstract base + 7 concrete block
+   commands (add/insert/remove/move/set_payload/set_visible/set_name) +
+   `UndoStack` (bounded depth, redo invalidation, atomicity). See
+   ADR 0024.
+✅ Document JSON serialization: `domain::io::document_to_json` /
+   `document_from_json` round-trip the block tree. Strict parser,
+   version-gated, integer kind ordinals. See ADR 0025.
 ✅ `.noted` zip container: `platform::io::save_noted_file` /
-   `load_noted_file` (+ `document_to_archive_bytes` /
-   `document_from_archive_bytes` for in-memory use) wrap
-   `document.json` in a standard zip via miniz. `assets/` +
-   `graphs/` subdirs reserved for future asset + LayerGraph
-   stores. 256 MB extraction cap. 13 unit tests. See ADR 0026.
+   `load_noted_file` wrap `document.json` in a standard zip via
+   miniz. 256 MB extraction cap. See ADR 0026.
 ✅ Dear ImGui scaffold: `ui::ImGuiHost` RAII wrapper around
    ImGui + Vulkan + GLFW backends with three-phase frame
-   (`begin_frame` / `finalize_frame` / `render_into`). The
-   split avoids a dangling ImGui frame when the renderer
-   bails on a swapchain-out-of-date. 6 unit tests cover
-   create() rejection paths. See ADR 0027.
-✅ Compositor wire-up: `app/main.cpp` now drives the canvas
-   pass via `compositor::LayerCompositor::composite()` walking
-   a demo `domain::LayerGraph` with 4 layers (normal / multiply
-   / linear_dodge / normal) — exercises every FF blend mode the
-   compositor implements. Stroke ink still overlays the layer
-   composite; ImGui still overlays the swapchain composite.
-   Textured-quad demo + checkerboard / sample.png loading is
-   gone.
-✅ IM_ASSERT routing: `ui/imgui_user_config.hpp` overrides
-   `IM_ASSERT` so ImGui invariant violations route through
-   `noted::harness::validate` (ErrorObserved hook channel)
-   AND still hit `assert()` for fail-fast in debug. Closes
-   ADR 0027's deferred routing promise.
-✅ Product shell (first cut): menu bar (File / Edit / View /
-   About), layer panel observing + mutating the scene graph
-   (visibility toggle wires through `set_visible()`), status
-   bar pinned to the bottom of the viewport (frame index +
-   FPS). `ImGui::ShowDemoWindow` retired to View → ImGui Demo
-   toggle, off by default.
-✅ Document + UndoStack wired: empty `domain::Document` lives
-   in main.cpp. Outline panel (tree view of
-   `Document.preorder()` with selection state) renders the
-   live model. Edit menu's Undo / Redo back the live
-   `UndoStack`; Edit → Add Block submenu emits
-   `AddBlockCommand` under the selected block (group),
-   document root, or invalid_block_id (first block becomes
-   the root). Selection follows the newly-added block.
-✅ File menu wired: `platform::io::pick_noted_open` /
-   `pick_noted_save` wrap nativefiledialog-extended (zlib, IFileDialog
-   on Win32). main.cpp tracks `current_path` + `saved_undo_size`;
-   Save falls through to Save As when the document has no on-disk
-   backing path. Title bar shows `noted — <filename> [*]`. Save As
-   force-appends `.noted` so the file always round-trips through the
-   same filter. See P4 #18d-file.
+   (`begin_frame` / `finalize_frame` / `render_into`). See ADR 0027.
 ✅ Frame-safe compositor: `LayerCompositor::create()` runs the dummy
    mask's clear + transition synchronously via the new
-   `gpu::immediate_submit` helper (transient pool + one-time-submit CB
-   + fence wait). composite() is now a pure-draw path with per-frame-
-   in-flight descriptor sets and view-cached descriptor writes — zero
-   barriers, zero spec violations. See ADR 0028.
-✅ CJK font: ImGuiHost loads an OS-installed CJK TTF/TTC at startup
-   with `GetGlyphRangesKorean()` + 2048×2048 atlas. main.cpp probes
-   malgun.ttf / AppleSDGothicNeo / Noto Sans CJK KR / Nanum Gothic in
-   that order. Graceful fallback to ProggyClean on any failure — never
-   blocks `ImGuiHost::create()`.
-✅ Keyboard shortcuts: Ctrl+N/O/S/Shift+S/Z/Y/Q wired via
-   `ImGui::IsKeyChordPressed` (RouteGlobal default). Save fall-through
-   matches the menu; Undo / Redo gated by `can_undo` / `can_redo` so
-   an empty stack doesn't print error noise. See P4 #18e.
-✅ Dirty-confirm modal: closing the window (X / File → Quit /
-   Ctrl+Q) or starting a New on a dirty document opens a Save /
-   Discard / Cancel modal. One state machine, single arming flag,
-   double-X-click race guarded. See P4 #18f.
-✅ Debug overlay: View → Debug overlay (off by default). Frame
-   index + FPS, 120-sample CPU-time line plot driven by
-   `on_frame_end`, LayerCompositor fallback count, and a
-   name/value table of every registered `harness::Counter`. See
-   P4 #18g.
-✅ Theme pass: `noted::ui::theme::apply(ThemeKind)` mutates the
-   ImGui global style — dark default + light, shared sizing,
-   single accent. View → Theme submenu toggles live. See P4 #18h.
+   `gpu::immediate_submit` helper. composite() is now a pure-draw
+   path with per-frame-in-flight descriptor sets. See ADR 0028.
+✅ CJK font: ImGuiHost loads an OS-installed CJK TTF/TTC at startup.
+   Graceful fallback to ProggyClean on any failure. Override via
+   `cfg_.font.cjk_font_path`.
+✅ Keyboard shortcuts: Ctrl+N/O/S/Shift+S/Z/Y/Q via
+   `ImGui::IsKeyChordPressed`. RouteFocused fix: skip when
+   `WantTextInput` to keep Ctrl+Z working inside InputTexts.
+✅ Dirty-confirm modal on close / New on dirty doc.
+✅ Debug overlay (View → Debug overlay): frame + FPS, CPU plot,
+   fallback count, harness counter table.
+✅ Theme pass: `noted::ui::theme::apply(ThemeKind)` — dark / light.
 ✅ App-class architecture: `app/src/main.cpp` is 53 lines doing
-   only profile-thread + observers + App::create+run. Everything
-   else lives in `noted::app::App` (in `app/src/app.{hpp,cpp}`)
-   with frame-loop body split into 7 named methods and four
-   focused helper modules (`DocumentSession`, `DirtyPrompt`,
-   `DemoScene`, `probe_cjk_font`). Move-only App returned as
-   `Result<unique_ptr<App>>` so hook subscriptions can capture
-   `this` safely. See PR #54.
-✅ Block rename + RouteFocused fix: F2 on a selected outline row
-   opens an inline `InputText` that commits via `SetNameCommand`
-   through the undo stack (Enter / focus loss) or cancels via
-   Escape. `App::wire_keyboard_shortcuts` early-returns when
-   `ImGui::GetIO().WantTextInput` is true so Ctrl+Z inside a
-   rename undoes text rather than the document. See PR #56.
-✅ Canvas Camera (pan + zoom, Phase A.1): `noted::canvas::Camera`
-   is a pure-logic primitive with NaN / inf / zero guards.
-   `zoom_around(anchor, factor)` pins the canvas pixel under the
-   cursor (Goodnotes feel). Composite shader pushes view scale
-   + translation; stroke engine unprojects pointer events so
-   stamps land at canvas pixels regardless of zoom. Mouse wheel
-   = zoom around cursor (clamped to [0.1×, 32×]); middle-drag =
-   pan. Status bar + debug overlay readouts. 13 unit tests cover
-   project/unproject round-trip, zoom-around pin invariant, and
-   pathological-factor guards. See PR #57.
-✅ Build hygiene: zero MSVC warnings on Release. Third-party headers
-   (GLFW/VMA/stb/Tracy/GoogleTest) marked SYSTEM via FetchContent so
-   their warnings can't leak. `/Ob[0-9]` collisions removed at the
-   cache layer.
-✅ CI matrix verifies build + sanitizers + Tracy smoke build on every PR.
+   only profile-thread + observers + `App::create+run`. Everything
+   else lives in `noted::app::App` (PR #54).
+✅ Block rename: F2 in outline panel → inline InputText →
+   `SetNameCommand`.
+✅ Canvas Camera (Phase A.1): pan + zoom-around-cursor, NaN / inf /
+   zero guards, 13 unit tests. See ADR 0029 references.
+✅ Vector ink (Phase A.2): Catmull-Rom polyline ribbon, pressure-
+   modulated width. See ADR 0029.
+✅ Page model (Phase A.3.a): `Page` + `PageList` POD with reflow /
+   clamp invariants. 19 unit tests.
+✅ Page background rendering (Phase A.3.b): `PageRenderer` GPU
+   primitive + `page_bg.slang` (blank / lined / grid / dotted
+   patterns with smoothstep AA).
+✅ Page strip widget (Phase A.3.c, PR #67): left-rail panel with one
+   row per page (label + actual pattern preview + thumbnail rect),
+   "+ Add page" footer, right-click → Remove. Click row → camera
+   jumps to page (auto-focus on add). `noted::ui::widget::page_strip`
+   + `camera_translation_y_for_page` pure helper, 6 unit tests.
+✅ AppConfig + relocatable shaders (ADR 0030): typed
+   `noted::app::config::AppConfig` (window / canvas / font / assets /
+   ui sub-structs), env-var → `noted.config.json` → defaults
+   priority, `<exe_dir>/shaders` post-build copy so `build/bin/` is
+   zip-distributable.
+✅ Build hygiene: zero MSVC warnings on Release. CI matrix verifies
+   build + sanitizers + Tracy smoke build on every PR.
+
+### What's in flight (open PRs)
+
+🟢 **PR #68 — `feat/document-page-linkage` (Phase A.3.d)** — CI 8/8 green
+   - `PageList` ownership moved into `domain::Document`. Survives
+     `Document::clear()`, persists to `.noted` v2, replicates over
+     future CRDT edges.
+   - `AddPageCommand` + `RemovePageCommand` flow through the existing
+     `UndoStack`. Ctrl+Z reverses page add/remove like block add/remove.
+   - JSON schema bumped v1 → v2 with `pages: { gap_px, items: [{w, h,
+     bg, x}] }`. Reader accepts v1 (loads with empty pages) AND v2.
+   - 287/287 tests pass.
+
+🟢 **PR #69 — `feat/tool-palette-and-eraser` (Phase B.1, ADR 0031)** —
+   CI 8/8 green, stacked on #68
+   - `noted::domain::tool::{ToolKind, ToolState, label}` with all 6
+     wire-stable ordinals up-front.
+   - `noted::ui::widget::tool_palette` — stateless ImGui side rail.
+   - `App::tools_` + `brush_for_tool(kind)` swap pen ↔ eraser brush.
+   - **Eraser is "paint-with-paper-colour" placeholder** — proper
+     destination-out semantics require the canvas pass split, which
+     is Phase B.2 (next).
+   - 292/292 tests pass.
 
 ### What does NOT work yet (by design — not bugs)
 
-- No keyboard shortcuts. Ctrl+N/O/S/Z/Y are displayed as menu hints
-  but the host doesn't bind them yet — same gap as Edit's Ctrl+Z/Y.
-- No "save before close" confirmation. Quitting with a dirty document
-  silently discards changes.
-- No asset / LayerGraph contents in the archive yet — the zip
-  container reserves `assets/` and `graphs/` subdirs but v1
-  writers only emit `document.json`.
-- No compositor wired into app/main.cpp yet (LayerCompositor exists with masking, but main still runs the textured-quad demo).
-- No brush variety beyond the MVP black tip; presets / library TBD.
-- Pen pressure plumbed on Windows; macOS / Linux still mouse.
-- No persistence layer.
-- No UI chrome (no widgets, no panels, no menus).
-- File format MVP shipped (JSON + zip container); asset / graph / history embedding still pending.
-- Edit coalescing not implemented (every keystroke is one undo entry — production-ready coalescing is a P4 follow-up).
-- No tests for GPU code (CI has no GPU).
+- **Eraser preserves the page pattern** (Phase B.2 — needs the
+  canvas pass restructure, see [ADR 0031]).
+- **Per-tool option payloads** (brush size / hardness / opacity /
+  colour) — Phase B.3.
+- **Selection / shape / text / image tools** beyond their enum
+  presence — Phase B.4+.
+- **Asset / LayerGraph / history embedding** in the `.noted` archive
+  — Phase C/D follow-ups.
+- **Pen pressure on macOS / Linux** — Win32 WM_POINTER only today.
+- **Edit coalescing** in `UndoStack` (every keystroke is one undo
+  entry).
+- **GPU tests in CI** (CI runners have no GPU).
 
 ---
 
@@ -297,10 +267,11 @@ cmake --build build --parallel
 .\build\bin\noted_app.exe
 ```
 
-Expected: window opens with the 4-layer demo composite (dark
-navy base → muted red → blue glow → warm tint), a Dear ImGui
-demo window on top, and any pen / mouse drag deposits ink stamps
-that survive across frames.
+Expected on first launch: a 1600×1000 window with **3 demo pages**
+(grid / lined / dotted backgrounds) stacked vertically on the canvas,
+the Tool palette + Page strip + Layer panel + Outline panel docked,
+and pen / mouse drag deposits vector-ink strokes that survive across
+frames. Scroll wheel zooms around the cursor; middle-drag pans.
 
 ### Read first (in order — ~30 min)
 
@@ -308,60 +279,35 @@ that survive across frames.
    the entry point. Skim "What does NOT work yet" to know what's
    intentionally absent vs broken.
 2. [`docs/architecture/README.md`](docs/architecture/README.md) → the
-   27 ADRs in numeric order. **Read all of them** before changing
+   31 ADRs in numeric order. **Read all of them** before changing
    cross-cutting code. ADR 0001 (C++23 + Vulkan), 0003 (Result<T>),
    0004 (harness), 0011 (2026 baseline), 0016 (LayerGraph), 0019
-   (compositor), 0023 (Document), 0024 (Command/Undo), and 0027 (UI
-   stack) are the most-referenced; the rest fill in details.
+   (compositor), 0023 (Document), 0024 (Command/Undo), 0027 (UI
+   stack), 0029 (vector ink), 0030 (AppConfig), 0031 (tool state)
+   are the most-referenced; the rest fill in details.
 3. [`CONTRIBUTING.md`](CONTRIBUTING.md) — branch protocol, commit
    convention, code style.
 4. [`README.md`](README.md) — project overview.
 
-### Pick up where I left off
-
-Sequential next steps from the roadmap:
-**UI pivot is active.** Engine MVP is sufficient end-to-end;
-further engine investment (P5 modern Vulkan, asset embedding in
-file format, edit coalescing, color management) is premature
-without a UI that lets us validate. ADR 0027 commits to Dear
-ImGui for v0.x with an explicit phase boundary for v1.0
-re-evaluation.
-
-1. ~~**`feat/ui-file-menu-wire`**~~ ✅ landed (PR #45).
-2. ~~**`fix/compositor-render-pass-init`**~~ ✅ landed (PR #46) — ADR 0028.
-3. ~~**`feat/ui-cjk-font`**~~ ✅ landed (PR #47) — CJK font half of #18h.
-4. ~~**`feat/ui-keyboard-shortcuts`**~~ ✅ landed (PR #49).
-5. ~~**`feat/ui-dirty-confirm`**~~ ✅ landed (PR #50).
-6. ~~**`feat/ui-debug-overlay`**~~ ✅ landed (PR #51).
-7. ~~**`feat/ui-theme-pass`**~~ ✅ landed (PR #53) — theme half of #18h.
-8. ~~**`refactor/app-class-extract`**~~ ✅ landed (PR #54) — main.cpp
-   1055 → 53 lines via `noted::app::App` class + four single-
-   responsibility helper modules. **Zero behaviour change.**
-9. ~~**`feat/ui-block-rename`**~~ ✅ landed (PR #56) — F2 inline
-   rename via `SetNameCommand` + `OutlineRenameState` + the
-   RouteFocused fix that early-returns
-   `wire_keyboard_shortcuts` when `WantTextInput` is true.
-10. ~~**`feat/canvas-camera-pan-zoom`**~~ ✅ landed (PR #57) — first
-    Phase A piece: `noted::canvas::Camera` (pure-logic primitive
-    with NaN / zero / inf guards, 13 unit tests), shader push
-    constants for the composite pass, stroke-engine input
-    unprojection, scroll-to-zoom-around-cursor, middle-drag pan,
-    status bar + debug overlay readouts.
-
 ### Goodnotes + Photoshop unified canvas — phased plan
 
-Engine MVP + UI shell are ready. The product vision (HANDOFF L4)
-is a single document that delivers **Goodnotes UX** (stylus-first,
-page navigation, infinite canvas feel) on **Photoshop depth**
-(layers, blend modes, filters, color management). Phased to keep
-each PR focused:
+Engine MVP + UI shell are ready. The product vision is a single
+document that delivers **Goodnotes UX** (stylus-first, page navigation,
+infinite canvas feel) on **Photoshop depth** (layers, blend modes,
+filters, color management). Phased to keep each PR focused:
 
 | Phase | Item | Status |
 |---|---|---|
 | A.1 | Camera pan + zoom (PR #57) | ✅ |
-| A.2 | Vector ink — replace SDF stamps with Catmull-Rom polyline ribbon, pressure-modulated width | next |
-| A.3 | Page model — Document gets Page block kind with extent + background; page strip panel; multi-page layout | |
-| B   | Tool palette + state machine (pen / eraser / select / shape / text / image) + color picker + brush options | |
+| A.2 | Vector ink — Catmull-Rom polyline ribbon, pressure-modulated width (PRs #59-61, ADR 0029) | ✅ |
+| A.3.a | Page model — `Page` + `PageList` POD + 19 unit tests (PR #63) | ✅ |
+| A.3.b | Page background rendering — `PageRenderer` + `page_bg.slang` patterns (PR #64) | ✅ |
+| A.3.c | Page strip panel + Add/Remove page UI + camera focus (PR #67) | ✅ |
+| A.3.d | Document linkage — `PageList` ownership moves into Document, mutation via Command, persists to `.noted` v2 (PR #68) | 🟢 open, CI green |
+| B.1 | Tool state machine — `ToolKind` / `ToolState` + tool palette widget + pen/eraser brush swap (PR #69, ADR 0031) | 🟢 open, CI green |
+| B.2 | Real eraser via canvas pass split — `gpu::StrokeTarget` + destination-out blend, page pattern survives erasure | next |
+| B.3 | Per-tool option payloads — brush size / hardness / opacity / colour, colour-picker widget | |
+| B.4+ | Selection / shape / text / image tools — one behavioural PR each | |
 | C   | Photoshop depth — layer panel ops, shader blend modes (12 missing), filter pipeline, color management | |
 | D   | Goodnotes polish — smart shapes, lasso + transform handles, pen-button mapping, page templates, PDF export | |
 | E   | (optional) Native chrome — ImGui → Qt/Slint per ADR 0027 v1.0 boundary | |
@@ -373,85 +319,61 @@ each PR focused:
 - Edit coalescing in `UndoStack`
 - macOS / Linux pen-input ports
 
----
+### Next session — pick up here
 
-## Roadmap — what to do next (priority order)
+**Open PRs to land first:**
 
-Each entry is a single focused PR. Estimated effort assumes a developer
-familiar with Vulkan and C++. Pick from the top.
+- **PR #68 `feat/document-page-linkage` (Phase A.3.d)** — squash-merge
+  after review. PageList moves into `domain::Document`, AddPageCommand +
+  RemovePageCommand flow through the existing UndoStack, JSON schema
+  v1 → v2 with a new `pages` field. Reader accepts both v1 and v2 for
+  back-compat. 287/287 tests, CI 8/8 green.
+- **PR #69 `feat/tool-palette-and-eraser` (Phase B.1, ADR 0031)** —
+  squash-merge after #68 (rebases cleanly — git auto-drops the
+  shared commits). Tool state machine + palette widget + pen/eraser
+  brush swap. 292/292 tests, CI 8/8 green. The eraser is a "paint
+  with paper colour" placeholder — Phase B.2 is the proper
+  destination-out version.
 
-### 🔥 Priority 1 — Debt and observability
+**Target after #68 / #69 merge: Phase B.2 — real eraser via canvas pass
+split.** Branch name: `feat/canvas-pass-split-stroke-target`.
 
-These unblock everything else. Do them before adding new features.
+Concrete plan (single focused PR, design per [ADR 0031]):
 
-| # | PR | Effort | Why |
-|---|---|---|---|
-| 1 | ~~`feat/format-sweep`~~ ✅ **landed** | — | `clang-format-18` applied across all 118 `.hpp/.cpp` files (engine/domain/compositor/plugin/platform/ui/app/tests). CI lint job is now blocking. Local install via `uv tool install clang-format==18.1.8` or `pip install clang-format==18.1.8`. |
-| 2 | ~~`feat/tracy-integration`~~ ✅ **landed** | — | Tracy via FetchContent + `NOTED_ENABLE_TRACY` option. `harness::ScopedTimer` → Tracy zones, `Counter` → Tracy plots. See ADR 0013. |
+1. **`gpu::StrokeTarget`** — new `engine/gpu/stroke_target.{hpp,cpp}`.
+   RGBA image with the canvas extent, COLOR_ATTACHMENT | SAMPLED |
+   TRANSFER_DST, layout tracking like `CanvasRenderTarget` (see
+   [ADR 0014]). `recreate()` on swapchain resize.
+2. **Canvas pass restructure** in `App::record_canvas_pass`:
+   - Render `PageRenderer` + `LayerCompositor` into canvas as
+     today (clear → paper → layers).
+   - Begin a SECOND rendering pass into `strokes_target` cleared to
+     transparent black. `StrokeEngine::record()` writes here.
+   - Begin a THIRD pass back into canvas (LOAD_OP_LOAD). Composite
+     `strokes_target` with normal SRC_OVER blend (`SRC_ALPHA` /
+     `ONE_MINUS_SRC_ALPHA`).
+3. **Stroke engine `DrawMode` enum** — `draw` (current behaviour) or
+   `erase`. Two graphics pipelines, identical except blend state:
+   draw = `SRC_ALPHA / ONE_MINUS_SRC_ALPHA`, erase = `ZERO /
+   ONE_MINUS_SRC_ALPHA` (destination-out). `StrokeEngine::set_mode(...)`
+   swaps the active pipeline.
+4. **App wiring** — `brush_for_tool` becomes `tool_settings_for_tool`
+   returning `(BrushStyle, DrawMode)`. Pen → (default brush, draw).
+   Eraser → (default brush, erase). The eraser colour stops mattering
+   because destination-out only reads alpha.
+5. **Tests** — pure-logic helpers on the stroke engine
+   (`set_mode`, `current_mode()`) covered. The pipeline state swap
+   is interactive-only; smoke test verifies the visual.
+6. **Smoke** — open app, select Eraser, drag across a page with
+   grid pattern. The pattern survives in the erased region (the
+   B.1 bug this fixes). Stderr stays 0.
 
-### 🎨 Priority 2 — Canvas + stroke (Goodnotes side)
+Do **not** add per-tool option payloads in this PR — that's B.3.
+The eraser uses the default brush footprint; size / hardness
+sliders land alongside the colour picker.
 
-The product's note-taking half. Each PR builds on the previous.
-
-| # | PR | Effort | Depends on | Why |
-|---|---|---|---|---|
-| 3 | ~~`feat/canvas-render-target`~~ ✅ **landed** | — | — | `CanvasRenderTarget` (R8G8B8A8_UNORM, COLOR_ATTACHMENT\|SAMPLED\|TRANSFER_DST) + `Renderer::render_with_canvas` two-pass flow. Internal layout tracking via sync2 barriers. See ADR 0014. |
-| 4 | ~~`feat/stroke-engine-mvp`~~ ✅ **landed** | — | — | SDF disk-stamp pipeline (`stamp.slang`) + `noted::stroke::StrokeEngine` (heap-allocated, non-movable, RAII hook subscriptions). Mouse drag → anti-aliased disks layered over the textured background. See ADR 0015. |
-| 5 | ~~`feat/pen-input`~~ ✅ **landed** | — | — | Win32 `WM_POINTER` subclass over GLFW. Real pressure (0..1024 → [0, 1]) + tilt (degrees) flow through existing hook events. See ADR 0017. |
-| 6 | ~~`feat/stroke-engine-pressure`~~ ✅ **landed** | — | — | `BrushStyle` (min/max radius, gamma alpha curve, softness ratio) + pure `stamp_from_pressure()` mapping. Live-tunable via `set_brush()`. See ADR 0018. |
-
-### 🖼️ Priority 3 — Layers + blend (Photoshop side)
-
-The image-editor half. Can be developed in parallel with strokes.
-
-| # | PR | Effort | Why |
-|---|---|---|---|
-| 7 | ~~`feat/layer-domain-model`~~ ✅ **landed** | — | `domain::LayerGraph` — DAG of `LayerNode` (id/kind/blend/opacity/visible/inputs). 16-mode Photoshop blend enum + 5-kind layer enum, both wire-stable. Monotonic IDs, validate-then-mutate, cycle detection via iterative DFS. See ADR 0016. |
-| 8 | ~~`feat/layer-compositor`~~ ✅ **landed** | New `compositor/` module bridging `engine` + `domain`. `LayerPayloadStore` (SolidColor MVP) + `LayerCompositor` with 4 fixed-function blend modes (normal/screen/linear_dodge/multiply) and counted fallback to NORMAL for the other 12. See ADR 0019. |
-| 9a | ~~`feat/selection-domain`~~ ✅ **landed** | — | `domain::Selection` — canonical rect-list with union/intersect/subtract set ops, bounds, half-open `contains`. Same data/GPU split as LayerGraph→Compositor. See ADR 0020. |
-| 9b | ~~`feat/selection-mask-gpu`~~ ✅ **landed** | — | `gpu::SelectionMask` (R8_UNORM, layout tracking) + `compositor::SelectionRasterizer` (CPU rasterize → buffer-to-image copy). Pure step unit-tested without a GPU. See ADR 0021. |
-| 9c | ~~`feat/compositor-masking`~~ ✅ **landed** | — | `LayerCompositor::composite()` takes an optional `SelectionMask*`; fragment multiplies output by mask sample. 1×1 dummy keeps shader unconditional. See ADR 0022. |
-
-### 📄 Priority 4 — Document model + persistence
-
-| # | PR | Effort | Why |
-|---|---|---|---|
-| 10 | ~~`feat/document-block-tree`~~ ✅ **landed** | — | `domain::Document` — strict tree of `BlockNode` (group/text/heading/code/canvas/image/embed). Payload variant + opaque side-store IDs for heavy data. parent+children for O(1) both directions. 30 unit tests. See ADR 0023. |
-| 11 | ~~`feat/command-undo-redo`~~ ✅ **landed** | — | `Command` abstract base + 7 concrete commands (add/insert/remove/move/set_payload/set_visible/set_name) + `UndoStack` (bounded depth, redo invalidation, peek labels). Inverse-based undo keeps stack memory tight. Adds `Document::restore_subtree` as the precise inverse of `remove_block`. 27 unit tests. See ADR 0024. |
-| 12 | ~~`feat/file-format-mvp`~~ ✅ **landed** (JSON only) | — | `domain::io::document_to_json` / `from_json` round-trip the block tree. Strict parser, version-gated, integer kind ordinals (ADR 0023 wire-stable). 26 unit tests. nlohmann/json dep. See ADR 0025. |
-| 12b | ~~`feat/file-format-zip`~~ ✅ **landed** | — | `.noted` is a standard ZIP via miniz. `platform::io::save_noted_file` / `load_noted_file` + a bytes-level API for in-memory use. 256 MB extraction cap. Reserved `assets/` and `graphs/` subdirs for follow-ups. 13 unit tests. See ADR 0026. |
-
-### ⚡ Priority 5 — Modern Vulkan (post-MVP)
-
-The 2026-trend extensions from ADR 0011. Lift to AAA-class scale once
-the product has actual content.
-
-| # | PR | Effort | Why |
-|---|---|---|---|
-| 13 | `feat/shader-objects` | 6h | `VK_EXT_shader_object` — pipeline-less shaders. Avoids combinatorial pipeline state explosion when we ship hundreds of brushes / filters. |
-| 14 | `feat/descriptor-buffer` | 6h | `VK_EXT_descriptor_buffer` — pack descriptors into normal buffers. AAA-grade bindless. |
-| 15 | `feat/mesh-shaders` | 8h | `VK_EXT_mesh_shader` — vector-graphics-style ink stroke rendering on the GPU. The right answer for high-stroke-count Goodnotes scenarios. |
-| 16 | `feat/timeline-semaphore-renderer` | 4h | Replace fence + binary-semaphore sync with timeline semaphores (already enabled on Device). Simpler multi-queue code. |
-
-### 🖥️ Priority 6 — UI
-
-| # | PR | Effort | Why |
-|---|---|---|---|
-| 17 | ~~`feat/ui-stack-decision`~~ ✅ **decided** | — | ADR 0027 picks **Dear ImGui** (docking branch, MIT, official Vulkan+GLFW backends) for v0.x with an explicit phase boundary for v1.0 reassessment. Pure-design PR — no code change beyond the `ui/ui.hpp` docstring refresh. |
-| 18a | ~~`feat/ui-imgui-scaffold`~~ ✅ **landed** | — | Dear ImGui docking v1.91.5 via FetchContent + official Vulkan/GLFW backends, ALL wrapped by `ui::ImGuiHost` with three-phase frame (`begin_frame` / `finalize_frame` / `render_into`). 6 unit tests cover create() rejection paths. See ADR 0027. |
-| 18b | ~~`feat/ui-compositor-wire`~~ ✅ **landed** | — | `app/main.cpp` drives canvas pass via `LayerCompositor::composite()` walking a 4-layer demo LayerGraph (normal / multiply / linear_dodge). Textured-quad demo + checkerboard / sample.png loading retired. Stroke + ImGui still overlay correctly. |
-| 18c | ~~`feat/ui-imgui-imassert-routing`~~ ✅ **landed** | — | `IM_ASSERT` routes through `noted::harness::validate` via `IMGUI_USER_CONFIG` + a forward-decl in `ui/include/noted/ui/imgui_user_config.hpp`. ADR 0027 follow-up closed. |
-| 18d | ~~`feat/ui-document-shell`~~ ✅ **landed** (shell first cut) | — | Menu bar (File / Edit / View / About) + layer panel (visibility toggle wires through `set_visible()`) + status bar (frame index + FPS). `ShowDemoWindow` retired to View menu toggle. |
-| 18d-undo | ~~`feat/ui-document-undo-outline`~~ ✅ **landed** | — | `Document` + `UndoStack` live in main.cpp. Outline panel renders `Document.preorder()` with click-to-select. Edit menu's Undo/Redo back the UndoStack live; Edit → Add Block submenu emits `AddBlockCommand` with proper parent selection (selected group → root → invalid_block_id). |
-| 18d-file | ~~`feat/ui-file-menu-wire`~~ ✅ **landed** | — | File → New / Open / Save / Save As. nativefiledialog-extended via FetchContent. `platform::io::pick_noted_open` / `pick_noted_save` returns `Result<optional<path>>` (nullopt = user cancel). main.cpp tracks `current_path` + `saved_undo_size` for the title-bar dirty marker. Save force-falls-through to Save As when there's no backing path; Save As force-appends `.noted` if missing. |
-| 18e | ~~`feat/ui-keyboard-shortcuts`~~ ✅ **landed** (PR #49) | — | Ctrl+N/O/S/Shift+S/Z/Y/Q via `ImGui::IsKeyChordPressed`. Save fall-through matches the menu; Undo/Redo gated by stack state. Routing defaults to `RouteGlobal`; flip to `RouteFocused` per-chord once text-input widgets land. |
-| 18f | ~~`feat/ui-dirty-confirm`~~ ✅ **landed** (PR #50) | — | Modal "Save / Discard / Cancel" on window close (X / Quit / Ctrl+Q) + File → New on dirty. One state machine, `confirmed_exit` flag prevents the loop from re-prompting on Save success. Double-X-click race guarded. |
-| 18g | ~~`feat/ui-debug-overlay`~~ ✅ **landed** (PR #51) | — | Floating window (View → Debug overlay; off by default): frame + FPS, 120-sample CPU-time line plot from `on_frame_end`, `LayerCompositor::fallback_count()`, name/value table of every `harness::Counter`. |
-| 18h-font | ~~`feat/ui-cjk-font`~~ ✅ **landed** (PR #47) | — | OS-installed CJK TTF/TTC probed at startup (malgun.ttf / AppleSDGothicNeo / Noto Sans CJK KR / Nanum Gothic). `GetGlyphRangesKorean()` + 2048×2048 atlas. Graceful fallback to ProggyClean on any failure. |
-| 18h-theme | ~~`feat/ui-theme-pass`~~ ✅ **landed** (PR #53) | — | `noted::ui::theme::apply(ThemeKind)` mutates ImGuiStyle (palette + sizing). Dark (default) + Light, single accent `#5294e2/#2c6cdb`. View → Theme submenu radio toggles; main.cpp watches for change and re-applies. |
-| 18i | ~~`refactor/app-class-extract`~~ ✅ **landed** (PR #54) | — | main.cpp 1055 → 53 lines. `noted::app::App` class owns engine + GPU stack + scene + UI session; non-movable, returned as `Result<unique_ptr<App>>`. Frame loop body split into 7 named methods. New helpers: `DocumentSession`, `DirtyPrompt`, `DemoScene`, `probe_cjk_font`. Zero behaviour change. |
-| 18j | ~~`feat/ui-block-rename`~~ ✅ **landed** (PR #56) | — | F2 inline rename in outline panel via `SetNameCommand` + `OutlineRenameState`. RouteFocused fix: `wire_keyboard_shortcuts` early-returns on `WantTextInput` so Ctrl+Z in InputText undoes text not document. |
-| A.1 | ~~`feat/canvas-camera-pan-zoom`~~ ✅ **landed** (PR #57) | — | `noted::canvas::Camera` pure-logic primitive + 13 unit tests, composite-pass push constants, stroke-engine view-transform unprojection, scroll-zoom-around-cursor, middle-drag pan, status bar + debug overlay readouts. |
+After B.2 lands: B.3 (brush options + colour picker), then B.4+
+(selection / shape / text / image, one PR each).
 
 ---
 
@@ -462,6 +384,27 @@ clang-format-18 is mandatory on every PR. Local setup:
 `uv tool install clang-format==18.1.8` (or `pip install clang-format==18.1.8`).
 The lint CI job blocks merges on drift; run
 `clang-format-18 -i path/to/file.cpp` to fix.
+
+### Conventional-commit scope characters
+The `commit message lint` CI job enforces
+`^(feat|fix|chore|...)(\([a-z0-9._-]+\))?!?: .+`. Scopes can only
+contain `[a-z0-9._-]` — no `+`, no spaces, no uppercase. When a
+change touches multiple modules, pick the dominant one or use a
+hyphenated multi-scope (`canvas-ui`, `domain-app`). Don't use `+`.
+
+### Force-pushing PR branches
+If you need to amend a commit (e.g. to fix the conventional-commit
+subject), `git push --force-with-lease` is OK on personal feature
+branches but **never** on `main`. Branch protection should block
+that anyway; if it doesn't, treat it as a configuration bug.
+
+### Stacked PR rebase pattern
+When a PR is built on top of an un-merged predecessor and the
+predecessor merges via squash, the rebase will fault on the
+predecessor's commits (which are now squashed into a single commit
+on main). Use `git rebase --skip` for each conflicted commit — git
+also auto-drops commits it detects as "already upstream" once you
+move past the first.
 
 ### `scripts/build_and_run.cmd` was a local helper
 Hardcoded paths for a specific machine. **Not committed** — recreate per
@@ -475,41 +418,54 @@ in `docs/SETUP.md` says the same. If you bump it, bump all three places
 ### Slang SPIR-V entry name
 **Slang renames every entry to `"main"` in SPIR-V.** Use
 `add_stage(stage, module, "main")` (the builder default). Don't pass the
-Slang function name — see ADR 0012 (corrected) and `fix/slang-runtime-bugs`
-commit for the painful learning.
+Slang function name — see ADR 0012 (corrected) for the painful learning.
 
-### `pName "main"` for now
-Once we have multiple compute shaders in the same .slang file, we'll
-need either per-entry SPV files (current approach) or a way to keep
-distinct entry names. The Slang spec allows `--entry-point-name` to
-rename; if we go that route, update the rule.
+### Hardcoded shader path — resolved
+`AppConfig::assets.shader_dir` + `resolve_shader_dir(cfg)` walk:
+config override → `NOTED_SHADER_DIR` env → `<exe_dir>/shaders` →
+compile-time fallback. A CMake post-build step copies `.spv` files
+next to the `.exe` so `build/bin/` is zip-distributable. See ADR 0030.
 
-### Hardcoded shader path
-`NOTED_SHADER_DIR` is a compile-time define pointing at `build/shaders/`.
-Production packaging will need a relocatable install layout
-(`AppData/...` or similar). Out of scope for current PRs.
+### Fullscreen-triangle vs camera scale
+The composite pass uses a **6-vertex quad** rather than the classic
+fullscreen-triangle. The fullscreen-triangle pattern relies on the
+GPU clipping over-spilling vertices against the [-1, 1] NDC box;
+that breaks under camera scale < 1 because the triangle shrinks
+inside the visible region. A quad has no over-spill so it shrinks
+to a rectangle, which is the correct "zoomed out" behaviour. See
+`shaders/fullscreen.slang`'s vs_main + the comment in
+`App::record_swapchain_pass`. Fixed in PR #67.
 
 ### Semaphore semantics
 We use binary semaphores with per-image render_finished. When we
 migrate to timeline semaphores (`feat/timeline-semaphore-renderer`),
-the per-image structure changes. Read ADR 0008 and the recent semaphore
-fix commit before touching `engine/src/gpu/renderer.cpp`.
+the per-image structure changes. Read ADR 0008 before touching
+`engine/src/gpu/renderer.cpp`.
 
 ---
 
 ## Useful commands
 
 ```powershell
+# Sourcing MSVC env (each shell session)
+& "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+
 # Clean rebuild
 rm -r build
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
+
+# Run unit tests
+.\build\tests\unit\noted_unit_tests.exe --gtest_brief=1
 
 # Open PR via gh CLI
 gh pr create --base main --head <branch> --title "..." --body "..."
 
 # Watch CI on a PR
 gh pr checks <number> --watch
+
+# Squash-merge a PR (after CI green + review)
+gh pr merge <number> --squash --delete-branch --subject "..." --body "..."
 
 # Run with Vulkan validation explicit (already on by default)
 $env:VK_INSTANCE_LAYERS = "VK_LAYER_KHRONOS_validation"
@@ -534,5 +490,10 @@ $env:VK_INSTANCE_LAYERS = ""
 - **Tempted to add a feature flag for "old vs new"?** Don't. Replace the
   old path entirely. See ADR 0012 (Slang fully replaced GLSL — no half
   migrations).
+- **Tempted to amend / force-push to fix a CI failure?** Prefer adding
+  a new commit on top. Amend only for **the very latest commit** when
+  no one else has pulled the branch (which, in this solo-dev repo, is
+  almost always true). Force-pushing the squashed PR branch is the
+  natural follow-up. See the "Force-pushing PR branches" gotcha above.
 
-Good luck. The foundation is solid; the fun part starts at #3.
+The foundation is solid. Phase B is in flight.

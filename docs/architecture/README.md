@@ -36,6 +36,7 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0028 | [Compositor frame-safe init + descriptor rotation](0028-compositor-frame-safe-init.md) | Accepted |
 | 0029 | [Vector ink — polyline rendering](0029-vector-ink-polyline.md) | Accepted |
 | 0030 | [Runtime config — typed `AppConfig` for user-facing tunables](0030-runtime-config.md) | Accepted |
+| 0031 | [Tool state machine + canvas pass strategy for editing tools](0031-tool-state-machine.md) | Accepted |
 
 ## Format
 

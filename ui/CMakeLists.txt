@@ -8,6 +8,7 @@ noted_add_module(
         src/widget/layer_panel.cpp
         src/widget/outline_panel.cpp
         src/widget/page_strip.cpp
+        src/widget/tool_palette.cpp
         src/widget/status_bar.cpp
         src/widget/debug_overlay.cpp
         src/theme/theme.cpp
