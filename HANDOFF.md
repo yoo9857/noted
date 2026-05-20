@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-20 · **main HEAD:** `1aba0ed` (clean, 0 open PRs)
+**Last updated:** 2026-05-20 · **main HEAD:** `35bce9d` (clean, 0 open PRs)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -346,7 +346,9 @@ filters, color management). Phased to keep each PR focused:
 | B.2 | Real eraser via canvas pass split — `gpu::StrokeTarget` + destination-out blend, per-stroke mode snapshot, page pattern survives erasure (PR #70) | ✅ |
 | B.3 | Per-tool option payloads — `PenOptions` / `EraserOptions` + `brush_options` widget + colour picker + size sliders (PR #72) | ✅ |
 | B.4 | Rectangle selection tool — `SelectionToolHandler` + `selection_overlay` + modifier-key set ops (PR #73) | ✅ |
-| B.5+ | Shape / text / image tools — one behavioural PR each (under the new ToolInputHandler pattern) | |
+| B.5 | Shape tool — rectangle + ellipse, `ShapeToolHandler` + `shape_overlay`, app.cpp Δ +8 LOC (PR #81) | ✅ |
+| B.6 | Text tool — click+type, `TextToolHandler` + `text_overlay` (pure-domain API), app.cpp Δ +5 LOC (PR #82) | ✅ |
+| B.7 | Image tool — paste/drop image primitive | |
 | **R.1** | **App-layer decomposition** — `ToolInputRouter` + `SelectionToolHandler` extracted (PR #75, ADR 0032) | ✅ |
 | **R.2** | **App-layer decomposition** — `CameraController` extracted (PR #76, ADR 0032) | ✅ |
 | **R.3** | **App-layer decomposition** — `RenderPasses` (4-pass canvas pipeline) extracted (PR #78, ADR 0032) | ✅ |
@@ -364,41 +366,56 @@ filters, color management). Phased to keep each PR focused:
 
 ### Next session — pick up here
 
-**Target: Phase B.5 — Shape tool.** The first tool under the
-**fully-decomposed App pattern**.
+**Target: Phase B.7 — Image tool.** Third validation of the
+ToolInputHandler pattern (B.5 Shape: app.cpp +8 LOC; B.6 Text:
+app.cpp +5 LOC; B.7 Image should land in the same budget).
 
-Branch name: `feat/shape-tool`. Per [ADR 0031] + the
-ToolInputHandler interface landed in R.1.
+Branch name: `feat/image-tool`.
 
-The whole point of R.1-R.4 was to make this PR small. **App
-should not grow.** Adding the shape tool is:
+Shape of the work — same pattern as B.5 / B.6:
 
-1. **New `app/src/input/shape_tool_handler.hpp` + `.cpp`** —
-   a `ToolInputHandler` subclass. On press: record start point.
-   On move: update current. On release: commit a shape to the
-   document via a new command. On deactivate: discard in-flight
-   drag.
-2. **New `domain::tool::ShapeOptions` + `domain::tool::shape_drag_*`
-   pure helpers** (analogous to selection_drag.{hpp,cpp}). The
-   "what shape kind, what stroke colour, what fill colour" lives
-   here; the handler glues pointer events to the data via these.
-3. **`ToolState::shape` payload field** + a `ShapeKind` enum
-   (rectangle, ellipse, line, polygon — let's start with
-   rectangle + ellipse for B.5).
-4. **`brush_options` panel grows** a Shape section showing the
-   shape options when Shape is the active tool. Just like the Pen
-   and Eraser sections.
-5. **App's `install_frame_hook` gains ONE line:**
-   `tool_input_router_->register_handler(std::make_unique<ShapeToolHandler>(...));`
-6. **Tests** — pure-logic helpers (shape_rect_from_drag,
-   shape_apply_drag) covered without ImGui or Vulkan.
-7. **Smoke** — pick Shape, drag → rectangle outlined.
+1. **`domain/tool/image_input`** — pure data: `ImageOptions`
+   (placeholder for tint / opacity), `ImagePrimitive` (anchor +
+   width/height + decoded RGBA buffer or asset id + opacity).
+   Anchor is top-left in canvas pixels, matching `TextPrimitive`'s
+   convention.
+2. **`app/src/input/ImageToolHandler`** — interaction model is
+   **click-to-place** (or **paste from clipboard / drop from OS**
+   long-term; v0.x can start with a stub "click places a fixed
+   placeholder texture" and iterate). Snapshots `ImageOptions` at
+   PRESS like every other tool.
+3. **`ui/widget/image_overlay`** — pure-domain API (refs to
+   `vector<ImagePrimitive>` + canvas-to-screen). Renders via
+   `ImGui::GetBackgroundDrawList()->AddImage`. The ImGui image API
+   needs an `ImTextureID` — for v0.x we can stage via a small
+   GPU-side texture registry (one Vulkan image per primitive,
+   freed on remove) or punt and use `AddRectFilled` placeholders
+   until the texture path lands. **Decide on PR open**.
+4. **`brush_options` Image section** — minimal v0.x: a "Pick
+   image…" button (nativefiledialog-extended already available).
+5. **`menu_bar` Image overlay toggle** — same pattern as Text.
+6. **App's `install_frame_hook` gains ONE line.**
+7. **Tests** — pure-logic helpers (clamping, anchor maths) +
+   `ImageOptions` equality + defaults.
+8. **Smoke** — pick Image, click → placeholder shows on canvas.
 
-**App.cpp should remain at 1002 LOC after B.5 lands.** That's
-the test of the refactor.
+**App.cpp budget: ≤ +8 LOC** (same as B.5). Third tool in a
+row confirms the pattern.
 
-After B.5: B.6 (Text tool), B.7 (Image tool). Each follows the
-same one-handler-one-line pattern.
+After B.7: **persistence** for all B-series primitives — shapes /
+texts / images currently live in App-owned vectors. They should
+graduate to `Document::shapes() / texts() / images()` with
+`Add*Command` + `Remove*Command` so undo / save / load round-trip
+through the `.noted` archive. That's a single PR that touches
+all three vectors at once (analogous to A.3.d which graduated
+PageList into Document).
+
+The pure-data + pure-handler split that B.6 enforced (lifting
+`EditingState` into `domain::tool::TextEditingState` so `ui` has
+no `app/` dependency) is the template. New tools should follow
+the same boundaries: domain owns the data + reducers, app owns
+the handler + event glue, ui owns the rendering + interaction
+widgets — never reaching across.
 
 This is the third slice of the App-layer decomposition. **Zero
 behaviour change** is the contract — 340/340 tests continue to pass
