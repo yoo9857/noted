@@ -13,7 +13,7 @@ namespace noted::ui::widget {
 
 namespace {
 
-[[nodiscard]] auto background_glyph(noted::canvas::PageBackground bg) -> const char* {
+[[nodiscard]] auto background_name(noted::canvas::PageBackground bg) -> const char* {
     using noted::canvas::PageBackground;
     switch (bg) {
         case PageBackground::blank:
@@ -26,6 +26,66 @@ namespace {
             return "dots";
     }
     return "blank";
+}
+
+// Draw a small representation of the page's background pattern into
+// the strip's thumbnail rect. Mirrors `page_bg.slang`'s patterns at
+// thumbnail resolution so the user can tell pages apart at a glance
+// without having to scroll the canvas to each one. Paper colour
+// matches the shader's `kPaperColor`; line colour is a soft grey.
+void draw_pattern_preview(ImDrawList* draw,
+                          ImVec2 tl,
+                          ImVec2 br,
+                          noted::canvas::PageBackground bg) {
+    using noted::canvas::PageBackground;
+    constexpr ImU32 kPaper = IM_COL32(245, 243, 235, 255);
+    constexpr ImU32 kLine = IM_COL32(160, 160, 160, 255);
+    constexpr ImU32 kBorder = IM_COL32(90, 90, 90, 255);
+
+    draw->AddRectFilled(tl, br, kPaper);
+
+    const float w = br.x - tl.x;
+    const float h = br.y - tl.y;
+
+    switch (bg) {
+        case PageBackground::blank:
+            break;
+        case PageBackground::lined: {
+            constexpr int kLines = 3;
+            for (int i = 1; i <= kLines; ++i) {
+                const float y = tl.y + h * static_cast<float>(i) / static_cast<float>(kLines + 1);
+                draw->AddLine({tl.x + 2.0F, y}, {br.x - 2.0F, y}, kLine, 1.0F);
+            }
+            break;
+        }
+        case PageBackground::grid: {
+            constexpr int kCols = 6;
+            constexpr int kRows = 3;
+            for (int c = 1; c < kCols; ++c) {
+                const float x = tl.x + w * static_cast<float>(c) / static_cast<float>(kCols);
+                draw->AddLine({x, tl.y + 2.0F}, {x, br.y - 2.0F}, kLine, 1.0F);
+            }
+            for (int r = 1; r < kRows; ++r) {
+                const float y = tl.y + h * static_cast<float>(r) / static_cast<float>(kRows);
+                draw->AddLine({tl.x + 2.0F, y}, {br.x - 2.0F, y}, kLine, 1.0F);
+            }
+            break;
+        }
+        case PageBackground::dotted: {
+            constexpr int kCols = 6;
+            constexpr int kRows = 3;
+            for (int r = 1; r < kRows; ++r) {
+                for (int c = 1; c < kCols; ++c) {
+                    const float x = tl.x + w * static_cast<float>(c) / static_cast<float>(kCols);
+                    const float y = tl.y + h * static_cast<float>(r) / static_cast<float>(kRows);
+                    draw->AddCircleFilled({x, y}, 1.2F, kLine);
+                }
+            }
+            break;
+        }
+    }
+
+    draw->AddRect(tl, br, kBorder);
 }
 
 }  // namespace
@@ -48,36 +108,34 @@ auto page_strip(const noted::canvas::PageList& pages, bool* open) -> PageStripRe
         ImGui::PushID(static_cast<int>(i));
 
         std::array<char, 64> label{};
-        std::snprintf(label.data(),
-                      label.size(),
-                      "Page %zu  (%s)",
-                      i + 1U,
-                      background_glyph(page.background));
+        std::snprintf(
+            label.data(), label.size(), "Page %zu  (%s)", i + 1U, background_name(page.background));
         if (ImGui::Selectable(label.data(), false)) {
             out.focus_request = i;
         }
-
-        // Thumbnail placeholder — a flat coloured rect so the user can
-        // see "this row corresponds to a real page" even before the
-        // future GPU thumbnail render lands. Width tracks the
-        // available rail width; height is a fixed aspect-ish chunk.
-        const auto avail = ImGui::GetContentRegionAvail().x;
-        const float thumb_h = 36.0F;
-        const auto cursor = ImGui::GetCursorScreenPos();
-        const ImVec2 tl{cursor.x, cursor.y};
-        const ImVec2 br{cursor.x + avail, cursor.y + thumb_h};
-        auto* draw = ImGui::GetWindowDrawList();
-        draw->AddRectFilled(tl, br, IM_COL32(220, 220, 220, 255));
-        draw->AddRect(tl, br, IM_COL32(110, 110, 110, 255));
-        // Reserve the rect so subsequent widgets flow below it.
-        ImGui::Dummy(ImVec2{avail, thumb_h});
-
+        // Context menu attached to the label Selectable — right-click
+        // anywhere on the row label opens it. Must come immediately
+        // after the Selectable so BeginPopupContextItem binds to the
+        // right item.
         if (ImGui::BeginPopupContextItem("page_row_ctx")) {
             if (ImGui::MenuItem("Remove")) {
                 out.remove_request = i;
             }
             ImGui::EndPopup();
         }
+
+        // Mini preview of the page's background pattern so the user
+        // can tell pages apart at a glance without scrolling the
+        // canvas. The Dummy reserves layout space for the manually-
+        // drawn rect so the separator + next row land below it.
+        const auto avail = ImGui::GetContentRegionAvail().x;
+        constexpr float kThumbH = 36.0F;
+        const auto cursor = ImGui::GetCursorScreenPos();
+        draw_pattern_preview(ImGui::GetWindowDrawList(),
+                             ImVec2{cursor.x, cursor.y},
+                             ImVec2{cursor.x + avail, cursor.y + kThumbH},
+                             page.background);
+        ImGui::Dummy(ImVec2{avail, kThumbH});
 
         ImGui::Separator();
         ImGui::PopID();

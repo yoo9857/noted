@@ -831,6 +831,10 @@ void App::draw_widgets() {
     // semantics sane (focus_request always refers to the post-add
     // list because no remove competes in the same frame).
     auto strip = noted::ui::widget::page_strip(pages_, &menu_state_.show_page_strip);
+    // Park the focused page just below the menu bar with a bit of
+    // breathing room. Shared by both add-then-auto-focus and the
+    // explicit row-click focus so the camera lands at the same y.
+    constexpr double kFocusTargetScreenY = 80.0;
     if (strip.add_request) {
         const auto idx = pages_.add_page(cfg_.canvas.default_page_extent_w_px,
                                          cfg_.canvas.default_page_extent_h_px,
@@ -842,16 +846,20 @@ void App::draw_widgets() {
             20.0F,
             (static_cast<float>(canvas.width) - cfg_.canvas.default_page_extent_w_px) * 0.5F);
         pages_.set_page_origin_x(idx, origin_x);
+        // Auto-focus the newly-added page. Without this the new page
+        // lands below the visible camera region and the click feels
+        // like a no-op — the user-reported bug that motivated this.
+        const double new_y = noted::ui::widget::camera_translation_y_for_page(
+            pages_, idx, camera_.translation_y(), camera_.scale(), kFocusTargetScreenY);
+        camera_.set_translation(camera_.translation_x(), new_y);
     }
     if (strip.remove_request) {
         pages_.remove_page(*strip.remove_request);
     }
     if (strip.focus_request) {
-        // Park the focused page just below the menu bar with a bit
-        // of breathing room. The current camera translation_y is
-        // returned unchanged if the index is now stale (e.g. the
-        // page got removed in the same frame), so this is safe.
-        constexpr double kFocusTargetScreenY = 80.0;
+        // The current camera translation_y is returned unchanged if
+        // the index is now stale (e.g. the page got removed in the
+        // same frame), so this is safe.
         const double new_y =
             noted::ui::widget::camera_translation_y_for_page(pages_,
                                                              *strip.focus_request,
@@ -1003,7 +1011,13 @@ void App::record_swapchain_pass(VkCommandBuffer cb, VkExtent2D /*ext*/) {
     push.translation[1] = camera_.shader_translation_y();
     vkCmdPushConstants(cb, layout_h, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(CompositePush), &push);
 
-    vkCmdDraw(cb, /*vertexCount=*/3, /*instanceCount=*/1, 0, 0);
+    // 6 vertices = a quad (two triangles, uv ∈ [0,1]²). See the
+    // `fullscreen.slang` comment for why we don't use the classic
+    // fullscreen-triangle here — camera scale < 1 shrinks the
+    // triangle's NDC bounding box, exposing a triangular cut. A
+    // quad shrinks to a rectangle, which is the correct "zoomed
+    // out" view.
+    vkCmdDraw(cb, /*vertexCount=*/6, /*instanceCount=*/1, 0, 0);
     // ImGui draws on top of the composited canvas. The surrounding
     // vkCmdBeginRendering (owned by the renderer) is the right
     // context for ImGui_ImplVulkan_RenderDrawData. finalize_frame()
