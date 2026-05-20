@@ -552,7 +552,8 @@ TEST(DocumentJson, TextsRoundTripPreservesContentAndStyle) {
     EXPECT_FLOAT_EQ(loaded->texts()[0].r, 0.5F);
 
     EXPECT_DOUBLE_EQ(loaded->texts()[1].x, -10.5);
-    EXPECT_EQ(loaded->texts()[1].content, "\xED\x95\x9C\xEA\xB8\x80 / \xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E / mixed");
+    EXPECT_EQ(loaded->texts()[1].content,
+              "\xED\x95\x9C\xEA\xB8\x80 / \xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E / mixed");
     EXPECT_FLOAT_EQ(loaded->texts()[1].font_size_px, 16.0F);
 }
 
