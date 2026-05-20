@@ -30,6 +30,8 @@
 #include <vulkan/vulkan.h>
 
 #include "noted/compositor/layer_compositor.hpp"
+#include "noted/domain/selection/selection.hpp"
+#include "noted/domain/tool/selection_drag.hpp"
 #include "noted/domain/tool/tool.hpp"
 #include "noted/engine/canvas/camera.hpp"
 #include "noted/engine/canvas/page_renderer.hpp"
@@ -232,9 +234,32 @@ private:
 
     // ---- Tool state ---------------------------------------------------
     // The active editing tool. Mutated by the tool palette widget; the
-    // stroke engine re-reads its brush from `brush_for_tool(active)` on
-    // every switch so Pen draws black and Eraser draws paper colour.
+    // stroke engine re-reads its brush from `tool_settings_for_tool`
+    // on every switch so Pen draws normally and Eraser draws with
+    // destination-out blend. Per-tool option payloads (PenOptions /
+    // EraserOptions / ...) live on `tools_` and the App pushes them
+    // into the stroke engine every frame for live-edit.
     noted::domain::tool::ToolState tools_{};
+
+    // ---- Selection state ----------------------------------------------
+    // The committed selection — modified by the Select tool, eventually
+    // consumed by future Copy / Cut / Delete / Fill commands AND piped
+    // into the existing `compositor::SelectionRasterizer` →
+    // `gpu::SelectionMask` (ADR 0021 / 0022) so the compositor can clip
+    // per-pixel operations to the region the user marked.
+    noted::domain::Selection selection_{};
+    // In-flight drag — `nullopt` between drags. Populated on Left-down
+    // while the Select tool is active; updated on PointerMoved; applied
+    // to `selection_` on PointerReleased.
+    struct SelectionDragState {
+        double press_canvas_x{0.0};
+        double press_canvas_y{0.0};
+        double current_canvas_x{0.0};
+        double current_canvas_y{0.0};
+        noted::domain::tool::SelectionDragMode mode{
+            noted::domain::tool::SelectionDragMode::replace};
+    };
+    std::optional<SelectionDragState> selection_drag_{};
 
     // ---- Canvas view --------------------------------------------------
     // Pan + scale state shared by the composite pass (camera-projected

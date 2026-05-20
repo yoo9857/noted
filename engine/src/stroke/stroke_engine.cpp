@@ -440,7 +440,30 @@ void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept
 
 // ---- Event handlers ---------------------------------------------------------
 
+void StrokeEngine::set_active(bool active) noexcept {
+    if (active == input_active_) {
+        return;
+    }
+    input_active_ = active;
+    // Going from active → inactive while a stroke is in flight:
+    // commit what the user already drew. Without this, the in-flight
+    // stroke would stay in `current_stroke_` forever (until the next
+    // press from this engine — which may never come if the user
+    // doesn't switch back), making the test/inspection surface
+    // confusing. Mirror what `on_released` does for a normal left-up.
+    if (!input_active_ && drawing_) {
+        drawing_ = false;
+        if (current_stroke_.samples.size() >= 2) {
+            strokes_.push_back(std::move(current_stroke_));
+        }
+        current_stroke_ = Stroke{};
+    }
+}
+
 void StrokeEngine::on_pressed(const noted::hook::PointerPressed& e) noexcept {
+    if (!input_active_) {
+        return;
+    }
     if (e.button != noted::hook::PointerButton::left) {
         return;
     }
@@ -464,7 +487,7 @@ void StrokeEngine::on_pressed(const noted::hook::PointerPressed& e) noexcept {
 }
 
 void StrokeEngine::on_moved(const noted::hook::PointerMoved& e) noexcept {
-    if (!drawing_) {
+    if (!input_active_ || !drawing_) {
         return;
     }
     StrokeSample sample{};
@@ -475,6 +498,9 @@ void StrokeEngine::on_moved(const noted::hook::PointerMoved& e) noexcept {
 }
 
 void StrokeEngine::on_released(const noted::hook::PointerReleased& e) noexcept {
+    if (!input_active_) {
+        return;
+    }
     if (e.button != noted::hook::PointerButton::left) {
         return;
     }

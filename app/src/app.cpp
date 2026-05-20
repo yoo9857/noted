@@ -21,6 +21,7 @@
 #include "noted/domain/command/commands.hpp"
 #include "noted/domain/document/document.hpp"
 #include "noted/domain/tool/options.hpp"
+#include "noted/domain/tool/selection_drag.hpp"
 #include "noted/engine/harness/harness.hpp"
 #include "noted/engine/hook/registry.hpp"
 #include "noted/engine/profile.hpp"
@@ -31,6 +32,7 @@
 #include "noted/ui/widget/layer_panel.hpp"
 #include "noted/ui/widget/outline_panel.hpp"
 #include "noted/ui/widget/page_strip.hpp"
+#include "noted/ui/widget/selection_overlay.hpp"
 #include "noted/ui/widget/status_bar.hpp"
 #include "noted/ui/widget/tool_palette.hpp"
 
@@ -95,6 +97,16 @@ struct ToolSettings {
     noted::stroke::BrushStyle brush;
     noted::stroke::DrawMode mode;
 };
+
+// True for tools whose left-button drag drives the stroke engine
+// (paints ink or erases ink). False for tools that own pointer
+// events themselves (Select / Shape / Text / Image — once their
+// behavioural integrations land). The App uses this to gate the
+// stroke engine's input via `StrokeEngine::set_active`.
+[[nodiscard]] auto is_stroke_tool(noted::domain::tool::ToolKind kind) noexcept -> bool {
+    using noted::domain::tool::ToolKind;
+    return kind == ToolKind::pen || kind == ToolKind::eraser;
+}
 
 [[nodiscard]] auto tool_settings_for_tool(const noted::domain::tool::ToolState& tools) noexcept
     -> ToolSettings {
@@ -624,26 +636,73 @@ void App::install_frame_hook() {
             cursor_y_ = e.y;
             pan_last_x_ = e.x;
             pan_last_y_ = e.y;
+            if (selection_drag_.has_value()) {
+                // Selection drag uses canvas-pixel coords so it survives
+                // a camera pan / zoom that happens mid-drag.
+                selection_drag_->current_canvas_x = camera_.unproject_x(e.x);
+                selection_drag_->current_canvas_y = camera_.unproject_y(e.y);
+            }
         });
 
     // Middle-button press / release toggles pan mode. Left button is
-    // reserved for the stroke engine; right button is open for a
-    // future context menu.
+    // reserved for the active tool: stroke engine when active is Pen
+    // or Eraser, App's selection-drag handler when active is Select.
+    // Right button is open for a future context menu.
     (void) noted::hook::registry().on_pointer_pressed.subscribe(
         [this](const noted::hook::PointerPressed& e) {
-            if (e.button != noted::hook::PointerButton::middle) {
+            if (e.button == noted::hook::PointerButton::middle) {
+                panning_ = true;
+                pan_last_x_ = e.x;
+                pan_last_y_ = e.y;
                 return;
             }
-            panning_ = true;
-            pan_last_x_ = e.x;
-            pan_last_y_ = e.y;
+            if (e.button != noted::hook::PointerButton::left) {
+                return;
+            }
+            if (tools_.active != noted::domain::tool::ToolKind::select) {
+                return;
+            }
+            // Start a selection drag. Press point unprojected through
+            // the camera so the rect lives in canvas pixels — same
+            // coordinate space the existing `domain::Selection` and
+            // `SelectionRasterizer` consume.
+            //
+            // Modifier-key snapshot at PRESS time (not release) — a
+            // user who lets go of Shift mid-drag keeps the union
+            // operation they meant when they started. Matches
+            // Photoshop / Figma behaviour.
+            const auto& io = ImGui::GetIO();
+            SelectionDragState st{};
+            st.press_canvas_x = camera_.unproject_x(e.x);
+            st.press_canvas_y = camera_.unproject_y(e.y);
+            st.current_canvas_x = st.press_canvas_x;
+            st.current_canvas_y = st.press_canvas_y;
+            st.mode = noted::domain::tool::drag_mode_from_modifiers(io.KeyShift, io.KeyAlt);
+            selection_drag_ = st;
         });
     (void) noted::hook::registry().on_pointer_released.subscribe(
         [this](const noted::hook::PointerReleased& e) {
-            if (e.button != noted::hook::PointerButton::middle) {
+            if (e.button == noted::hook::PointerButton::middle) {
+                panning_ = false;
                 return;
             }
-            panning_ = false;
+            if (e.button != noted::hook::PointerButton::left) {
+                return;
+            }
+            if (!selection_drag_.has_value()) {
+                return;
+            }
+            // Commit the drag rect to the live selection through the
+            // pure-logic apply_drag helper. Empty rects (sub-pixel
+            // clicks) are dropped by apply_drag so a stationary click
+            // doesn't wipe an existing selection in replace mode.
+            const auto rect =
+                noted::domain::tool::rect_from_drag(selection_drag_->press_canvas_x,
+                                                    selection_drag_->press_canvas_y,
+                                                    selection_drag_->current_canvas_x,
+                                                    selection_drag_->current_canvas_y);
+            noted::domain::tool::apply_drag(selection_, rect, selection_drag_->mode);
+            selection_drag_.reset();
         });
 
     // Scroll → zoom around the cursor. dy > 0 (wheel up) zooms in;
@@ -939,6 +998,19 @@ void App::draw_widgets() {
         stroke_engine_->set_brush(settings.brush);
         stroke_engine_->set_mode(settings.mode);
     }
+    // Gate stroke-engine input to only stroke tools. Switching away
+    // from Pen/Eraser drops the engine's left-button subscription
+    // path on the floor (any in-flight stroke is committed first).
+    // Switching back re-enables it. set_active is idempotent so
+    // calling every frame costs only a bool compare.
+    stroke_engine_->set_active(is_stroke_tool(tools_.active));
+    // Mid-drag tool switches: dump any selection drag in progress
+    // when we're no longer in Select mode. Without this the drag
+    // state lingers and the next "release" elsewhere would commit a
+    // stale rectangle.
+    if (tools_.active != noted::domain::tool::ToolKind::select && selection_drag_.has_value()) {
+        selection_drag_.reset();
+    }
 
     auto selected = session_.selected_block();
     noted::ui::widget::outline_panel(
@@ -1022,6 +1094,28 @@ void App::draw_widgets() {
     if (outline_rename_.cancel_requested) {
         outline_rename_.cancel_requested = false;
         outline_rename_.target = noted::domain::invalid_block_id;
+    }
+
+    // Selection overlay — draws committed selection rects + the
+    // in-progress drag preview on top of the canvas via ImGui's
+    // background draw list. The widget needs canvas → screen
+    // projection; the camera gives us that.
+    {
+        std::optional<noted::ui::widget::SelectionDragPreview> preview;
+        if (selection_drag_.has_value()) {
+            noted::ui::widget::SelectionDragPreview p{};
+            p.press_canvas_x = selection_drag_->press_canvas_x;
+            p.press_canvas_y = selection_drag_->press_canvas_y;
+            p.current_canvas_x = selection_drag_->current_canvas_x;
+            p.current_canvas_y = selection_drag_->current_canvas_y;
+            preview = p;
+        }
+        auto project = [this](double cx, double cy) -> std::pair<float, float> {
+            return {static_cast<float>(camera_.project_x(cx)),
+                    static_cast<float>(camera_.project_y(cy))};
+        };
+        noted::ui::widget::selection_overlay(
+            selection_, preview, project, menu_state_.show_selection_overlay);
     }
 
     noted::ui::widget::debug_overlay(

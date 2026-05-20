@@ -21,6 +21,7 @@ add_executable(noted_unit_tests
     document_pages_test.cpp
     tool_test.cpp
     tool_options_test.cpp
+    selection_drag_test.cpp
 )
 
 target_link_libraries(noted_unit_tests PRIVATE noted_test_harness noted::domain noted::compositor noted::platform noted::ui)

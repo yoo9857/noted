@@ -146,6 +146,19 @@ public:
     [[nodiscard]] auto mode() const noexcept -> DrawMode { return mode_; }
     void set_mode(DrawMode m) noexcept { mode_ = m; }
 
+    // Master input gate. When false, pointer events are dropped on
+    // the floor and no new strokes accumulate — the host has
+    // delegated input to another tool (selection, shape, text, ...).
+    // record() still draws whatever was accumulated, so previously-
+    // drawn ink stays visible while a different tool is active.
+    //
+    // An in-flight stroke is **finalized cleanly** on transition to
+    // `false`: the press → move → release sequence the user already
+    // started gets committed, then further events are ignored. This
+    // avoids dangling drag state across a mid-stroke tool switch.
+    [[nodiscard]] auto is_input_active() const noexcept -> bool { return input_active_; }
+    void set_active(bool active) noexcept;
+
     // Test-only / no-hook constructor (production code goes through create()).
     // Build an engine with no pipeline + no subscriptions, just the
     // accumulation state. Lets unit tests exercise the pointer-event →
@@ -213,6 +226,7 @@ private:
     Stroke current_stroke_{};
     BrushStyle brush_{};
     DrawMode mode_{DrawMode::draw};
+    bool input_active_{true};
 
     // RAII subscriptions — released when the engine goes out of scope.
     noted::hook::Subscription<noted::hook::PointerPressed> sub_pressed_;
