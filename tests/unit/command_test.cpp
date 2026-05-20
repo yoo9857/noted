@@ -8,7 +8,9 @@
 
 namespace {
 
+using noted::canvas::PageBackground;
 using noted::domain::AddBlockCommand;
+using noted::domain::AddPageCommand;
 using noted::domain::BlockId;
 using noted::domain::BlockKind;
 using noted::domain::Document;
@@ -17,6 +19,7 @@ using noted::domain::InsertBlockCommand;
 using noted::domain::invalid_block_id;
 using noted::domain::MoveBlockCommand;
 using noted::domain::RemoveBlockCommand;
+using noted::domain::RemovePageCommand;
 using noted::domain::SetNameCommand;
 using noted::domain::SetPayloadCommand;
 using noted::domain::SetVisibleCommand;
@@ -394,4 +397,112 @@ TEST(UndoStack, InterleavedExecuteUndoRedoSequence) {
     // Redo is invalidated by the new execute.
     EXPECT_FALSE(stack.can_redo());
     EXPECT_TRUE(doc.validate());
+}
+
+// ============================================================================
+// AddPageCommand
+// ============================================================================
+
+TEST(AddPageCommand, ApplyAddsPageAndUndoRemovesIt) {
+    Document doc;
+    AddPageCommand cmd(612.0F, 792.0F, PageBackground::grid, 50.0F);
+    ASSERT_TRUE(cmd.apply(doc));
+    EXPECT_EQ(doc.pages().size(), 1U);
+    EXPECT_EQ(cmd.assigned_index(), 0U);
+    EXPECT_FLOAT_EQ(doc.pages().pages()[0].extent_w_px, 612.0F);
+    EXPECT_EQ(doc.pages().pages()[0].background, PageBackground::grid);
+    EXPECT_FLOAT_EQ(doc.pages().pages()[0].origin_x_px, 50.0F);
+
+    ASSERT_TRUE(cmd.undo(doc));
+    EXPECT_TRUE(doc.pages().empty());
+}
+
+TEST(AddPageCommand, AssignedIndexFollowsAppendOrder) {
+    Document doc;
+    AddPageCommand a(100.0F, 100.0F, PageBackground::blank, 0.0F);
+    AddPageCommand b(100.0F, 100.0F, PageBackground::lined, 0.0F);
+    AddPageCommand c(100.0F, 100.0F, PageBackground::dotted, 0.0F);
+    ASSERT_TRUE(a.apply(doc));
+    ASSERT_TRUE(b.apply(doc));
+    ASSERT_TRUE(c.apply(doc));
+    EXPECT_EQ(a.assigned_index(), 0U);
+    EXPECT_EQ(b.assigned_index(), 1U);
+    EXPECT_EQ(c.assigned_index(), 2U);
+}
+
+TEST(AddPageCommand, UndoOnUnappliedRejects) {
+    Document doc;
+    AddPageCommand cmd(100.0F, 100.0F, PageBackground::blank, 0.0F);
+    EXPECT_FALSE(cmd.undo(doc));
+}
+
+// ============================================================================
+// RemovePageCommand
+// ============================================================================
+
+TEST(RemovePageCommand, ApplyRemovesAndUndoRestoresAtSameIndex) {
+    Document doc;
+    (void) *doc.add_page(100.0F, 100.0F, PageBackground::blank, 10.0F);
+    (void) *doc.add_page(200.0F, 300.0F, PageBackground::grid, 20.0F);
+    (void) *doc.add_page(400.0F, 500.0F, PageBackground::lined, 30.0F);
+
+    RemovePageCommand cmd(1);
+    ASSERT_TRUE(cmd.apply(doc));
+    EXPECT_EQ(doc.pages().size(), 2U);
+    // After remove, page formerly at 2 slides into index 1.
+    EXPECT_EQ(doc.pages().pages()[1].background, PageBackground::lined);
+
+    ASSERT_TRUE(cmd.undo(doc));
+    EXPECT_EQ(doc.pages().size(), 3U);
+    // Restored at original index 1 with original extent + background + x.
+    const auto& restored = doc.pages().pages()[1];
+    EXPECT_FLOAT_EQ(restored.extent_w_px, 200.0F);
+    EXPECT_FLOAT_EQ(restored.extent_h_px, 300.0F);
+    EXPECT_EQ(restored.background, PageBackground::grid);
+    EXPECT_FLOAT_EQ(restored.origin_x_px, 20.0F);
+}
+
+TEST(RemovePageCommand, ApplyOnOutOfRangeRejects) {
+    Document doc;
+    (void) *doc.add_page(100.0F, 100.0F, PageBackground::blank, 0.0F);
+    RemovePageCommand cmd(99);
+    EXPECT_FALSE(cmd.apply(doc));
+    EXPECT_EQ(doc.pages().size(), 1U);  // doc untouched
+}
+
+TEST(RemovePageCommand, UndoOnUnappliedRejects) {
+    Document doc;
+    RemovePageCommand cmd(0);
+    EXPECT_FALSE(cmd.undo(doc));
+}
+
+// ============================================================================
+// UndoStack: page commands integrate with the block-command stack
+// ============================================================================
+
+TEST(UndoStackPages, MixedBlockAndPageHistoryUndoRedoes) {
+    Document doc;
+    UndoStack stack;
+    (void) *doc.add_block(BlockKind::group, invalid_block_id, "root");
+
+    ASSERT_TRUE(stack.execute(
+        std::make_unique<AddPageCommand>(100.0F, 100.0F, PageBackground::grid, 0.0F), doc));
+    ASSERT_TRUE(
+        stack.execute(std::make_unique<AddBlockCommand>(BlockKind::text, doc.root(), "t"), doc));
+    ASSERT_TRUE(stack.execute(
+        std::make_unique<AddPageCommand>(100.0F, 100.0F, PageBackground::lined, 0.0F), doc));
+    EXPECT_EQ(doc.pages().size(), 2U);
+    EXPECT_EQ(doc.find(doc.root())->children.size(), 1U);
+
+    ASSERT_TRUE(stack.undo(doc));  // pages 2 → 1
+    ASSERT_TRUE(stack.undo(doc));  // block 1 → 0
+    ASSERT_TRUE(stack.undo(doc));  // pages 1 → 0
+    EXPECT_EQ(doc.pages().size(), 0U);
+    EXPECT_EQ(doc.find(doc.root())->children.size(), 0U);
+
+    ASSERT_TRUE(stack.redo(doc));
+    ASSERT_TRUE(stack.redo(doc));
+    ASSERT_TRUE(stack.redo(doc));
+    EXPECT_EQ(doc.pages().size(), 2U);
+    EXPECT_EQ(doc.find(doc.root())->children.size(), 1U);
 }

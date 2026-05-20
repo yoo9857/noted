@@ -330,7 +330,92 @@ TEST(DocumentJson, EmittedJsonContainsVersionAndKindOrdinal) {
     (void) h;
     const auto text = document_to_json(src);
     // The output should include the wire-stable version + heading ordinal (2).
-    EXPECT_NE(text.find("\"version\": 1"), std::string::npos);
+    EXPECT_NE(text.find("\"version\": 2"), std::string::npos);
     EXPECT_NE(text.find("\"kind\": 0"), std::string::npos);  // group
     EXPECT_NE(text.find("\"kind\": 2"), std::string::npos);  // heading
+    // v2 always emits a (possibly empty) pages object.
+    EXPECT_NE(text.find("\"pages\""), std::string::npos);
+}
+
+// ---- v1 back-compat --------------------------------------------------------
+
+TEST(DocumentJson, V1FileLoadsWithEmptyPages) {
+    // v1 file (no "pages" key) must continue to parse. Loaded doc
+    // has an empty page list.
+    const auto v1 = R"({
+        "version": 1, "root": 1, "blocks": [
+            {"id": 1, "kind": 0, "visible": true, "name": "r", "parent": 0, "children": [],
+             "payload": {}}
+        ]
+    })";
+    auto loaded = document_from_json(v1);
+    ASSERT_TRUE(loaded);
+    EXPECT_EQ(loaded->size(), 1U);
+    EXPECT_TRUE(loaded->pages().empty());
+}
+
+// ---- v2 page round-trip ----------------------------------------------------
+
+TEST(DocumentJson, PagesRoundTripWithMixedBackgrounds) {
+    using noted::canvas::PageBackground;
+    Document src;
+    (void) *src.add_block(BlockKind::group, invalid_block_id, "doc");
+    ASSERT_TRUE(src.add_page(612.0F, 792.0F, PageBackground::grid, 100.0F));
+    ASSERT_TRUE(src.add_page(400.0F, 500.0F, PageBackground::lined, 50.0F));
+    ASSERT_TRUE(src.add_page(800.0F, 600.0F, PageBackground::dotted, 0.0F));
+
+    auto loaded = document_from_json(document_to_json(src));
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->pages().size(), 3U);
+
+    const auto& items = loaded->pages().pages();
+    EXPECT_FLOAT_EQ(items[0].extent_w_px, 612.0F);
+    EXPECT_FLOAT_EQ(items[0].extent_h_px, 792.0F);
+    EXPECT_EQ(items[0].background, PageBackground::grid);
+    EXPECT_FLOAT_EQ(items[0].origin_x_px, 100.0F);
+
+    EXPECT_FLOAT_EQ(items[1].extent_w_px, 400.0F);
+    EXPECT_EQ(items[1].background, PageBackground::lined);
+    EXPECT_FLOAT_EQ(items[1].origin_x_px, 50.0F);
+
+    EXPECT_FLOAT_EQ(items[2].extent_w_px, 800.0F);
+    EXPECT_EQ(items[2].background, PageBackground::dotted);
+}
+
+TEST(DocumentJson, GapRoundTripsThroughJson) {
+    Document src;
+    noted::canvas::PageList custom{40.0F};
+    custom.add_page(100.0F, 100.0F, noted::canvas::PageBackground::blank);
+    custom.add_page(100.0F, 100.0F, noted::canvas::PageBackground::blank);
+    src.replace_pages(std::move(custom));
+
+    auto loaded = document_from_json(document_to_json(src));
+    ASSERT_TRUE(loaded);
+    EXPECT_FLOAT_EQ(loaded->pages().gap_px(), 40.0F);
+    // Second page must reflow to 100 + 40 = 140 after load.
+    EXPECT_FLOAT_EQ(loaded->pages().pages()[1].origin_y_px, 140.0F);
+}
+
+TEST(DocumentJsonReject, PagesUnknownKey) {
+    const auto bad = R"({
+        "version": 2, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": [], "stowaway": 1}
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+TEST(DocumentJsonReject, PageItemBgOutOfRange) {
+    const auto bad = R"({
+        "version": 2, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": [{"w": 1, "h": 1, "bg": 99, "x": 0}]}
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+TEST(DocumentJsonReject, PagesMissingItems) {
+    const auto bad = R"({
+        "version": 2, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0}
+    })";
+    EXPECT_FALSE(document_from_json(bad));
 }

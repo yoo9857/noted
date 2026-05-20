@@ -30,6 +30,7 @@
 //
 // Rationale: see docs/architecture/0023-document-block-tree.md.
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -37,6 +38,7 @@
 #include <variant>
 #include <vector>
 
+#include "noted/engine/canvas/page.hpp"
 #include "noted/engine/error/error.hpp"
 
 namespace noted::domain {
@@ -268,6 +270,49 @@ public:
     // O(N). The compositor / file-format code calls this before commit.
     [[nodiscard]] auto validate() const -> Result<void>;
 
+    // ---- Pages -----------------------------------------------------------
+    //
+    // The canvas-layout side of the document. A `PageList` is a vertical
+    // stack of `Page`s with a configurable gap; pages stack independently
+    // of the block tree. Owned here so they (a) persist to `.noted`
+    // alongside blocks, (b) participate in undo/redo via `Command<>`, and
+    // (c) flow through future CRDT replication on the same edge as blocks.
+    //
+    // Read-only access via `pages()`; mutation goes through the
+    // page-specific wrappers below, which mirror `LayerGraph`'s
+    // validate-then-mutate contract and return `Result<>` on misuse.
+
+    [[nodiscard]] auto pages() const noexcept -> const noted::canvas::PageList& { return pages_; }
+
+    // Append a page at the bottom of the stack with the given extent,
+    // background, and horizontal origin. Returns the assigned index.
+    // The underlying PageList clamps negative / NaN extents to a 1 px
+    // floor — see `PageList::add_page`. Cannot fail in a recoverable
+    // way; the Result wrapper kept for symmetry with the rest of the
+    // mutation API.
+    [[nodiscard]] auto add_page(float w,
+                                float h,
+                                noted::canvas::PageBackground bg,
+                                float origin_x = 0.0F) -> Result<std::size_t>;
+
+    // Remove the page at `index`. Rejects:
+    //   - invalid_argument: `index >= pages().size()`.
+    auto remove_page(std::size_t index) -> Result<void>;
+
+    // Insert `page` at `index` (`index == size()` appends). The precise
+    // inverse of `remove_page` for undo: the saved `Page` carries its
+    // extent + background + origin_x. Returns invalid_argument when
+    // `index > pages().size()`.
+    [[nodiscard]] auto insert_page(std::size_t index,
+                                   const noted::canvas::Page& page) -> Result<std::size_t>;
+
+    // Replace the entire PageList. **File-format loader path only** —
+    // bypasses per-page validation because the loader already validated
+    // structure. Regular mutation must go through add/remove/insert_page
+    // (and ideally through Commands so undo/redo + future CRDT work
+    // continue to see them).
+    void replace_pages(noted::canvas::PageList pages) noexcept;
+
 private:
     // Detach `id` from its parent's children list, leaving the node
     // itself otherwise intact. Returns the (parent, index) it was
@@ -284,6 +329,7 @@ private:
     std::unordered_map<BlockId, BlockNode> nodes_;
     BlockId root_{invalid_block_id};
     BlockId next_id_{1};  // 0 is reserved
+    noted::canvas::PageList pages_{};
 };
 
 }  // namespace noted::domain

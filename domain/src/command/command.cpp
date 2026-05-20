@@ -290,6 +290,72 @@ auto SetNameCommand::undo(Document& doc) -> Result<void> {
 }
 
 // ============================================================================
+// AddPageCommand
+// ============================================================================
+
+AddPageCommand::AddPageCommand(float w, float h, noted::canvas::PageBackground bg, float origin_x)
+    : w_(w), h_(h), bg_(bg), origin_x_(origin_x) {}
+
+auto AddPageCommand::apply(Document& doc) -> Result<void> {
+    auto r = doc.add_page(w_, h_, bg_, origin_x_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    assigned_index_ = *r;
+    applied_ = true;
+    return {};
+}
+
+auto AddPageCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_state,
+                                                 "AddPageCommand::undo: command was not applied"));
+    }
+    auto r = doc.remove_page(assigned_index_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
+// RemovePageCommand
+// ============================================================================
+
+RemovePageCommand::RemovePageCommand(std::size_t index) : target_index_(index) {}
+
+auto RemovePageCommand::apply(Document& doc) -> Result<void> {
+    if (target_index_ >= doc.pages().size()) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_argument,
+            "RemovePageCommand::apply: index " + std::to_string(target_index_) +
+                " out of range (size " + std::to_string(doc.pages().size()) + ")"));
+    }
+    // Snapshot BEFORE removal so the inverse has the full state.
+    snapshot_ = doc.pages().pages()[target_index_];
+    auto r = doc.remove_page(target_index_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = true;
+    return {};
+}
+
+auto RemovePageCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_state, "RemovePageCommand::undo: command was not applied"));
+    }
+    auto r = doc.insert_page(target_index_, snapshot_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
 // UndoStack
 // ============================================================================
 

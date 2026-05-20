@@ -91,11 +91,25 @@ public:
     // height + gap). No-op when `index >= size()`.
     void remove_page(std::size_t index);
 
+    // Insert `page` at `index`. `index == size()` appends (same as
+    // add_page). Extents are clamped the same way add_page clamps
+    // them. Returns the effective insertion index (clamped to
+    // [0, size()]). Used by undo to restore a removed page in its
+    // original slot — the saved Page carries its background + extent;
+    // origin_y_px is overwritten by the reflow.
+    auto insert_page(std::size_t index, const Page& page) -> std::size_t;
+
     // Override a single page's horizontal origin. `add_page` /
     // `remove_page` do not reflow the X axis (pages share a
     // left edge by default), so per-page X overrides survive
     // subsequent list mutations. No-op when `index >= size()`.
     void set_page_origin_x(std::size_t index, float x) noexcept;
+
+    // Replace the inter-page gap. Subsequent mutations use the new
+    // gap; existing origins are reflowed immediately so the on-screen
+    // stack stays consistent. Negative / NaN values clamp to 0 (same
+    // rule as the constructor).
+    void set_gap_px(float gap) noexcept;
 
     // Total stacked height: sum of page heights + (size - 1) gaps.
     // 0 for an empty list.

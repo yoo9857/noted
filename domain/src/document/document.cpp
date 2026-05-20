@@ -294,8 +294,44 @@ auto Document::restore_subtree(std::vector<BlockNode> subtree,
 void Document::clear() noexcept {
     nodes_.clear();
     root_ = invalid_block_id;
+    pages_ = noted::canvas::PageList{};
     // next_id_ is intentionally NOT reset — IDs stay monotonic across
     // clears so any history / undo references survive the wipe.
+}
+
+auto Document::add_page(float w,
+                        float h,
+                        noted::canvas::PageBackground bg,
+                        float origin_x) -> Result<std::size_t> {
+    const auto idx = pages_.add_page(w, h, bg);
+    pages_.set_page_origin_x(idx, origin_x);
+    return idx;
+}
+
+auto Document::remove_page(std::size_t index) -> Result<void> {
+    if (index >= pages_.size()) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument,
+                              "Document::remove_page: index " + std::to_string(index) +
+                                  " out of range (size " + std::to_string(pages_.size()) + ")"));
+    }
+    pages_.remove_page(index);
+    return {};
+}
+
+auto Document::insert_page(std::size_t index,
+                           const noted::canvas::Page& page) -> Result<std::size_t> {
+    if (index > pages_.size()) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument,
+                              "Document::insert_page: index " + std::to_string(index) +
+                                  " out of range (size " + std::to_string(pages_.size()) + ")"));
+    }
+    return pages_.insert_page(index, page);
+}
+
+void Document::replace_pages(noted::canvas::PageList pages) noexcept {
+    pages_ = std::move(pages);
 }
 
 auto Document::move_to(BlockId id, BlockId new_parent, std::size_t index) -> Result<void> {

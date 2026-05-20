@@ -18,6 +18,7 @@ add_executable(noted_unit_tests
     stroke_geometry_test.cpp
     page_test.cpp
     page_strip_test.cpp
+    document_pages_test.cpp
 )
 
 target_link_libraries(noted_unit_tests PRIVATE noted_test_harness noted::domain noted::compositor noted::platform noted::ui)

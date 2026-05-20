@@ -31,7 +31,6 @@
 
 #include "noted/compositor/layer_compositor.hpp"
 #include "noted/engine/canvas/camera.hpp"
-#include "noted/engine/canvas/page.hpp"
 #include "noted/engine/canvas/page_renderer.hpp"
 #include "noted/engine/engine.hpp"
 #include "noted/engine/error/error.hpp"
@@ -167,12 +166,12 @@ private:
     std::optional<DemoScene> scene_;
 
     // Page rendering — Phase A.3.b. The page list is the document's
-    // canvas layout; the renderer draws each page's paper background
-    // BEFORE the layer compositor + stroke engine layer on top.
+    // canvas layout (Phase A.3.d moved ownership into Document); the
+    // renderer draws each page's paper background BEFORE the layer
+    // compositor + stroke engine layer on top.
     std::optional<noted::gpu::ShaderModule> page_bg_vs_;
     std::optional<noted::gpu::ShaderModule> page_bg_ps_;
     std::optional<noted::canvas::PageRenderer> page_renderer_;
-    noted::canvas::PageList pages_{};
 
     std::optional<noted::gpu::ShaderModule> stamp_vs_;
     std::optional<noted::gpu::ShaderModule> stamp_ps_;
