@@ -370,44 +370,48 @@ filters, color management). Phased to keep each PR focused:
 
 ### Next session — pick up here
 
-**B.7 placeholder is done. Next: persistence consolidation for
-B-series primitives** OR **B.7.b real raster upload**. Pick one.
+**Persistence trilogy complete** (PRs #86 / #87 / #88). Shapes /
+texts / images all graduated to `Document::*()` with Add/Remove
+commands; `.noted` schema at v5 with v1..v4 forward-compat.
+App owns no primitive vectors any more. Pick the next bite:
 
-**Option 1 — persistence consolidation** (recommended). Today the
-App owns three vectors (`shapes_`, `texts_`, `images_`) that
-neither save nor undo. They should graduate to `Document::shapes()`
-/ `texts()` / `images()` with `Add*Command` / `Remove*Command` so:
+**Option 1 — B.7.b real raster upload.** Real image loading on
+top of the persistence contract:
 
-  - Undo/redo works on shape / text / image placement
-  - `.noted` save round-trips all three (schema bump to v3)
-  - Dirty marker fires when any of them changes
-  - Selection-cut / -copy / -paste can target them eventually
+  - `nativefiledialog-extended` picker wired to the "Pick image…"
+    button in `brush_options.cpp` (currently disabled-text)
+  - `stb_image` decode into a CPU `vector<uint8_t>` (RGBA8)
+  - VMA-backed `VkImage` upload via a transient staging buffer +
+    pre-frame layout transition
+  - New `ImageAssetRegistry` mapping `AssetId` →
+    `ImGui_ImplVulkan_AddTexture` handle; registry observes
+    `Document::images()` and reclaims handles on remove
+  - Extend `ImagePrimitive` with an `AssetId` field; persist it
+    in `.noted` v6 alongside the asset blob (binary in the zip
+    archive next to `document.json`)
+  - Replace `AddRectFilled` body in `image_overlay.cpp` with
+    `AddImage` keyed by `ImTextureID`; keep border + label as
+    fallback when an asset fails to load
 
-Same template as A.3.d (which graduated `PageList` into Document):
-schema-versioned JSON IO, append-only enum ordinals, one PR per
-primitive kind OR one consolidation PR — your call. Branch:
-`feat/document-owns-primitives`.
+Likely split into 3 PRs:
+  - **B.7.b.1** — `ImageAssetRegistry` + `AssetId` on
+    `ImagePrimitive` + schema v6
+  - **B.7.b.2** — file picker + stb_image decode + VMA upload
+  - **B.7.b.3** — `.noted` asset bundle in the zip archive
+    (binary file alongside document.json)
 
-**Option 2 — B.7.b real raster upload.** Now that the placeholder
-architecture is shipping, fill in:
+Branch family: `feat/image-upload-*`.
 
-  - `nativefiledialog-extended` picker (already a dep) wired to
-    the "Pick image…" button in `brush_options.cpp` (currently
-    disabled-text)
-  - `stb_image` decode into a CPU `std::vector<uint8_t>` (RGBA8)
-  - VMA-backed `VkImage` upload via a transient staging buffer
-  - `ImGui_ImplVulkan_AddTexture` → `ImTextureID` registry; one
-    image per primitive, freed on remove
-  - Replace `AddRectFilled` placeholder body with `AddImage`
-    in `image_overlay.cpp` (keep the border + label as overlay
-    affordances when the image fails to load)
+**Option 2 — Selection operations.** Document-owned primitives
+can be selected. Build cut / copy / paste / delete that target
+shapes / texts / images via the existing `Selection` infra.
+Branch: `feat/selection-clipboard`.
 
-Branch: `feat/image-upload`.
+**Option 3 — Phase C: shader blend modes.** 12 missing blend
+modes in `shaders/layer.slang` + compositor plumbing. Pure GPU
+work, no domain churn. Branch: `feat/layer-blend-modes`.
 
-**Recommendation: do persistence first.** The placeholders teach
-the user nothing if a reload drops them; real GPU upload is a much
-bigger fish (descriptor lifetime, registry, mid-frame uploads) and
-benefits from having the persistence contract settled first.
+**Recommendation: B.7.b**, sliced into the 3 sub-PRs above.
 
 ---
 
