@@ -13,6 +13,7 @@ noted_add_module(
         src/widget/selection_overlay.cpp
         src/widget/shape_overlay.cpp
         src/widget/text_overlay.cpp
+        src/widget/image_overlay.cpp
         src/widget/status_bar.cpp
         src/widget/debug_overlay.cpp
         src/theme/theme.cpp

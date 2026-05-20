@@ -62,6 +62,33 @@ void draw_text(noted::domain::tool::TextOptions& opt) {
     }
 }
 
+void draw_image(noted::domain::tool::ImageOptions& opt) {
+    ImGui::TextDisabled("Image");
+    ImGui::Spacing();
+
+    // Width / height sliders. 8 px floor matches the placeholder's
+    // visibility threshold (smaller and the centred label drops
+    // out — see `image_overlay`); 4096 px is a soft cap chosen for
+    // UX, not engine limits.
+    ImGui::SliderFloat(
+        "Width", &opt.width_px, 8.0F, 4096.0F, "%.0f px", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat(
+        "Height", &opt.height_px, 8.0F, 4096.0F, "%.0f px", ImGuiSliderFlags_Logarithmic);
+
+    ImGui::Spacing();
+    float colour[4] = {opt.r, opt.g, opt.b, opt.a};
+    if (ImGui::ColorEdit4(
+            "Tint", colour, ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_Float)) {
+        opt.r = colour[0];
+        opt.g = colour[1];
+        opt.b = colour[2];
+        opt.a = colour[3];
+    }
+
+    ImGui::Spacing();
+    ImGui::TextDisabled("(file picker + GPU upload land in B.7.b)");
+}
+
 void draw_shape(noted::domain::tool::ShapeOptions& opt) {
     ImGui::TextDisabled("Shape");
     ImGui::Spacing();
@@ -118,7 +145,7 @@ void brush_options(noted::domain::tool::ToolState& tools, bool* open) {
             draw_text(tools.text);
             break;
         case ToolKind::image:
-            draw_placeholder("Image");
+            draw_image(tools.image);
             break;
     }
     ImGui::End();

@@ -13,6 +13,7 @@
 #include "noted/engine/gpu/swapchain.hpp"
 #include "noted/engine/stroke/stroke_engine.hpp"
 #include "noted/ui/widget/brush_options.hpp"
+#include "noted/ui/widget/image_overlay.hpp"
 #include "noted/ui/widget/layer_panel.hpp"
 #include "noted/ui/widget/outline_panel.hpp"
 #include "noted/ui/widget/page_strip.hpp"
@@ -83,6 +84,7 @@ UiPanels::UiPanels(Deps d) noexcept
       selection_handler_(d.selection_handler),
       shape_handler_(d.shape_handler),
       text_handler_(d.text_handler),
+      image_handler_(d.image_handler),
       camera_(d.camera),
       swapchain_(d.swapchain),
       cfg_(d.cfg),
@@ -92,6 +94,7 @@ UiPanels::UiPanels(Deps d) noexcept
       tools_(d.tools),
       selection_(d.selection),
       shapes_(d.shapes),
+      images_(d.images),
       prompt_(d.prompt),
       save_for_dirty_prompt_(std::move(d.save_for_dirty_prompt)),
       execute_pending_dirty_action_(std::move(d.execute_pending_dirty_action)) {}
@@ -288,6 +291,17 @@ void UiPanels::draw() {
             [h = text_handler_] { h->commit_editing(); },
             [h = text_handler_] { h->cancel_editing(); },
             menu_state_.show_text_overlay);
+    }
+
+    // Image overlay (B.7) — non-interactive placeholder draw on the
+    // background draw list. Same canvas-to-screen projection as
+    // shape_overlay / text_overlay.
+    {
+        auto project = [this](double cx, double cy) -> std::pair<float, float> {
+            return {static_cast<float>(camera_.project_x(cx)),
+                    static_cast<float>(camera_.project_y(cy))};
+        };
+        noted::ui::widget::image_overlay(images_, project, menu_state_.show_image_overlay);
     }
 
     noted::ui::widget::debug_overlay(

@@ -64,6 +64,7 @@
 #include "config/app_config.hpp"
 #include "frame/render_passes.hpp"
 #include "input/camera_controller.hpp"
+#include "input/image_tool_handler.hpp"
 #include "input/selection_tool_handler.hpp"
 #include "input/shape_tool_handler.hpp"
 #include "input/text_tool_handler.hpp"
@@ -271,6 +272,14 @@ private:
     // `Document::texts()` with Commands.
     std::vector<noted::domain::tool::TextPrimitive> texts_{};
 
+    // ---- Images state (Phase B.7) -------------------------------------
+    // Committed image placeholders from the Image tool. App-owned;
+    // `ImageToolHandler` pushes on press; `image_overlay` reads each
+    // frame. Future B.7.b adds the file picker + real GPU upload;
+    // future persistence PR promotes to `Document::images()` with
+    // Commands.
+    std::vector<noted::domain::tool::ImagePrimitive> images_{};
+
     // ---- Tool input routing -------------------------------------------
     // Owns the LEFT-button pointer subscriptions and dispatches to the
     // registered handler matching the active tool. Heap-allocated for
@@ -284,6 +293,7 @@ private:
     noted::app::input::SelectionToolHandler* selection_handler_{nullptr};
     noted::app::input::ShapeToolHandler* shape_handler_{nullptr};
     noted::app::input::TextToolHandler* text_handler_{nullptr};
+    noted::app::input::ImageToolHandler* image_handler_{nullptr};
 
     // ---- Canvas view --------------------------------------------------
     // Pan + scale state shared by the composite pass (camera-projected

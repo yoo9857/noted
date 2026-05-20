@@ -11,6 +11,7 @@ noted_add_module(
         src/tool/selection_drag.cpp
         src/tool/shape_drag.cpp
         src/tool/text_input.cpp
+        src/tool/image_input.cpp
     PUBLIC_DEPS   noted::engine
     PRIVATE_DEPS  nlohmann_json::nlohmann_json
 )

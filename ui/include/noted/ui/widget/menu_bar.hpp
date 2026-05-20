@@ -30,6 +30,7 @@ struct MenuBarState {
     bool show_selection_overlay{true};
     bool show_shape_overlay{true};
     bool show_text_overlay{true};
+    bool show_image_overlay{true};
     bool show_debug_overlay{false};
     bool show_demo_window{false};
     bool show_about_window{false};
