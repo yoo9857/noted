@@ -17,10 +17,12 @@
 #include "noted/ui/widget/outline_panel.hpp"
 #include "noted/ui/widget/page_strip.hpp"
 #include "noted/ui/widget/selection_overlay.hpp"
+#include "noted/ui/widget/shape_overlay.hpp"
 #include "noted/ui/widget/status_bar.hpp"
 #include "noted/ui/widget/tool_palette.hpp"
 
 #include "input/selection_tool_handler.hpp"
+#include "input/shape_tool_handler.hpp"
 #include "input/tool_input_router.hpp"
 
 namespace noted::app::ui {
@@ -77,6 +79,7 @@ UiPanels::UiPanels(Deps d) noexcept
       stroke_engine_(d.stroke_engine),
       tool_input_router_(d.tool_input_router),
       selection_handler_(d.selection_handler),
+      shape_handler_(d.shape_handler),
       camera_(d.camera),
       swapchain_(d.swapchain),
       cfg_(d.cfg),
@@ -85,6 +88,7 @@ UiPanels::UiPanels(Deps d) noexcept
       outline_rename_(d.outline_rename),
       tools_(d.tools),
       selection_(d.selection),
+      shapes_(d.shapes),
       prompt_(d.prompt),
       save_for_dirty_prompt_(std::move(d.save_for_dirty_prompt)),
       execute_pending_dirty_action_(std::move(d.execute_pending_dirty_action)) {}
@@ -240,6 +244,29 @@ void UiPanels::draw() {
         };
         noted::ui::widget::selection_overlay(
             selection_, preview, project, menu_state_.show_selection_overlay);
+    }
+
+    // Shape overlay — committed shapes (read-only inspector on App-
+    // owned vector) + the in-flight drag preview from the handler.
+    // Same canvas → screen projection as the selection overlay.
+    {
+        std::optional<noted::ui::widget::ShapeDragPreview> preview;
+        if (shape_handler_ != nullptr) {
+            if (auto d = shape_handler_->current_drag(); d.has_value()) {
+                noted::ui::widget::ShapeDragPreview p{};
+                p.press_canvas_x = d->press_x;
+                p.press_canvas_y = d->press_y;
+                p.current_canvas_x = d->current_x;
+                p.current_canvas_y = d->current_y;
+                p.options = d->options;
+                preview = p;
+            }
+        }
+        auto project = [this](double cx, double cy) -> std::pair<float, float> {
+            return {static_cast<float>(camera_.project_x(cx)),
+                    static_cast<float>(camera_.project_y(cy))};
+        };
+        noted::ui::widget::shape_overlay(shapes_, preview, project, menu_state_.show_shape_overlay);
     }
 
     noted::ui::widget::debug_overlay(
