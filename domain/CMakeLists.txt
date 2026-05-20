@@ -7,6 +7,7 @@ noted_add_module(
         src/layer/layer.cpp
         src/selection/selection.cpp
         src/tool/tool.cpp
+        src/tool/options.cpp
     PUBLIC_DEPS   noted::engine
     PRIVATE_DEPS  nlohmann_json::nlohmann_json
 )
