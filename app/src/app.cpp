@@ -160,6 +160,31 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
         return std::unexpected(std::move(r).error());
     }
 
+    // Build the render passes coordinator AFTER all GPU resources
+    // are alive. The `Deps` struct snapshots non-owning references
+    // to ~15 fields above; App outlives RenderPasses so the
+    // references stay valid for the entire render path.
+    app->render_passes_ =
+        noted::app::frame::RenderPasses::create(noted::app::frame::RenderPasses::Deps{
+            .device = *app->device_,
+            .swapchain = *app->swapchain_,
+            .renderer = *app->renderer_,
+            .canvas = *app->canvas_,
+            .strokes_target = *app->strokes_target_,
+            .page_renderer = *app->page_renderer_,
+            .session = app->session_,
+            .layer_compositor = *app->layer_compositor_,
+            .scene = *app->scene_,
+            .stroke_engine = *app->stroke_engine_,
+            .composite_pipeline_layout = *app->composite_pipeline_layout_,
+            .composite_pipeline = *app->composite_pipeline_,
+            .composite_overlay_pipeline = *app->composite_overlay_pipeline_,
+            .canvas_set = app->canvas_set_,
+            .strokes_set = app->strokes_set_,
+            .camera = app->camera_,
+            .imgui_host = *app->imgui_host_,
+        });
+
     // Set the initial title from a clean session before the first
     // paint — avoids the "noted" → "noted — Untitled" flash on
     // frame 0.
@@ -1077,47 +1102,12 @@ void App::refresh_window_title_if_changed() {
 }
 
 auto App::render_one_frame() -> noted::Result<void> {
-    // Canvas pass clears to opaque black — paper + layers will fill
-    // most of it; the clear shows through outside the pages.
-    VkClearColorValue canvas_clear{};
-    canvas_clear.float32[0] = 0.0F;
-    canvas_clear.float32[1] = 0.0F;
-    canvas_clear.float32[2] = 0.0F;
-    canvas_clear.float32[3] = 1.0F;
-
-    // Strokes target clears to transparent black every frame so eraser
-    // alpha doesn't persist into the next frame's stroke history.
-    VkClearColorValue strokes_clear{};
-    strokes_clear.float32[0] = 0.0F;
-    strokes_clear.float32[1] = 0.0F;
-    strokes_clear.float32[2] = 0.0F;
-    strokes_clear.float32[3] = 0.0F;
-
-    // Swapchain pass clears to a dark teal — what shows through if
-    // the composite quad ever leaves edges blank (it doesn't today,
-    // but it's a useful regression tell).
-    VkClearColorValue swapchain_clear{};
-    swapchain_clear.float32[0] = 0.05F;
-    swapchain_clear.float32[1] = 0.05F;
-    swapchain_clear.float32[2] = 0.10F;
-    swapchain_clear.float32[3] = 1.0F;
-
-    auto canvas_cb = [this](VkCommandBuffer cb, VkExtent2D ext) { record_canvas_pass(cb, ext); };
-    auto strokes_cb = [this](VkCommandBuffer cb, VkExtent2D ext) { record_strokes_pass(cb, ext); };
-    auto overlay_cb = [this](VkCommandBuffer cb, VkExtent2D ext) { record_overlay_pass(cb, ext); };
-    auto swapchain_cb = [this](VkCommandBuffer cb, VkExtent2D ext) {
-        record_swapchain_pass(cb, ext);
-    };
-
-    auto rr = renderer_->render_with_canvas(
-        *device_,
-        *swapchain_,
-        *canvas_,
-        *strokes_target_,
-        noted::gpu::Renderer::CanvasPassDesc{canvas_clear, canvas_cb},
-        noted::gpu::Renderer::StrokesPassDesc{strokes_clear, strokes_cb},
-        noted::gpu::Renderer::OverlayPassDesc{overlay_cb},
-        noted::gpu::Renderer::SwapchainPassDesc{swapchain_clear, swapchain_cb});
+    // Per-frame draw delegates entirely to the `RenderPasses`
+    // subsystem after Phase R.3. App's residual responsibility on
+    // the render path is the OUT_OF_DATE / SUBOPTIMAL recovery —
+    // owner work that touches the swapchain handle, reallocates
+    // canvas + strokes_target, and re-binds descriptors.
+    auto rr = render_passes_->render_frame();
     if (!rr) {
         const auto code = rr.error().code;
         if (code == noted::ErrorCode::gpu_swapchain_out_of_date ||
@@ -1127,108 +1117,6 @@ auto App::render_one_frame() -> noted::Result<void> {
         return std::unexpected(std::move(rr).error());
     }
     return {};
-}
-
-void App::record_canvas_pass(VkCommandBuffer cb, VkExtent2D ext) {
-    // Phase 1 of the four-pass canvas pipeline (Phase B.2, ADR 0031).
-    // Paper + layers go into the canvas; ink lands in a separate
-    // strokes target rendered by `record_strokes_pass`.
-    //
-    // Order matters within this pass:
-    //   1. Page backgrounds — paper rectangles. The canvas pass's
-    //      clear colour shows through everywhere outside the pages.
-    //   2. Layer compositor — adjustment / image layers within
-    //      pages (none today; demo payloads were dropped in
-    //      A.3.b so pages stay visible).
-    page_renderer_->render(cb, ext, session_.document().pages());
-    layer_compositor_->composite(cb, ext, scene_->graph, scene_->store);
-}
-
-void App::record_strokes_pass(VkCommandBuffer cb, VkExtent2D ext) {
-    // Phase 2: the stroke engine writes into `strokes_target` (cleared
-    // to transparent black each frame by the renderer). Draw strokes
-    // accumulate alpha; eraser strokes subtract alpha — both behaviours
-    // come from the engine's two pipelines + the active `DrawMode`.
-    stroke_engine_->record(cb, ext);
-}
-
-void App::record_overlay_pass(VkCommandBuffer cb, VkExtent2D /*ext*/) {
-    // Phase 3: composite the strokes target onto the canvas with
-    // SRC_OVER blend. The canvas attachment is LOAD_OP_LOAD (paper +
-    // layers from phase 1 survive); where strokes_target alpha=0, the
-    // canvas is unchanged → page pattern shows through erased regions.
-    //
-    // Identity transform: scale=(2,2), translation=(-1,-1) reproduces
-    // the standard `uv → ndc = uv * 2 - 1` mapping, so the strokes
-    // target fills the canvas at 1:1 with no camera projection.
-    const auto layout_h = composite_pipeline_layout_->handle();
-    const auto pipeline_h = composite_overlay_pipeline_->handle();
-    const VkDescriptorSet set_h = strokes_set_.handle();
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_h);
-    vkCmdBindDescriptorSets(cb,
-                            VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            layout_h,
-                            /*firstSet=*/0,
-                            /*setCount=*/1,
-                            &set_h,
-                            /*dynamicOffsetCount=*/0,
-                            nullptr);
-
-    struct CompositePush {
-        float scale[2];
-        float translation[2];
-    };
-    CompositePush push{};
-    push.scale[0] = 2.0F;
-    push.scale[1] = 2.0F;
-    push.translation[0] = -1.0F;
-    push.translation[1] = -1.0F;
-    vkCmdPushConstants(cb, layout_h, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(CompositePush), &push);
-
-    vkCmdDraw(cb, /*vertexCount=*/6, /*instanceCount=*/1, 0, 0);
-}
-
-void App::record_swapchain_pass(VkCommandBuffer cb, VkExtent2D /*ext*/) {
-    const auto layout_h = composite_pipeline_layout_->handle();
-    const auto pipeline_h = composite_pipeline_->handle();
-    const VkDescriptorSet set_h = canvas_set_.handle();
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_h);
-    vkCmdBindDescriptorSets(cb,
-                            VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            layout_h,
-                            /*firstSet=*/0,
-                            /*setCount=*/1,
-                            &set_h,
-                            /*dynamicOffsetCount=*/0,
-                            nullptr);
-    // Push the Camera-derived view transform that the composite
-    // vertex shader applies to the fullscreen-triangle's vertices.
-    // Layout must mirror `CompositePush` in `shaders/fullscreen.slang`
-    // (float2 scale, float2 translation = 16 bytes).
-    struct CompositePush {
-        float scale[2];
-        float translation[2];
-    };
-    CompositePush push{};
-    push.scale[0] = camera_.shader_scale_x();
-    push.scale[1] = camera_.shader_scale_y();
-    push.translation[0] = camera_.shader_translation_x();
-    push.translation[1] = camera_.shader_translation_y();
-    vkCmdPushConstants(cb, layout_h, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(CompositePush), &push);
-
-    // 6 vertices = a quad (two triangles, uv ∈ [0,1]²). See the
-    // `fullscreen.slang` comment for why we don't use the classic
-    // fullscreen-triangle here — camera scale < 1 shrinks the
-    // triangle's NDC bounding box, exposing a triangular cut. A
-    // quad shrinks to a rectangle, which is the correct "zoomed
-    // out" view.
-    vkCmdDraw(cb, /*vertexCount=*/6, /*instanceCount=*/1, 0, 0);
-    // ImGui draws on top of the composited canvas. The surrounding
-    // vkCmdBeginRendering (owned by the renderer) is the right
-    // context for ImGui_ImplVulkan_RenderDrawData. finalize_frame()
-    // was already called above; render_into just records the
-    // cached draw data.
-    imgui_host_->render_into(cb);
 }
 
 auto App::recreate_swapchain() -> noted::Result<void> {

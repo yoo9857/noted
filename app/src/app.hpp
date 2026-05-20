@@ -61,6 +61,7 @@
 #include "noted/ui/widget/outline_panel.hpp"
 
 #include "config/app_config.hpp"
+#include "frame/render_passes.hpp"
 #include "input/camera_controller.hpp"
 #include "input/selection_tool_handler.hpp"
 #include "input/tool_input_router.hpp"
@@ -110,17 +111,12 @@ private:
     void refresh_window_title_if_changed();
     [[nodiscard]] auto render_one_frame() -> noted::Result<void>;
 
-    // Renderer DrawCallback bodies, called from inside the surrounding
-    // `vkCmdBeginRendering` the renderer owns. Four passes (per ADR
-    // 0031 / Phase B.2):
-    //   1. canvas — paper + layers
-    //   2. strokes — stroke engine writes into strokes_target
-    //   3. overlay — strokes_target sampled, SRC_OVER blended into canvas
-    //   4. swapchain — canvas sampled + ImGui
-    void record_canvas_pass(VkCommandBuffer cb, VkExtent2D extent);
-    void record_strokes_pass(VkCommandBuffer cb, VkExtent2D extent);
-    void record_overlay_pass(VkCommandBuffer cb, VkExtent2D extent);
-    void record_swapchain_pass(VkCommandBuffer cb, VkExtent2D extent);
+    // The 4-pass canvas pipeline + per-frame orchestration lives in
+    // `noted::app::frame::RenderPasses` after Phase R.3 (ADR 0032).
+    // App's `render_one_frame` delegates to that subsystem; the only
+    // App-side concern left in the render path is the
+    // `recreate_swapchain` recovery (owner work — reallocates targets
+    // + rebinds descriptors after a swapchain out-of-date).
 
     // Dirty-prompt callbacks installed into `prompt_.draw()`.
     [[nodiscard]] auto save_for_dirty_prompt() -> bool;
@@ -278,6 +274,15 @@ private:
     // `this` (hook lambdas capture themselves); built in
     // install_frame_hook once the registry is alive.
     std::unique_ptr<noted::app::input::CameraController> camera_controller_;
+
+    // ---- Render passes ------------------------------------------------
+    // 4-pass canvas pipeline orchestration (Phase R.3 / ADR 0032).
+    // Holds non-owning references to every GPU resource above;
+    // constructed AFTER all init_* steps so the references are
+    // stable. App owns `recreate_swapchain` (touches the resources
+    // themselves) and delegates the per-frame draw to
+    // `render_passes_->render_frame()`.
+    std::unique_ptr<noted::app::frame::RenderPasses> render_passes_;
 };
 
 }  // namespace noted::app
