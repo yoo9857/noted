@@ -19,20 +19,12 @@
 #include "noted/compositor/layer_payload.hpp"
 #include "noted/domain/command/commands.hpp"
 #include "noted/domain/document/document.hpp"
-#include "noted/domain/tool/options.hpp"
 #include "noted/engine/harness/harness.hpp"
 #include "noted/engine/hook/registry.hpp"
 #include "noted/engine/profile.hpp"
 #include "noted/platform/fs/fs.hpp"
 #include "noted/platform/io/file_picker.hpp"
 #include "noted/platform/io/noted_file.hpp"
-#include "noted/ui/widget/brush_options.hpp"
-#include "noted/ui/widget/layer_panel.hpp"
-#include "noted/ui/widget/outline_panel.hpp"
-#include "noted/ui/widget/page_strip.hpp"
-#include "noted/ui/widget/selection_overlay.hpp"
-#include "noted/ui/widget/status_bar.hpp"
-#include "noted/ui/widget/tool_palette.hpp"
 
 #include "io/font_probe.hpp"
 
@@ -80,57 +72,6 @@ noted::harness::FeatureFlag flag_force_vsync{"gpu.force_vsync_fifo", /*default=*
 
 constexpr VkFormat kCanvasFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
-// Settings the stroke engine consumes for the active tool: the brush
-// style (colour + radii + alpha curve) and the draw mode (normal
-// alpha blend vs destination-out erase).
-//
-// Phase B.3: the brush style comes from the active tool's per-tool
-// payload on `ToolState` (PenOptions / EraserOptions), so the user's
-// slider drags + colour-picker edits flow into the engine. The
-// caller pushes these every frame — `set_brush` only affects future
-// presses (the in-flight stroke holds its snapshotted style), so a
-// per-frame push has no risk of corrupting an in-flight stroke and
-// is too cheap (~32 B memcpy) to bother with change detection.
-struct ToolSettings {
-    noted::stroke::BrushStyle brush;
-    noted::stroke::DrawMode mode;
-};
-
-// True for tools whose left-button drag drives the stroke engine
-// (paints ink or erases ink). False for tools that own pointer
-// events themselves (Select / Shape / Text / Image — once their
-// behavioural integrations land). The App uses this to gate the
-// stroke engine's input via `StrokeEngine::set_active`.
-[[nodiscard]] auto is_stroke_tool(noted::domain::tool::ToolKind kind) noexcept -> bool {
-    using noted::domain::tool::ToolKind;
-    return kind == ToolKind::pen || kind == ToolKind::eraser;
-}
-
-[[nodiscard]] auto tool_settings_for_tool(const noted::domain::tool::ToolState& tools) noexcept
-    -> ToolSettings {
-    using noted::domain::tool::ToolKind;
-    switch (tools.active) {
-        case ToolKind::eraser:
-            return {.brush = noted::domain::tool::brush_from_eraser(tools.eraser),
-                    .mode = noted::stroke::DrawMode::erase};
-        case ToolKind::pen:
-            return {.brush = noted::domain::tool::brush_from_pen(tools.pen),
-                    .mode = noted::stroke::DrawMode::draw};
-        case ToolKind::select:
-        case ToolKind::shape:
-        case ToolKind::text:
-        case ToolKind::image:
-            // Not-yet-implemented tools fall through to Pen behaviour
-            // until their behavioural integration lands. Reading from
-            // tools.pen so they share the user's pen settings — feels
-            // less surprising than reverting to defaults mid-session.
-            return {.brush = noted::domain::tool::brush_from_pen(tools.pen),
-                    .mode = noted::stroke::DrawMode::draw};
-    }
-    return {.brush = noted::domain::tool::brush_from_pen(tools.pen),
-            .mode = noted::stroke::DrawMode::draw};
-}
-
 }  // namespace
 
 // ---- create / destroy ------------------------------------------------------
@@ -160,10 +101,10 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
         return std::unexpected(std::move(r).error());
     }
 
-    // Build the render passes coordinator AFTER all GPU resources
-    // are alive. The `Deps` struct snapshots non-owning references
-    // to ~15 fields above; App outlives RenderPasses so the
-    // references stay valid for the entire render path.
+    // Build the render passes + UI panels coordinators AFTER all
+    // GPU resources are alive. The `Deps` structs snapshot non-
+    // owning references; App outlives both so the references stay
+    // valid for the entire process lifetime.
     app->render_passes_ =
         noted::app::frame::RenderPasses::create(noted::app::frame::RenderPasses::Deps{
             .device = *app->device_,
@@ -211,6 +152,35 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
     app->camera_.set_window_extent(extent.width, extent.height);
 
     app->install_frame_hook();
+
+    // UiPanels is built LAST — it depends on `tool_input_router_`
+    // and `selection_handler_` which `install_frame_hook` creates.
+    // Deps struct includes two `std::function` callbacks that bind
+    // App methods so the dirty-prompt's save flow stays on App
+    // (it touches the GLFW window handle and the session's path).
+    auto* raw = app.get();
+    app->ui_panels_ = noted::app::ui::UiPanels::create(noted::app::ui::UiPanels::Deps{
+        .engine = raw->engine_,
+        .session = raw->session_,
+        .scene = *raw->scene_,
+        .layer_compositor = *raw->layer_compositor_,
+        .stroke_engine = *raw->stroke_engine_,
+        .tool_input_router = *raw->tool_input_router_,
+        .selection_handler = raw->selection_handler_,
+        .camera = raw->camera_,
+        .swapchain = *raw->swapchain_,
+        .cfg = raw->cfg_,
+        .menu_state = raw->menu_state_,
+        .debug_overlay_state = raw->debug_overlay_state_,
+        .outline_rename = raw->outline_rename_,
+        .tools = raw->tools_,
+        .selection = raw->selection_,
+        .prompt = raw->prompt_,
+        .save_for_dirty_prompt = [raw]() -> bool { return raw->save_for_dirty_prompt(); },
+        .execute_pending_dirty_action =
+            [raw](DirtyPrompt::PendingAction a) { raw->execute_pending_dirty_action(a); },
+    });
+
     return app;
 }
 
@@ -910,187 +880,12 @@ void App::handle_menu_actions(const noted::ui::widget::MenuBarResult& menu) {
 }
 
 void App::draw_widgets() {
-    prompt_.draw([this]() -> bool { return save_for_dirty_prompt(); },
-                 [this](DirtyPrompt::PendingAction a) { execute_pending_dirty_action(a); });
-
-    noted::ui::widget::layer_panel(scene_->graph, &menu_state_.show_layer_panel);
-
-    // Tool palette — switching tools swaps the stroke engine's brush
-    // (Pen = default black, Eraser = paper colour). Other tools fall
-    // through to Pen until their behavioural integration lands.
-    auto tool_result =
-        noted::ui::widget::tool_palette(tools_.active, &menu_state_.show_tool_palette);
-    if (tool_result.switch_request && *tool_result.switch_request != tools_.active) {
-        tools_.active = *tool_result.switch_request;
-    }
-    // Brush options panel — slider / colour-picker writes mutate
-    // `tools_.pen` / `tools_.eraser` in place.
-    noted::ui::widget::brush_options(tools_, &menu_state_.show_brush_options);
-    // Per-frame push of the active tool's brush + mode into the
-    // stroke engine. Live-update: slider drags and colour-picker
-    // edits take effect on the very next stroke. The in-flight
-    // stroke (if any) is unaffected — its style is snapshotted at
-    // press time.
-    {
-        const auto settings = tool_settings_for_tool(tools_);
-        stroke_engine_->set_brush(settings.brush);
-        stroke_engine_->set_mode(settings.mode);
-    }
-    // Gate stroke-engine input to only stroke tools. Switching away
-    // from Pen/Eraser drops the engine's left-button subscription
-    // path on the floor (any in-flight stroke is committed first).
-    // Switching back re-enables it. set_active is idempotent so
-    // calling every frame costs only a bool compare.
-    stroke_engine_->set_active(is_stroke_tool(tools_.active));
-    // Tool input router: sync the active handler with the user's
-    // current tool. The router's `set_active` is idempotent on a
-    // no-op switch (matching kind), and triggers `on_deactivated`
-    // on the previously-active handler on a real switch — which is
-    // how the SelectionToolHandler drops its in-flight drag on a
-    // mid-drag tool switch (no more `selection_drag_.reset()` in
-    // App after R.1).
-    tool_input_router_->set_active(tools_.active);
-
-    auto selected = session_.selected_block();
-    noted::ui::widget::outline_panel(
-        session_.document(), selected, &outline_rename_, &menu_state_.show_outline_panel);
-    session_.set_selected_block(selected);
-
-    // Page strip — observes pages_, surfaces user intent as a
-    // PageStripResult. Sequenced as: apply structural mutations
-    // first (add / remove), then resolve focus against the now-
-    // current list. add_request + focus_request can co-occur if
-    // the user double-clicked; mutate-then-focus keeps the index
-    // semantics sane (focus_request always refers to the post-add
-    // list because no remove competes in the same frame).
-    const auto& pages = session_.document().pages();
-    auto strip = noted::ui::widget::page_strip(pages, &menu_state_.show_page_strip);
-    // Park the focused page just below the menu bar with a bit of
-    // breathing room. Shared by both add-then-auto-focus and the
-    // explicit row-click focus so the camera lands at the same y.
-    constexpr double kFocusTargetScreenY = 80.0;
-    if (strip.add_request) {
-        // Match the demo seed's centring so newly-added pages line
-        // up with the existing ones at the identity camera transform.
-        const auto canvas = swapchain_->summary().extent;
-        const float origin_x = std::max(
-            20.0F,
-            (static_cast<float>(canvas.width) - cfg_.canvas.default_page_extent_w_px) * 0.5F);
-        auto cmd =
-            std::make_unique<noted::domain::AddPageCommand>(cfg_.canvas.default_page_extent_w_px,
-                                                            cfg_.canvas.default_page_extent_h_px,
-                                                            cfg_.canvas.default_page_background,
-                                                            origin_x);
-        auto* cmd_ptr = cmd.get();
-        if (auto r = session_.execute(std::move(cmd)); !r) {
-            std::cerr << r.error().format() << '\n';
-        } else {
-            // Auto-focus the newly-added page. Without this the new
-            // page lands below the visible camera region and the
-            // click feels like a no-op.
-            const double new_y =
-                noted::ui::widget::camera_translation_y_for_page(session_.document().pages(),
-                                                                 cmd_ptr->assigned_index(),
-                                                                 camera_.translation_y(),
-                                                                 camera_.scale(),
-                                                                 kFocusTargetScreenY);
-            camera_.set_translation(camera_.translation_x(), new_y);
-        }
-    }
-    if (strip.remove_request) {
-        auto cmd = std::make_unique<noted::domain::RemovePageCommand>(*strip.remove_request);
-        if (auto r = session_.execute(std::move(cmd)); !r) {
-            std::cerr << r.error().format() << '\n';
-        }
-    }
-    if (strip.focus_request) {
-        // The current camera translation_y is returned unchanged if
-        // the index is now stale (e.g. the page got removed in the
-        // same frame), so this is safe.
-        const double new_y =
-            noted::ui::widget::camera_translation_y_for_page(session_.document().pages(),
-                                                             *strip.focus_request,
-                                                             camera_.translation_y(),
-                                                             camera_.scale(),
-                                                             kFocusTargetScreenY);
-        camera_.set_translation(camera_.translation_x(), new_y);
-    }
-
-    // Drain rename outputs into the command stream. Both flags are
-    // mutually exclusive in practice (the widget never sets both in
-    // the same frame); check Commit first so an Enter + Escape race
-    // resolves to "save what was typed."
-    if (outline_rename_.commit_requested) {
-        outline_rename_.commit_requested = false;
-        const auto target = outline_rename_.target;
-        outline_rename_.target = noted::domain::invalid_block_id;
-        std::string new_name{outline_rename_.buffer.data()};  // null-terminated by ImGui
-        auto cmd = std::make_unique<noted::domain::SetNameCommand>(target, std::move(new_name));
-        if (auto r = session_.execute(std::move(cmd)); !r) {
-            std::cerr << r.error().format() << '\n';
-        }
-    }
-    if (outline_rename_.cancel_requested) {
-        outline_rename_.cancel_requested = false;
-        outline_rename_.target = noted::domain::invalid_block_id;
-    }
-
-    // Selection overlay — draws committed selection rects + the
-    // in-progress drag preview on top of the canvas via ImGui's
-    // background draw list. After Phase R.1 the in-flight drag
-    // lives on `SelectionToolHandler::current_drag()`; the overlay
-    // queries it via the cached non-owning pointer.
-    {
-        std::optional<noted::ui::widget::SelectionDragPreview> preview;
-        if (selection_handler_ != nullptr) {
-            if (auto d = selection_handler_->current_drag(); d.has_value()) {
-                noted::ui::widget::SelectionDragPreview p{};
-                p.press_canvas_x = d->press_x;
-                p.press_canvas_y = d->press_y;
-                p.current_canvas_x = d->current_x;
-                p.current_canvas_y = d->current_y;
-                preview = p;
-            }
-        }
-        auto project = [this](double cx, double cy) -> std::pair<float, float> {
-            return {static_cast<float>(camera_.project_x(cx)),
-                    static_cast<float>(camera_.project_y(cy))};
-        };
-        noted::ui::widget::selection_overlay(
-            selection_, preview, project, menu_state_.show_selection_overlay);
-    }
-
-    noted::ui::widget::debug_overlay(
-        noted::ui::widget::DebugOverlayInputs{
-            .frame_index = engine_.frame_index(),
-            .fallback_count = layer_compositor_->fallback_count(),
-            .camera_scale = camera_.scale(),
-            .camera_translation_x = camera_.translation_x(),
-            .camera_translation_y = camera_.translation_y(),
-        },
-        debug_overlay_state_,
-        &menu_state_.show_debug_overlay);
-
-    if (menu_state_.show_demo_window) {
-        ImGui::ShowDemoWindow(&menu_state_.show_demo_window);
-    }
-    if (menu_state_.show_about_window) {
-        ImGui::SetNextWindowSize({340.0F, 0.0F}, ImGuiCond_FirstUseEver);
-        if (ImGui::Begin(
-                "About noted", &menu_state_.show_about_window, ImGuiWindowFlags_NoCollapse)) {
-            ImGui::TextUnformatted("noted — note-taking + raster editor");
-            ImGui::TextUnformatted("노트 + 래스터 이미지 에디터");
-            ImGui::TextUnformatted("v0.x development build");
-            ImGui::Spacing();
-            ImGui::TextDisabled("Engine: C++23 + Vulkan 1.4 + Slang");
-            ImGui::TextDisabled("UI: Dear ImGui (ADR 0027)");
-        }
-        ImGui::End();
-    }
-    noted::ui::widget::status_bar({
-        .frame_index = engine_.frame_index(),
-        .zoom_pct = static_cast<float>(camera_.scale() * 100.0),
-    });
+    // After Phase R.4 every per-frame UI call (panels, command
+    // dispatches off widget results, stroke engine + tool router
+    // syncs) lives in `ui_panels_->draw()`. App is no longer
+    // responsible for ordering these — that contract sits in
+    // `UiPanels`, where the comments explaining each step live.
+    ui_panels_->draw();
 }
 
 void App::refresh_window_title_if_changed() {

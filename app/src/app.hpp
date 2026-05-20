@@ -68,6 +68,7 @@
 #include "scene/demo_scene.hpp"
 #include "ui/dirty_prompt.hpp"
 #include "ui/document_session.hpp"
+#include "ui/ui_panels.hpp"
 
 namespace noted::app {
 
@@ -283,6 +284,13 @@ private:
     // themselves) and delegates the per-frame draw to
     // `render_passes_->render_frame()`.
     std::unique_ptr<noted::app::frame::RenderPasses> render_passes_;
+
+    // ---- UI panels ----------------------------------------------------
+    // Per-frame panel orchestration extracted in Phase R.4 / ADR 0032.
+    // Owns the body of the old `draw_widgets()` — panels, command
+    // dispatches off widget results, stroke-engine + tool-router
+    // syncs. App's `draw_widgets()` now forwards to it.
+    std::unique_ptr<noted::app::ui::UiPanels> ui_panels_;
 };
 
 }  // namespace noted::app
