@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-20 · **main HEAD:** `5fbba5f` · **Open PRs:** #68 (Phase A.3.d, CI green), #69 (Phase B.1, CI green, stacked on #68)
+**Last updated:** 2026-05-20 · **main HEAD:** `d0947e8` (clean, 0 open PRs)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -195,28 +195,24 @@ tests/        Unit + integration + bench + fuzz scaffolds
 ✅ Build hygiene: zero MSVC warnings on Release. CI matrix verifies
    build + sanitizers + Tracy smoke build on every PR.
 
-### What's in flight (open PRs)
-
-🟢 **PR #68 — `feat/document-page-linkage` (Phase A.3.d)** — CI 8/8 green
-   - `PageList` ownership moved into `domain::Document`. Survives
-     `Document::clear()`, persists to `.noted` v2, replicates over
-     future CRDT edges.
-   - `AddPageCommand` + `RemovePageCommand` flow through the existing
-     `UndoStack`. Ctrl+Z reverses page add/remove like block add/remove.
-   - JSON schema bumped v1 → v2 with `pages: { gap_px, items: [{w, h,
-     bg, x}] }`. Reader accepts v1 (loads with empty pages) AND v2.
-   - 287/287 tests pass.
-
-🟢 **PR #69 — `feat/tool-palette-and-eraser` (Phase B.1, ADR 0031)** —
-   CI 8/8 green, stacked on #68
-   - `noted::domain::tool::{ToolKind, ToolState, label}` with all 6
-     wire-stable ordinals up-front.
-   - `noted::ui::widget::tool_palette` — stateless ImGui side rail.
-   - `App::tools_` + `brush_for_tool(kind)` swap pen ↔ eraser brush.
-   - **Eraser is "paint-with-paper-colour" placeholder** — proper
-     destination-out semantics require the canvas pass split, which
-     is Phase B.2 (next).
-   - 292/292 tests pass.
+✅ **Document linkage (Phase A.3.d, PR #68)**: `domain::Document`
+   owns `PageList`. AddPageCommand / RemovePageCommand flow through
+   the existing UndoStack. JSON schema v2 with `pages` field;
+   reader accepts v1 (empty pages) AND v2.
+✅ **Tool state machine (Phase B.1, PR #69, ADR 0031)**:
+   `noted::domain::tool::{ToolKind, ToolState, label}` with 6 wire-
+   stable ordinals. `noted::ui::widget::tool_palette` side rail.
+   `App::tools_` + `tool_settings_for_tool(kind)` returns
+   `(BrushStyle, DrawMode)` and swaps both atomically on tool
+   switch.
+✅ **Canvas pass split + real eraser (Phase B.2, PR #70)**: 4-pass
+   pipeline (canvas / strokes target / overlay / swapchain).
+   `gpu::StrokeTarget` analogous to `CanvasRenderTarget`.
+   `noted::stroke::DrawMode` moved into `stroke_geometry.hpp`;
+   `Stroke::mode` snapshotted per-stroke at press time so tool
+   toggling never rewrites already-committed strokes. Two
+   pipelines in StrokeEngine (draw / erase) with per-slice
+   binding. Eraser preserves page pattern through erasure.
 
 ### What does NOT work yet (by design — not bugs)
 
@@ -303,10 +299,10 @@ filters, color management). Phased to keep each PR focused:
 | A.3.a | Page model — `Page` + `PageList` POD + 19 unit tests (PR #63) | ✅ |
 | A.3.b | Page background rendering — `PageRenderer` + `page_bg.slang` patterns (PR #64) | ✅ |
 | A.3.c | Page strip panel + Add/Remove page UI + camera focus (PR #67) | ✅ |
-| A.3.d | Document linkage — `PageList` ownership moves into Document, mutation via Command, persists to `.noted` v2 (PR #68) | 🟢 open, CI green |
-| B.1 | Tool state machine — `ToolKind` / `ToolState` + tool palette widget + pen/eraser brush swap (PR #69, ADR 0031) | 🟢 open, CI green |
-| B.2 | Real eraser via canvas pass split — `gpu::StrokeTarget` + destination-out blend, page pattern survives erasure | next |
-| B.3 | Per-tool option payloads — brush size / hardness / opacity / colour, colour-picker widget | |
+| A.3.d | Document linkage — `PageList` ownership moves into Document, mutation via Command, persists to `.noted` v2 (PR #68) | ✅ |
+| B.1 | Tool state machine — `ToolKind` / `ToolState` + tool palette widget + pen/eraser brush swap (PR #69, ADR 0031) | ✅ |
+| B.2 | Real eraser via canvas pass split — `gpu::StrokeTarget` + destination-out blend, per-stroke mode snapshot, page pattern survives erasure (PR #70) | ✅ |
+| B.3 | Per-tool option payloads — brush size / hardness / opacity / colour, colour-picker widget | next |
 | B.4+ | Selection / shape / text / image tools — one behavioural PR each | |
 | C   | Photoshop depth — layer panel ops, shader blend modes (12 missing), filter pipeline, color management | |
 | D   | Goodnotes polish — smart shapes, lasso + transform handles, pen-button mapping, page templates, PDF export | |
@@ -321,59 +317,50 @@ filters, color management). Phased to keep each PR focused:
 
 ### Next session — pick up here
 
-**Open PRs to land first:**
+**Target: Phase B.3 — per-tool option payloads + colour picker.**
+Branch name: `feat/brush-options-and-color-picker`.
 
-- **PR #68 `feat/document-page-linkage` (Phase A.3.d)** — squash-merge
-  after review. PageList moves into `domain::Document`, AddPageCommand +
-  RemovePageCommand flow through the existing UndoStack, JSON schema
-  v1 → v2 with a new `pages` field. Reader accepts both v1 and v2 for
-  back-compat. 287/287 tests, CI 8/8 green.
-- **PR #69 `feat/tool-palette-and-eraser` (Phase B.1, ADR 0031)** —
-  squash-merge after #68 (rebases cleanly — git auto-drops the
-  shared commits). Tool state machine + palette widget + pen/eraser
-  brush swap. 292/292 tests, CI 8/8 green. The eraser is a "paint
-  with paper colour" placeholder — Phase B.2 is the proper
-  destination-out version.
+Concrete plan (single focused PR, design per [ADR 0031] §
+"Per-tool option payloads"):
 
-**Target after #68 / #69 merge: Phase B.2 — real eraser via canvas pass
-split.** Branch name: `feat/canvas-pass-split-stroke-target`.
+1. **Pen options struct** — new `noted::domain::tool::PenOptions`
+   with brush-size range (`min_radius_px`, `max_radius_px`),
+   `softness_ratio`, `alpha_gamma`, colour (rgba). Wire-stable
+   layout — `.noted` schema may persist these in a future bump.
+2. **Eraser options struct** — `EraserOptions` with size +
+   hardness. The eraser ignores src colour by design
+   (destination-out), so no colour field. Hardness becomes a
+   future radius-falloff parameter; for B.3 it sets the
+   `softness_ratio` on the eraser's BrushStyle.
+3. **`ToolState` grows** payload members for each tool kind. Use
+   `std::variant` for the active payload OR per-kind fields kept
+   side-by-side (chose the latter in [ADR 0031] for type-safety
+   without runtime cost — single PenOptions, single EraserOptions,
+   etc.).
+4. **`tool_settings_for_tool`** now reads the per-tool payload
+   from `ToolState` and constructs the `BrushStyle` from it.
+5. **Colour picker widget** — small ImGui colour-picker bound to
+   `PenOptions::colour`. Either inline in the tool palette below
+   the Pen button (active only when Pen is selected) or in a
+   separate "Brush" panel. Inline is simpler for B.3.
+6. **Brush options sliders** — size min/max, softness, alpha gamma.
+   Bound to `PenOptions` fields. Live-updates the stroke engine's
+   brush via `set_brush(brush_from_options(pen_opts))`.
+7. **App wiring** — every frame, push the current `ToolState`'s
+   per-tool options into the stroke engine via
+   `tool_settings_for_tool`. The mode + brush swap on tool change
+   continues to work as today.
+8. **Tests** — pure-logic helpers on the options → BrushStyle
+   mapping (clamp negative radii, NaN guards), default-options
+   equality, wire-stable field offsets if struct layout matters.
+9. **Smoke** — open app, select Pen, drag the colour picker to red,
+   drag a stroke → red ink. Drag size slider up, draw → thicker
+   stroke. Switch to Eraser, hardness slider, erase → eraser
+   footprint matches the slider value.
 
-Concrete plan (single focused PR, design per [ADR 0031]):
-
-1. **`gpu::StrokeTarget`** — new `engine/gpu/stroke_target.{hpp,cpp}`.
-   RGBA image with the canvas extent, COLOR_ATTACHMENT | SAMPLED |
-   TRANSFER_DST, layout tracking like `CanvasRenderTarget` (see
-   [ADR 0014]). `recreate()` on swapchain resize.
-2. **Canvas pass restructure** in `App::record_canvas_pass`:
-   - Render `PageRenderer` + `LayerCompositor` into canvas as
-     today (clear → paper → layers).
-   - Begin a SECOND rendering pass into `strokes_target` cleared to
-     transparent black. `StrokeEngine::record()` writes here.
-   - Begin a THIRD pass back into canvas (LOAD_OP_LOAD). Composite
-     `strokes_target` with normal SRC_OVER blend (`SRC_ALPHA` /
-     `ONE_MINUS_SRC_ALPHA`).
-3. **Stroke engine `DrawMode` enum** — `draw` (current behaviour) or
-   `erase`. Two graphics pipelines, identical except blend state:
-   draw = `SRC_ALPHA / ONE_MINUS_SRC_ALPHA`, erase = `ZERO /
-   ONE_MINUS_SRC_ALPHA` (destination-out). `StrokeEngine::set_mode(...)`
-   swaps the active pipeline.
-4. **App wiring** — `brush_for_tool` becomes `tool_settings_for_tool`
-   returning `(BrushStyle, DrawMode)`. Pen → (default brush, draw).
-   Eraser → (default brush, erase). The eraser colour stops mattering
-   because destination-out only reads alpha.
-5. **Tests** — pure-logic helpers on the stroke engine
-   (`set_mode`, `current_mode()`) covered. The pipeline state swap
-   is interactive-only; smoke test verifies the visual.
-6. **Smoke** — open app, select Eraser, drag across a page with
-   grid pattern. The pattern survives in the erased region (the
-   B.1 bug this fixes). Stderr stays 0.
-
-Do **not** add per-tool option payloads in this PR — that's B.3.
-The eraser uses the default brush footprint; size / hardness
-sliders land alongside the colour picker.
-
-After B.2 lands: B.3 (brush options + colour picker), then B.4+
-(selection / shape / text / image, one PR each).
+After B.3: **Phase B.4** — selection tool (rectangle / lasso).
+Phase B.5: shape tool. Phase B.6: text tool. Phase B.7: image
+tool. Each its own behavioural PR with its option payload.
 
 ---
 
