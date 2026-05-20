@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-20 · **main HEAD:** `d0947e8` (clean, 0 open PRs)
+**Last updated:** 2026-05-20 · **main HEAD:** `ce32980` (clean, 0 open PRs)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -213,15 +213,44 @@ tests/        Unit + integration + bench + fuzz scaffolds
    toggling never rewrites already-committed strokes. Two
    pipelines in StrokeEngine (draw / erase) with per-slice
    binding. Eraser preserves page pattern through erasure.
+✅ **Brush options + colour picker (Phase B.3, PR #72)**:
+   `domain::tool::{PenOptions, EraserOptions}` POD payloads on
+   `ToolState`. `noted::ui::widget::brush_options` panel with
+   size sliders + pressure-curve slider + ColorEdit4. App pushes
+   the active tool's settings into the stroke engine every frame
+   (live-edit). `brush_from_pen/eraser` clamps NaN/negative
+   inputs at the data boundary.
+✅ **Rectangle selection tool (Phase B.4, PR #73)**:
+   `domain::tool::{SelectionDragMode, rect_from_drag, apply_drag,
+   drag_mode_from_modifiers}` pure helpers + `SelectionToolHandler`
+   + `selection_overlay` widget. Modifier keys snapshot at press
+   time (Shift=add, Alt=subtract, Shift+Alt=intersect, none=
+   replace). `StrokeEngine::set_active(bool)` master gate so
+   switching tools cleanly commits any in-flight stroke.
+✅ **App-layer decomposition R.1 (PR #75, ADR 0032)**:
+   `noted::app::input::{ToolInputHandler, ToolInputRouter,
+   SelectionToolHandler}` extracted. Future tools (B.5+) ship as
+   one ToolInputHandler subclass + one `register_handler` line —
+   no growth in `App::install_frame_hook`.
+✅ **App-layer decomposition R.2 (PR #76, ADR 0032)**:
+   `noted::app::input::CameraController` extracted. Pan + zoom +
+   cursor tracking + framebuffer-resize all live in a focused
+   80-LOC class with 7 dedicated unit tests. App.cpp: 1402 (B.4)
+   → 1319 (-83 LOC, -6%).
 
 ### What does NOT work yet (by design — not bugs)
 
-- **Eraser preserves the page pattern** (Phase B.2 — needs the
-  canvas pass restructure, see [ADR 0031]).
-- **Per-tool option payloads** (brush size / hardness / opacity /
-  colour) — Phase B.3.
-- **Selection / shape / text / image tools** beyond their enum
-  presence — Phase B.4+.
+- **Hardness slider on the brush** — `BrushStyle::softness_ratio`
+  is preserved in PenOptions but not exposed in the UI because the
+  ribbon tessellator currently ignores it. Lands alongside the
+  SDF-edge brush in a future phase. **No fake sliders** policy.
+- **Shape / text / image tools** beyond their enum presence — one
+  behavioural PR each, per ADR 0031's roadmap.
+- **Selection consumed by Copy / Cut / Delete / Fill** — the
+  Selection data is live (Phase B.4) but the commands that act
+  on it haven't been wired yet. Same with feeding it into the
+  compositor's `SelectionMask` (the GPU plumbing exists per
+  ADR 0021 / 0022 but isn't enabled in App).
 - **Asset / LayerGraph / history embedding** in the `.noted` archive
   — Phase C/D follow-ups.
 - **Pen pressure on macOS / Linux** — Win32 WM_POINTER only today.
@@ -302,8 +331,13 @@ filters, color management). Phased to keep each PR focused:
 | A.3.d | Document linkage — `PageList` ownership moves into Document, mutation via Command, persists to `.noted` v2 (PR #68) | ✅ |
 | B.1 | Tool state machine — `ToolKind` / `ToolState` + tool palette widget + pen/eraser brush swap (PR #69, ADR 0031) | ✅ |
 | B.2 | Real eraser via canvas pass split — `gpu::StrokeTarget` + destination-out blend, per-stroke mode snapshot, page pattern survives erasure (PR #70) | ✅ |
-| B.3 | Per-tool option payloads — brush size / hardness / opacity / colour, colour-picker widget | next |
-| B.4+ | Selection / shape / text / image tools — one behavioural PR each | |
+| B.3 | Per-tool option payloads — `PenOptions` / `EraserOptions` + `brush_options` widget + colour picker + size sliders (PR #72) | ✅ |
+| B.4 | Rectangle selection tool — `SelectionToolHandler` + `selection_overlay` + modifier-key set ops (PR #73) | ✅ |
+| B.5+ | Shape / text / image tools — one behavioural PR each (under the new ToolInputHandler pattern) | |
+| **R.1** | **App-layer decomposition** — `ToolInputRouter` + `SelectionToolHandler` extracted (PR #75, ADR 0032) | ✅ |
+| **R.2** | **App-layer decomposition** — `CameraController` extracted (PR #76, ADR 0032) | ✅ |
+| **R.3** | **App-layer decomposition** — `RenderPasses` (4-pass canvas pipeline) extracted | next |
+| **R.4** | **App-layer decomposition** — `UiPanels` (draw_widgets + menu actions) extracted | |
 | C   | Photoshop depth — layer panel ops, shader blend modes (12 missing), filter pipeline, color management | |
 | D   | Goodnotes polish — smart shapes, lasso + transform handles, pen-button mapping, page templates, PDF export | |
 | E   | (optional) Native chrome — ImGui → Qt/Slint per ADR 0027 v1.0 boundary | |
@@ -317,50 +351,58 @@ filters, color management). Phased to keep each PR focused:
 
 ### Next session — pick up here
 
-**Target: Phase B.3 — per-tool option payloads + colour picker.**
-Branch name: `feat/brush-options-and-color-picker`.
+**Target: R.3 — `RenderPasses` extraction.** Branch name:
+`refactor/r3-render-passes`. Per [ADR 0032].
 
-Concrete plan (single focused PR, design per [ADR 0031] §
-"Per-tool option payloads"):
+This is the third slice of the App-layer decomposition. **Zero
+behaviour change** is the contract — 340/340 tests continue to pass
+at every intermediate state.
 
-1. **Pen options struct** — new `noted::domain::tool::PenOptions`
-   with brush-size range (`min_radius_px`, `max_radius_px`),
-   `softness_ratio`, `alpha_gamma`, colour (rgba). Wire-stable
-   layout — `.noted` schema may persist these in a future bump.
-2. **Eraser options struct** — `EraserOptions` with size +
-   hardness. The eraser ignores src colour by design
-   (destination-out), so no colour field. Hardness becomes a
-   future radius-falloff parameter; for B.3 it sets the
-   `softness_ratio` on the eraser's BrushStyle.
-3. **`ToolState` grows** payload members for each tool kind. Use
-   `std::variant` for the active payload OR per-kind fields kept
-   side-by-side (chose the latter in [ADR 0031] for type-safety
-   without runtime cost — single PenOptions, single EraserOptions,
-   etc.).
-4. **`tool_settings_for_tool`** now reads the per-tool payload
-   from `ToolState` and constructs the `BrushStyle` from it.
-5. **Colour picker widget** — small ImGui colour-picker bound to
-   `PenOptions::colour`. Either inline in the tool palette below
-   the Pen button (active only when Pen is selected) or in a
-   separate "Brush" panel. Inline is simpler for B.3.
-6. **Brush options sliders** — size min/max, softness, alpha gamma.
-   Bound to `PenOptions` fields. Live-updates the stroke engine's
-   brush via `set_brush(brush_from_options(pen_opts))`.
-7. **App wiring** — every frame, push the current `ToolState`'s
-   per-tool options into the stroke engine via
-   `tool_settings_for_tool`. The mode + brush swap on tool change
-   continues to work as today.
-8. **Tests** — pure-logic helpers on the options → BrushStyle
-   mapping (clamp negative radii, NaN guards), default-options
-   equality, wire-stable field offsets if struct layout matters.
-9. **Smoke** — open app, select Pen, drag the colour picker to red,
-   drag a stroke → red ink. Drag size slider up, draw → thicker
-   stroke. Switch to Eraser, hardness slider, erase → eraser
-   footprint matches the slider value.
+Concrete plan:
 
-After B.3: **Phase B.4** — selection tool (rectangle / lasso).
-Phase B.5: shape tool. Phase B.6: text tool. Phase B.7: image
-tool. Each its own behavioural PR with its option payload.
+1. **New `app/src/frame/render_passes.{hpp,cpp}`** —
+   `noted::app::frame::RenderPasses` class. Holds **references**
+   to the GPU resources App owns (not ownership): canvas,
+   strokes_target, page_renderer, layer_compositor, scene,
+   stroke_engine, composite pipeline + overlay pipeline +
+   pipeline layout + descriptor sets, imgui_host, camera.
+   Constructor takes a `Deps` struct so the ref list is
+   self-documenting.
+2. **Move `record_canvas_pass` / `record_strokes_pass` /
+   `record_overlay_pass` / `record_swapchain_pass`** into
+   RenderPasses as private member functions. Each becomes
+   `void record_*(VkCommandBuffer, VkExtent2D) const` reading
+   from the captured references.
+3. **`RenderPasses::render_frame(Renderer&, Swapchain&, ...)`** —
+   the per-frame orchestrator. Today's `App::render_one_frame`
+   body (build clear values + pass descriptors + call
+   `renderer.render_with_canvas`) moves here. Returns the same
+   `Result<void>` with the OUT_OF_DATE / SUBOPTIMAL recoverable
+   codes.
+4. **`recreate_swapchain` stays in App** — it touches the
+   swapchain itself + the renderer's per-image semaphores +
+   reallocates canvas + strokes_target. That's owner work, not
+   pass work. The descriptor re-binding after resize moves into
+   a small helper `App::rebind_composite_descriptors_()` to
+   document the contract.
+5. **App becomes a thin orchestrator**: `App::render_one_frame`
+   becomes one line — `return render_passes_->render_frame(...)`.
+   The 4 record_* methods on App disappear entirely.
+6. **Tests** — RenderPasses is GPU-dependent so unit tests
+   can't exercise the recording itself. What's testable is the
+   `Deps` struct's validation (a future paranoia helper) and
+   the smoke run remains the gating criterion.
+7. **Smoke** — pen still draws, eraser still erases preserving
+   page pattern, selection rect still appears, fb resize still
+   keeps the canvas aligned. Stderr stays at 0 bytes.
+
+After R.3: **R.4 — `UiPanels`** extraction (draw_widgets +
+handle_menu_actions + per-frame UI state pushes).
+
+After R.4: **Phase B.5 — Shape tool** ships as the FIRST tool
+under the fully-decomposed pattern: one `ShapeToolHandler`
+subclass + one `register_handler` line in App's startup. App
+itself shouldn't grow at all for B.5.
 
 ---
 
