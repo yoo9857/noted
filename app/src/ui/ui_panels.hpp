@@ -63,6 +63,7 @@ class StrokeEngine;
 namespace noted::app::input {
 class SelectionToolHandler;
 class ShapeToolHandler;
+class TextToolHandler;
 class ToolInputRouter;
 }  // namespace noted::app::input
 
@@ -84,6 +85,7 @@ public:
         // registered with the router.
         noted::app::input::SelectionToolHandler* selection_handler{nullptr};
         noted::app::input::ShapeToolHandler* shape_handler{nullptr};
+        noted::app::input::TextToolHandler* text_handler{nullptr};
 
         // Camera is non-const — the page-strip handler translates the
         // camera vertically when the user clicks a row or adds a page.
@@ -140,6 +142,7 @@ private:
     noted::app::input::ToolInputRouter& tool_input_router_;
     noted::app::input::SelectionToolHandler* selection_handler_;
     noted::app::input::ShapeToolHandler* shape_handler_;
+    noted::app::input::TextToolHandler* text_handler_;
 
     noted::canvas::Camera& camera_;
     const noted::gpu::Swapchain& swapchain_;

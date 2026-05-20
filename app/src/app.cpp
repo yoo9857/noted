@@ -168,6 +168,7 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
         .tool_input_router = *raw->tool_input_router_,
         .selection_handler = raw->selection_handler_,
         .shape_handler = raw->shape_handler_,
+        .text_handler = raw->text_handler_,
         .camera = raw->camera_,
         .swapchain = *raw->swapchain_,
         .cfg = raw->cfg_,
@@ -641,6 +642,10 @@ void App::install_frame_hook() {
     auto shape_handler = std::make_unique<noted::app::input::ShapeToolHandler>(shapes_, tools_);
     shape_handler_ = shape_handler.get();
     tool_input_router_->register_handler(std::move(shape_handler));
+    // Phase B.6 — Text tool. Same pattern.
+    auto text_handler = std::make_unique<noted::app::input::TextToolHandler>(texts_, tools_);
+    text_handler_ = text_handler.get();
+    tool_input_router_->register_handler(std::move(text_handler));
     tool_input_router_->set_active(tools_.active);
 }
 

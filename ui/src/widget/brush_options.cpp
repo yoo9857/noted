@@ -44,6 +44,24 @@ void draw_placeholder(const char* tool_name) {
     ImGui::TextWrapped("(no options yet — coming in a later phase)");
 }
 
+void draw_text(noted::domain::tool::TextOptions& opt) {
+    ImGui::TextDisabled("Text");
+    ImGui::Spacing();
+
+    ImGui::SliderFloat(
+        "Font size", &opt.font_size_px, 8.0F, 200.0F, "%.0f px", ImGuiSliderFlags_Logarithmic);
+
+    ImGui::Spacing();
+    float colour[4] = {opt.r, opt.g, opt.b, opt.a};
+    if (ImGui::ColorEdit4(
+            "Text colour", colour, ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_Float)) {
+        opt.r = colour[0];
+        opt.g = colour[1];
+        opt.b = colour[2];
+        opt.a = colour[3];
+    }
+}
+
 void draw_shape(noted::domain::tool::ShapeOptions& opt) {
     ImGui::TextDisabled("Shape");
     ImGui::Spacing();
@@ -97,7 +115,7 @@ void brush_options(noted::domain::tool::ToolState& tools, bool* open) {
             draw_shape(tools.shape);
             break;
         case ToolKind::text:
-            draw_placeholder("Text");
+            draw_text(tools.text);
             break;
         case ToolKind::image:
             draw_placeholder("Image");

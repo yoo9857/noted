@@ -9,6 +9,7 @@ add_executable(noted_app
     src/input/tool_input_router.cpp
     src/input/selection_tool_handler.cpp
     src/input/shape_tool_handler.cpp
+    src/input/text_tool_handler.cpp
     src/input/camera_controller.cpp
     src/frame/render_passes.cpp
     src/ui/ui_panels.cpp
