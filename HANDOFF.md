@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-20 · **main HEAD:** `ce32980` (clean, 0 open PRs)
+**Last updated:** 2026-05-20 · **main HEAD:** `1aba0ed` (clean, 0 open PRs)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -237,6 +237,19 @@ tests/        Unit + integration + bench + fuzz scaffolds
    cursor tracking + framebuffer-resize all live in a focused
    80-LOC class with 7 dedicated unit tests. App.cpp: 1402 (B.4)
    → 1319 (-83 LOC, -6%).
+✅ **App-layer decomposition R.3 (PR #78, ADR 0032)**:
+   `noted::app::frame::RenderPasses` extracted. The 4-pass
+   canvas pipeline (canvas / strokes / overlay / swapchain) +
+   `render_one_frame` body live in a 360-LOC class with a 16-ref
+   `Deps` struct documenting every dependency. App.cpp 1319 →
+   1207 (-112). `recreate_swapchain` stays in App (owner work).
+✅ **App-layer decomposition R.4 (PR #79, ADR 0032)** — **FINAL**:
+   `noted::app::ui::UiPanels` extracted. The entire `draw_widgets`
+   body (panels + command dispatches + per-frame state syncs) lives
+   in a 429-LOC class with a 20-ref Deps struct. App's
+   `draw_widgets` is now a one-line forward. App.cpp 1207 →
+   **1002** (-205). Cumulative R.1-R.4: **1402 → 1002, -400 LOC,
+   -28.5%**.
 
 ### What does NOT work yet (by design — not bugs)
 
@@ -336,8 +349,8 @@ filters, color management). Phased to keep each PR focused:
 | B.5+ | Shape / text / image tools — one behavioural PR each (under the new ToolInputHandler pattern) | |
 | **R.1** | **App-layer decomposition** — `ToolInputRouter` + `SelectionToolHandler` extracted (PR #75, ADR 0032) | ✅ |
 | **R.2** | **App-layer decomposition** — `CameraController` extracted (PR #76, ADR 0032) | ✅ |
-| **R.3** | **App-layer decomposition** — `RenderPasses` (4-pass canvas pipeline) extracted | next |
-| **R.4** | **App-layer decomposition** — `UiPanels` (draw_widgets + menu actions) extracted | |
+| **R.3** | **App-layer decomposition** — `RenderPasses` (4-pass canvas pipeline) extracted (PR #78, ADR 0032) | ✅ |
+| **R.4** | **App-layer decomposition** — `UiPanels` (draw_widgets body) extracted (PR #79, ADR 0032) | ✅ |
 | C   | Photoshop depth — layer panel ops, shader blend modes (12 missing), filter pipeline, color management | |
 | D   | Goodnotes polish — smart shapes, lasso + transform handles, pen-button mapping, page templates, PDF export | |
 | E   | (optional) Native chrome — ImGui → Qt/Slint per ADR 0027 v1.0 boundary | |
@@ -351,8 +364,41 @@ filters, color management). Phased to keep each PR focused:
 
 ### Next session — pick up here
 
-**Target: R.3 — `RenderPasses` extraction.** Branch name:
-`refactor/r3-render-passes`. Per [ADR 0032].
+**Target: Phase B.5 — Shape tool.** The first tool under the
+**fully-decomposed App pattern**.
+
+Branch name: `feat/shape-tool`. Per [ADR 0031] + the
+ToolInputHandler interface landed in R.1.
+
+The whole point of R.1-R.4 was to make this PR small. **App
+should not grow.** Adding the shape tool is:
+
+1. **New `app/src/input/shape_tool_handler.hpp` + `.cpp`** —
+   a `ToolInputHandler` subclass. On press: record start point.
+   On move: update current. On release: commit a shape to the
+   document via a new command. On deactivate: discard in-flight
+   drag.
+2. **New `domain::tool::ShapeOptions` + `domain::tool::shape_drag_*`
+   pure helpers** (analogous to selection_drag.{hpp,cpp}). The
+   "what shape kind, what stroke colour, what fill colour" lives
+   here; the handler glues pointer events to the data via these.
+3. **`ToolState::shape` payload field** + a `ShapeKind` enum
+   (rectangle, ellipse, line, polygon — let's start with
+   rectangle + ellipse for B.5).
+4. **`brush_options` panel grows** a Shape section showing the
+   shape options when Shape is the active tool. Just like the Pen
+   and Eraser sections.
+5. **App's `install_frame_hook` gains ONE line:**
+   `tool_input_router_->register_handler(std::make_unique<ShapeToolHandler>(...));`
+6. **Tests** — pure-logic helpers (shape_rect_from_drag,
+   shape_apply_drag) covered without ImGui or Vulkan.
+7. **Smoke** — pick Shape, drag → rectangle outlined.
+
+**App.cpp should remain at 1002 LOC after B.5 lands.** That's
+the test of the refactor.
+
+After B.5: B.6 (Text tool), B.7 (Image tool). Each follows the
+same one-handler-one-line pattern.
 
 This is the third slice of the App-layer decomposition. **Zero
 behaviour change** is the contract — 340/340 tests continue to pass
