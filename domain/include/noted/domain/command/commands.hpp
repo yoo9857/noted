@@ -20,12 +20,14 @@
 //
 // Rationale: see docs/architecture/0024-command-undo-redo.md.
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 #include "noted/domain/command/command.hpp"
 #include "noted/domain/document/document.hpp"
+#include "noted/engine/canvas/page.hpp"
 #include "noted/engine/error/error.hpp"
 
 namespace noted::domain {
@@ -140,6 +142,43 @@ private:
     BlockId target_;
     bool new_visible_;
     bool old_visible_{true};
+};
+
+// Append a page at the bottom of the document's PageList. Records
+// the assigned index so `undo()` can remove the exact page created.
+class AddPageCommand final : public Command {
+public:
+    AddPageCommand(float w, float h, noted::canvas::PageBackground bg, float origin_x);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override { return "Add page"; }
+
+    [[nodiscard]] auto assigned_index() const noexcept -> std::size_t { return assigned_index_; }
+
+private:
+    float w_;
+    float h_;
+    noted::canvas::PageBackground bg_;
+    float origin_x_;
+    std::size_t assigned_index_{0};
+    bool applied_{false};
+};
+
+// Remove a page at a given index. Snapshots the page on apply so undo
+// can re-insert it at the same index with the same extent + background.
+class RemovePageCommand final : public Command {
+public:
+    explicit RemovePageCommand(std::size_t index);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override { return "Remove page"; }
+
+private:
+    std::size_t target_index_;
+    noted::canvas::Page snapshot_{};
+    bool applied_{false};
 };
 
 // Rename a block.

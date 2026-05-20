@@ -12,7 +12,7 @@
 // Schema summary (see ADR 0025 for the full spec):
 //
 //   {
-//     "version": 1,
+//     "version": 2,
 //     "root": <BlockId>,                 // 0 when document is empty
 //     "blocks": [
 //       {
@@ -25,8 +25,20 @@
 //         "payload":  { ...kind-specific... }
 //       },
 //       ...
-//     ]
+//     ],
+//     "pages": {                         // optional in v1; required in v2 (may be empty)
+//       "gap_px": <float>,
+//       "items": [
+//         { "w": <float>, "h": <float>, "bg": <int>, "x": <float> },
+//         ...
+//       ]
+//     }
 //   }
+//
+// Versions:
+//   - v1: blocks only. Loader accepts these for back-compat.
+//   - v2: adds `pages`. Writer always emits v2. v1 files load with an
+//     empty page list.
 //
 // The payload object's keys depend on the block's kind. See ADR 0025
 // for the table. Group blocks emit `{}`.
@@ -49,12 +61,10 @@ class Document;
 
 namespace noted::domain::io {
 
-// On-disk schema version. Increments only on breaking changes.
-// Reading a file with a newer version is an error (caller upgrades
-// the writer first). Reading older versions is supported via a
-// migration step (not implemented in v1 — there are no older
-// versions yet).
-inline constexpr int kDocumentJsonVersion = 1;
+// On-disk schema version. Writer always emits this; reader accepts
+// this value AND every prior supported version (currently 1).
+inline constexpr int kDocumentJsonVersion = 2;
+inline constexpr int kDocumentJsonMinReadableVersion = 1;
 
 // Serialize `doc` to JSON. Output is pretty-printed with 2-space
 // indent for diff-friendliness; that's worth ~30% extra bytes at the

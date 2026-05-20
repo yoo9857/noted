@@ -196,11 +196,87 @@ TEST(PageList, RemoveOnEmptyIsNoOp) {
 // ---- Wire-stable enum ordinals --------------------------------------------
 
 TEST(PageBackgroundOrdinals, MatchSchemaContract) {
-    // PageBackground ordinals are wire-stable for the future
-    // .noted v2 schema. Pin them here so a reorder doesn't slip
-    // through review.
+    // PageBackground ordinals are wire-stable for the v2 .noted
+    // schema. Pin them here so a reorder doesn't slip through review.
     EXPECT_EQ(static_cast<int>(PageBackground::blank), 0);
     EXPECT_EQ(static_cast<int>(PageBackground::lined), 1);
     EXPECT_EQ(static_cast<int>(PageBackground::grid), 2);
     EXPECT_EQ(static_cast<int>(PageBackground::dotted), 3);
+}
+
+// ---- insert_page (used by undo of remove) ----------------------------------
+
+TEST(PageList, InsertPageAtMiddleReflowsAll) {
+    PageList list{10.0F};
+    list.add_page(100.0F, 100.0F, PageBackground::blank);  // y=0
+    list.add_page(100.0F, 100.0F, PageBackground::lined);  // y=110
+    // Insert at index 1: shift "lined" page down.
+    Page p{};
+    p.extent_w_px = 100.0F;
+    p.extent_h_px = 50.0F;
+    p.background = PageBackground::grid;
+    p.origin_x_px = 33.0F;  // x is preserved through insert
+    const auto idx = list.insert_page(1, p);
+    EXPECT_EQ(idx, 1U);
+    ASSERT_EQ(list.size(), 3U);
+    EXPECT_EQ(list.pages()[1].background, PageBackground::grid);
+    EXPECT_FLOAT_EQ(list.pages()[1].origin_x_px, 33.0F);
+    EXPECT_FLOAT_EQ(list.pages()[0].origin_y_px, 0.0F);
+    EXPECT_FLOAT_EQ(list.pages()[1].origin_y_px, 110.0F);  // 100 + 10
+    EXPECT_FLOAT_EQ(list.pages()[2].origin_y_px, 170.0F);  // 110 + 50 + 10
+}
+
+TEST(PageList, InsertPageAtEndAppends) {
+    PageList list{10.0F};
+    list.add_page(100.0F, 100.0F, PageBackground::blank);
+    Page p{};
+    p.extent_w_px = 200.0F;
+    p.extent_h_px = 200.0F;
+    p.background = PageBackground::dotted;
+    const auto idx = list.insert_page(1, p);  // == size, appends
+    EXPECT_EQ(idx, 1U);
+    EXPECT_EQ(list.size(), 2U);
+    EXPECT_EQ(list.pages()[1].background, PageBackground::dotted);
+}
+
+TEST(PageList, InsertPageBeyondSizeClampsToEnd) {
+    PageList list{10.0F};
+    list.add_page(100.0F, 100.0F, PageBackground::blank);
+    Page p{};
+    p.extent_w_px = 100.0F;
+    p.extent_h_px = 100.0F;
+    p.background = PageBackground::grid;
+    const auto idx = list.insert_page(999, p);
+    EXPECT_EQ(idx, 1U);  // clamped
+    EXPECT_EQ(list.size(), 2U);
+}
+
+TEST(PageList, InsertPageClampsBadExtents) {
+    PageList list;
+    Page p{};
+    p.extent_w_px = -50.0F;
+    p.extent_h_px = 0.0F;
+    p.background = PageBackground::blank;
+    list.insert_page(0, p);
+    EXPECT_FLOAT_EQ(list.pages()[0].extent_w_px, 1.0F);
+    EXPECT_FLOAT_EQ(list.pages()[0].extent_h_px, 1.0F);
+}
+
+// ---- set_gap_px (used by JSON loader) --------------------------------------
+
+TEST(PageList, SetGapReflowsOrigins) {
+    PageList list{10.0F};
+    list.add_page(100.0F, 100.0F, PageBackground::blank);
+    list.add_page(100.0F, 100.0F, PageBackground::blank);
+    EXPECT_FLOAT_EQ(list.pages()[1].origin_y_px, 110.0F);
+
+    list.set_gap_px(50.0F);
+    EXPECT_FLOAT_EQ(list.gap_px(), 50.0F);
+    EXPECT_FLOAT_EQ(list.pages()[1].origin_y_px, 150.0F);
+}
+
+TEST(PageList, SetGapNegativeClampsToZero) {
+    PageList list{20.0F};
+    list.set_gap_px(-100.0F);
+    EXPECT_FLOAT_EQ(list.gap_px(), 0.0F);
 }

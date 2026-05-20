@@ -58,6 +58,22 @@ void PageList::remove_page(std::size_t index) {
     reflow_origins();
 }
 
+auto PageList::insert_page(std::size_t index, const Page& page) -> std::size_t {
+    const std::size_t effective = index > pages_.size() ? pages_.size() : index;
+    Page p = page;
+    // Same extent-clamping discipline as add_page so a malformed
+    // restore can't poison the list.
+    p.extent_w_px = safe_extent(p.extent_w_px);
+    p.extent_h_px = safe_extent(p.extent_h_px);
+    // origin_y_px is recomputed by the reflow; origin_x_px is left
+    // untouched (matches the "shared left edge with per-page X
+    // overrides" contract that the rest of the API observes).
+    p.origin_y_px = 0.0F;
+    pages_.insert(pages_.begin() + static_cast<std::ptrdiff_t>(effective), p);
+    reflow_origins();
+    return effective;
+}
+
 void PageList::set_page_origin_x(std::size_t index, float x) noexcept {
     if (index >= pages_.size()) {
         return;
@@ -70,6 +86,11 @@ void PageList::set_page_origin_x(std::size_t index, float x) noexcept {
         return;
     }
     pages_[index].origin_x_px = x;
+}
+
+void PageList::set_gap_px(float gap) noexcept {
+    gap_ = safe_gap(gap);
+    reflow_origins();
 }
 
 auto PageList::total_height_px() const noexcept -> float {

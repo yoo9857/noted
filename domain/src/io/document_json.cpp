@@ -23,7 +23,15 @@ namespace {
 using json = nlohmann::json;
 
 // Top-level keys we recognize. Strict parser rejects any other key.
-constexpr std::array<std::string_view, 3> kTopLevelKeys{"version", "root", "blocks"};
+// `pages` is optional for v1 (back-compat) — its presence is not
+// itself an error at any version.
+constexpr std::array<std::string_view, 4> kTopLevelKeys{"version", "root", "blocks", "pages"};
+
+// Per-pages-object keys.
+constexpr std::array<std::string_view, 2> kPagesKeys{"gap_px", "items"};
+
+// Per-page-item keys.
+constexpr std::array<std::string_view, 4> kPageItemKeys{"w", "h", "bg", "x"};
 
 // Per-block keys we recognize.
 constexpr std::array<std::string_view, 7> kBlockKeys{
@@ -309,6 +317,22 @@ template <typename T>
 
 }  // namespace
 
+[[nodiscard]] auto serialize_pages(const noted::canvas::PageList& pages) -> json {
+    json items = json::array();
+    for (const auto& p : pages.pages()) {
+        items.push_back({
+            {"w", p.extent_w_px},
+            {"h", p.extent_h_px},
+            {"bg", static_cast<int>(p.background)},
+            {"x", p.origin_x_px},
+        });
+    }
+    return json{
+        {"gap_px", pages.gap_px()},
+        {"items", std::move(items)},
+    };
+}
+
 auto document_to_json(const Document& doc) -> std::string {
     json out;
     out["version"] = kDocumentJsonVersion;
@@ -326,6 +350,7 @@ auto document_to_json(const Document& doc) -> std::string {
         }
     }
     out["blocks"] = std::move(blocks);
+    out["pages"] = serialize_pages(doc.pages());
 
     // 2-space indent — readable diffs at small document scale.
     return out.dump(2);
@@ -352,16 +377,21 @@ auto document_from_json(std::string_view json_text) -> Result<Document> {
             std::string{"document_from_json: unknown top-level key '"} + bad + "'"));
     }
 
-    // Version.
+    // Version. Reader accepts every version in
+    // [kDocumentJsonMinReadableVersion, kDocumentJsonVersion]. A
+    // newer version on disk is a hard error (asks the user to
+    // upgrade the binary) — silent truncation of unknown fields
+    // would risk data loss on round-trip.
     auto version = require<int>(root_obj, "version", "document_from_json");
     if (!version) {
         return std::unexpected(std::move(version).error());
     }
-    if (*version != kDocumentJsonVersion) {
-        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_state,
-                                                 "document_from_json: unsupported version " +
-                                                     std::to_string(*version) + " (expected " +
-                                                     std::to_string(kDocumentJsonVersion) + ")"));
+    if (*version < kDocumentJsonMinReadableVersion || *version > kDocumentJsonVersion) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_state,
+            "document_from_json: unsupported version " + std::to_string(*version) +
+                " (supported [" + std::to_string(kDocumentJsonMinReadableVersion) + ", " +
+                std::to_string(kDocumentJsonVersion) + "])"));
     }
 
     auto stored_root = require<BlockId>(root_obj, "root", "document_from_json");
@@ -379,48 +409,119 @@ auto document_from_json(std::string_view json_text) -> Result<Document> {
                                                  "document_from_json: 'blocks' is not an array"));
     }
 
-    // Empty document case.
     Document doc;
     if (blocks_arr.empty()) {
+        // Empty-blocks invariant: root must also be invalid. Fall
+        // through to the pages parse step (a v2 doc can have empty
+        // blocks but populated pages — and the strict-key checks for
+        // the pages object must still run even on an empty-block
+        // doc, otherwise unknown keys silently round-trip).
         if (*stored_root != invalid_block_id) {
             return std::unexpected(noted::make_error(noted::ErrorCode::invalid_state,
                                                      "document_from_json: root id " +
                                                          std::to_string(*stored_root) +
                                                          " set but blocks is empty"));
         }
-        return doc;
-    }
-
-    // Parse blocks into a vector<BlockNode>. The file is expected to be
-    // in pre-order (root first, parents before children) — `restore_subtree`
-    // enforces that, plus internal consistency.
-    std::vector<BlockNode> subtree;
-    subtree.reserve(blocks_arr.size());
-    for (std::size_t i = 0; i < blocks_arr.size(); ++i) {
-        auto node = parse_block(blocks_arr[i], i);
-        if (!node) {
-            return std::unexpected(std::move(node).error());
+    } else {
+        // Parse blocks into a vector<BlockNode>. The file is expected to be
+        // in pre-order (root first, parents before children) — `restore_subtree`
+        // enforces that, plus internal consistency.
+        std::vector<BlockNode> subtree;
+        subtree.reserve(blocks_arr.size());
+        for (std::size_t i = 0; i < blocks_arr.size(); ++i) {
+            auto node = parse_block(blocks_arr[i], i);
+            if (!node) {
+                return std::unexpected(std::move(node).error());
+            }
+            subtree.push_back(std::move(*node));
         }
-        subtree.push_back(std::move(*node));
+
+        // The first block must be the document root. Verify its id matches
+        // the file's stored root id.
+        if (subtree.front().id != *stored_root) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::invalid_state,
+                "document_from_json: blocks[0].id " + std::to_string(subtree.front().id) +
+                    " does not match top-level root " + std::to_string(*stored_root)));
+        }
+        if (subtree.front().parent != invalid_block_id) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::invalid_state,
+                "document_from_json: root block must have parent=0 (invalid_block_id)"));
+        }
+
+        auto restore = doc.restore_subtree(std::move(subtree), 0);
+        if (!restore) {
+            return std::unexpected(std::move(restore).error());
+        }
     }
 
-    // The first block must be the document root. Verify its id matches
-    // the file's stored root id.
-    if (subtree.front().id != *stored_root) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::invalid_state,
-            "document_from_json: blocks[0].id " + std::to_string(subtree.front().id) +
-                " does not match top-level root " + std::to_string(*stored_root)));
-    }
-    if (subtree.front().parent != invalid_block_id) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::invalid_state,
-            "document_from_json: root block must have parent=0 (invalid_block_id)"));
-    }
-
-    auto restore = doc.restore_subtree(std::move(subtree), 0);
-    if (!restore) {
-        return std::unexpected(std::move(restore).error());
+    // Pages — optional at any version. Absent ⇒ empty page list.
+    if (root_obj.contains("pages")) {
+        const auto& pages_obj = root_obj.at("pages");
+        if (!pages_obj.is_object()) {
+            return std::unexpected(
+                noted::make_error(noted::ErrorCode::invalid_argument,
+                                  "document_from_json: 'pages' is not an object"));
+        }
+        if (auto bad = find_unknown_key(pages_obj, kPagesKeys); !bad.empty()) {
+            return std::unexpected(
+                noted::make_error(noted::ErrorCode::invalid_argument,
+                                  "document_from_json: 'pages' has unknown key '" + bad + "'"));
+        }
+        auto gap = require<float>(pages_obj, "gap_px", "pages");
+        if (!gap) {
+            return std::unexpected(std::move(gap).error());
+        }
+        if (!pages_obj.contains("items")) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::invalid_argument, "document_from_json: 'pages' missing 'items'"));
+        }
+        const auto& items = pages_obj.at("items");
+        if (!items.is_array()) {
+            return std::unexpected(
+                noted::make_error(noted::ErrorCode::invalid_argument,
+                                  "document_from_json: 'pages.items' is not an array"));
+        }
+        noted::canvas::PageList pages;
+        pages.set_gap_px(*gap);
+        for (std::size_t i = 0; i < items.size(); ++i) {
+            const std::string context = "pages.items[" + std::to_string(i) + "]";
+            const auto& item = items[i];
+            if (!item.is_object()) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": not an object"));
+            }
+            if (auto bad = find_unknown_key(item, kPageItemKeys); !bad.empty()) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": unknown key '" + bad + "'"));
+            }
+            auto w = require<float>(item, "w", context);
+            auto h = require<float>(item, "h", context);
+            auto bg_int = require<int>(item, "bg", context);
+            auto x = require<float>(item, "x", context);
+            if (!w) {
+                return std::unexpected(std::move(w).error());
+            }
+            if (!h) {
+                return std::unexpected(std::move(h).error());
+            }
+            if (!bg_int) {
+                return std::unexpected(std::move(bg_int).error());
+            }
+            if (!x) {
+                return std::unexpected(std::move(x).error());
+            }
+            if (*bg_int < 0 || *bg_int > static_cast<int>(noted::canvas::PageBackground::dotted)) {
+                return std::unexpected(noted::make_error(
+                    noted::ErrorCode::invalid_argument,
+                    context + ": bg ordinal " + std::to_string(*bg_int) + " out of range"));
+            }
+            const auto idx =
+                pages.add_page(*w, *h, static_cast<noted::canvas::PageBackground>(*bg_int));
+            pages.set_page_origin_x(idx, *x);
+        }
+        doc.replace_pages(std::move(pages));
     }
     return doc;
 }

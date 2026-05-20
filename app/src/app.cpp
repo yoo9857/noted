@@ -402,19 +402,23 @@ auto App::init_page_renderer() -> noted::Result<void> {
     // horizontally centred at the identity camera transform. Page
     // dimensions + initial backgrounds come from AppConfig so a
     // future Preferences UI can flip them without recompiling.
+    //
+    // Seed is written **directly** into the document, NOT through
+    // AddPageCommand — these aren't user edits, so they shouldn't
+    // sit in the undo stack and they shouldn't mark the document as
+    // dirty. (`is_dirty()` compares undo size to saved baseline; both
+    // stay zero with this path.)
     const auto canvas = swapchain_->summary().extent;
     const float page_w = cfg_.canvas.default_page_extent_w_px;
     const float page_h = cfg_.canvas.default_page_extent_h_px;
     const float origin_x = std::max(20.0F, (static_cast<float>(canvas.width) - page_w) * 0.5F);
-    pages_ = noted::canvas::PageList{24.0F};
     constexpr std::array<noted::canvas::PageBackground, 3> kDemoBackgrounds{{
         noted::canvas::PageBackground::grid,
         noted::canvas::PageBackground::lined,
         noted::canvas::PageBackground::dotted,
     }};
     for (const auto bg : kDemoBackgrounds) {
-        const auto idx = pages_.add_page(page_w, page_h, bg);
-        pages_.set_page_origin_x(idx, origin_x);
+        (void) session_.document().add_page(page_w, page_h, bg, origin_x);
     }
     return {};
 }
@@ -830,38 +834,52 @@ void App::draw_widgets() {
     // the user double-clicked; mutate-then-focus keeps the index
     // semantics sane (focus_request always refers to the post-add
     // list because no remove competes in the same frame).
-    auto strip = noted::ui::widget::page_strip(pages_, &menu_state_.show_page_strip);
+    const auto& pages = session_.document().pages();
+    auto strip = noted::ui::widget::page_strip(pages, &menu_state_.show_page_strip);
     // Park the focused page just below the menu bar with a bit of
     // breathing room. Shared by both add-then-auto-focus and the
     // explicit row-click focus so the camera lands at the same y.
     constexpr double kFocusTargetScreenY = 80.0;
     if (strip.add_request) {
-        const auto idx = pages_.add_page(cfg_.canvas.default_page_extent_w_px,
-                                         cfg_.canvas.default_page_extent_h_px,
-                                         cfg_.canvas.default_page_background);
-        // Match the demo seed's centring so newly added pages line
+        // Match the demo seed's centring so newly-added pages line
         // up with the existing ones at the identity camera transform.
         const auto canvas = swapchain_->summary().extent;
         const float origin_x = std::max(
             20.0F,
             (static_cast<float>(canvas.width) - cfg_.canvas.default_page_extent_w_px) * 0.5F);
-        pages_.set_page_origin_x(idx, origin_x);
-        // Auto-focus the newly-added page. Without this the new page
-        // lands below the visible camera region and the click feels
-        // like a no-op — the user-reported bug that motivated this.
-        const double new_y = noted::ui::widget::camera_translation_y_for_page(
-            pages_, idx, camera_.translation_y(), camera_.scale(), kFocusTargetScreenY);
-        camera_.set_translation(camera_.translation_x(), new_y);
+        auto cmd =
+            std::make_unique<noted::domain::AddPageCommand>(cfg_.canvas.default_page_extent_w_px,
+                                                            cfg_.canvas.default_page_extent_h_px,
+                                                            cfg_.canvas.default_page_background,
+                                                            origin_x);
+        auto* cmd_ptr = cmd.get();
+        if (auto r = session_.execute(std::move(cmd)); !r) {
+            std::cerr << r.error().format() << '\n';
+        } else {
+            // Auto-focus the newly-added page. Without this the new
+            // page lands below the visible camera region and the
+            // click feels like a no-op.
+            const double new_y =
+                noted::ui::widget::camera_translation_y_for_page(session_.document().pages(),
+                                                                 cmd_ptr->assigned_index(),
+                                                                 camera_.translation_y(),
+                                                                 camera_.scale(),
+                                                                 kFocusTargetScreenY);
+            camera_.set_translation(camera_.translation_x(), new_y);
+        }
     }
     if (strip.remove_request) {
-        pages_.remove_page(*strip.remove_request);
+        auto cmd = std::make_unique<noted::domain::RemovePageCommand>(*strip.remove_request);
+        if (auto r = session_.execute(std::move(cmd)); !r) {
+            std::cerr << r.error().format() << '\n';
+        }
     }
     if (strip.focus_request) {
         // The current camera translation_y is returned unchanged if
         // the index is now stale (e.g. the page got removed in the
         // same frame), so this is safe.
         const double new_y =
-            noted::ui::widget::camera_translation_y_for_page(pages_,
+            noted::ui::widget::camera_translation_y_for_page(session_.document().pages(),
                                                              *strip.focus_request,
                                                              camera_.translation_y(),
                                                              camera_.scale(),
@@ -978,7 +996,7 @@ void App::record_canvas_pass(VkCommandBuffer cb, VkExtent2D ext) {
     //      pages (none today; demo payloads were dropped in
     //      A.3.b so pages stay visible).
     //   3. Stroke engine — vector ink ribbons on top.
-    page_renderer_->render(cb, ext, pages_);
+    page_renderer_->render(cb, ext, session_.document().pages());
     layer_compositor_->composite(cb, ext, scene_->graph, scene_->store);
     stroke_engine_->record(cb, ext);
 }
