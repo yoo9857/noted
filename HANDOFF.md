@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-20 · **main HEAD:** `35bce9d` (clean, 0 open PRs)
+**Last updated:** 2026-05-20 · **main HEAD:** `48f6a2b` (clean, 0 open PRs)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -348,7 +348,8 @@ filters, color management). Phased to keep each PR focused:
 | B.4 | Rectangle selection tool — `SelectionToolHandler` + `selection_overlay` + modifier-key set ops (PR #73) | ✅ |
 | B.5 | Shape tool — rectangle + ellipse, `ShapeToolHandler` + `shape_overlay`, app.cpp Δ +8 LOC (PR #81) | ✅ |
 | B.6 | Text tool — click+type, `TextToolHandler` + `text_overlay` (pure-domain API), app.cpp Δ +5 LOC (PR #82) | ✅ |
-| B.7 | Image tool — paste/drop image primitive | |
+| B.7 | Image tool — click-to-place placeholder, `ImageToolHandler` + `image_overlay`, app.cpp Δ +7 LOC (PR #84) | ✅ |
+| B.7.b | Image tool follow-up — nativefiledialog picker + stb_image decode + VMA `VkImage` upload + `ImTextureID` registry | |
 | **R.1** | **App-layer decomposition** — `ToolInputRouter` + `SelectionToolHandler` extracted (PR #75, ADR 0032) | ✅ |
 | **R.2** | **App-layer decomposition** — `CameraController` extracted (PR #76, ADR 0032) | ✅ |
 | **R.3** | **App-layer decomposition** — `RenderPasses` (4-pass canvas pipeline) extracted (PR #78, ADR 0032) | ✅ |
@@ -366,9 +367,48 @@ filters, color management). Phased to keep each PR focused:
 
 ### Next session — pick up here
 
-**Target: Phase B.7 — Image tool.** Third validation of the
-ToolInputHandler pattern (B.5 Shape: app.cpp +8 LOC; B.6 Text:
-app.cpp +5 LOC; B.7 Image should land in the same budget).
+**B.7 placeholder is done. Next: persistence consolidation for
+B-series primitives** OR **B.7.b real raster upload**. Pick one.
+
+**Option 1 — persistence consolidation** (recommended). Today the
+App owns three vectors (`shapes_`, `texts_`, `images_`) that
+neither save nor undo. They should graduate to `Document::shapes()`
+/ `texts()` / `images()` with `Add*Command` / `Remove*Command` so:
+
+  - Undo/redo works on shape / text / image placement
+  - `.noted` save round-trips all three (schema bump to v3)
+  - Dirty marker fires when any of them changes
+  - Selection-cut / -copy / -paste can target them eventually
+
+Same template as A.3.d (which graduated `PageList` into Document):
+schema-versioned JSON IO, append-only enum ordinals, one PR per
+primitive kind OR one consolidation PR — your call. Branch:
+`feat/document-owns-primitives`.
+
+**Option 2 — B.7.b real raster upload.** Now that the placeholder
+architecture is shipping, fill in:
+
+  - `nativefiledialog-extended` picker (already a dep) wired to
+    the "Pick image…" button in `brush_options.cpp` (currently
+    disabled-text)
+  - `stb_image` decode into a CPU `std::vector<uint8_t>` (RGBA8)
+  - VMA-backed `VkImage` upload via a transient staging buffer
+  - `ImGui_ImplVulkan_AddTexture` → `ImTextureID` registry; one
+    image per primitive, freed on remove
+  - Replace `AddRectFilled` placeholder body with `AddImage`
+    in `image_overlay.cpp` (keep the border + label as overlay
+    affordances when the image fails to load)
+
+Branch: `feat/image-upload`.
+
+**Recommendation: do persistence first.** The placeholders teach
+the user nothing if a reload drops them; real GPU upload is a much
+bigger fish (descriptor lifetime, registry, mid-frame uploads) and
+benefits from having the persistence contract settled first.
+
+---
+
+### Earlier proposed B.7 plan (kept for reference)
 
 Branch name: `feat/image-tool`.
 
