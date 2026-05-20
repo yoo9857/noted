@@ -61,6 +61,7 @@
 #include "noted/ui/widget/outline_panel.hpp"
 
 #include "config/app_config.hpp"
+#include "input/camera_controller.hpp"
 #include "input/selection_tool_handler.hpp"
 #include "input/tool_input_router.hpp"
 #include "scene/demo_scene.hpp"
@@ -272,18 +273,11 @@ private:
     // canvas quad), the stroke engine (input unprojection), and the
     // status / debug overlays (zoom % readout).
     noted::canvas::Camera camera_{};
-    // Last seen pointer position in screen pixels — tracked so the
-    // scroll handler can zoom around the cursor. Updated on every
-    // pointer-moved event.
-    double cursor_x_{0.0};
-    double cursor_y_{0.0};
-    // Middle-button drag state for canvas panning. `panning_` is true
-    // between middle-press and middle-release; `pan_last_*` stores the
-    // previous frame's pointer position so the move handler can
-    // compute a delta.
-    bool panning_{false};
-    double pan_last_x_{0.0};
-    double pan_last_y_{0.0};
+    // Pan + zoom + cursor tracking + framebuffer-resize all live on
+    // `CameraController` after Phase R.2. Heap-allocated for stable
+    // `this` (hook lambdas capture themselves); built in
+    // install_frame_hook once the registry is alive.
+    std::unique_ptr<noted::app::input::CameraController> camera_controller_;
 };
 
 }  // namespace noted::app
