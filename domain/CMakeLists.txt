@@ -8,6 +8,7 @@ noted_add_module(
         src/selection/selection.cpp
         src/tool/tool.cpp
         src/tool/options.cpp
+        src/tool/selection_drag.cpp
     PUBLIC_DEPS   noted::engine
     PRIVATE_DEPS  nlohmann_json::nlohmann_json
 )

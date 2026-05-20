@@ -79,6 +79,7 @@ auto menu_bar(MenuBarState& state, const MenuBarStatus& status) -> MenuBarResult
         ImGui::MenuItem("Page strip", nullptr, &state.show_page_strip);
         ImGui::MenuItem("Tool palette", nullptr, &state.show_tool_palette);
         ImGui::MenuItem("Brush options", nullptr, &state.show_brush_options);
+        ImGui::MenuItem("Selection overlay", nullptr, &state.show_selection_overlay);
         ImGui::MenuItem("Debug overlay", nullptr, &state.show_debug_overlay);
         ImGui::MenuItem("ImGui Demo", nullptr, &state.show_demo_window);
         if (ImGui::BeginMenu("Theme")) {
