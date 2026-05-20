@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-20 · **main HEAD:** `48f6a2b` (clean, 0 open PRs)
+**Last updated:** 2026-05-20 · **main HEAD:** `0198483` (clean, 0 open PRs)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -349,6 +349,9 @@ filters, color management). Phased to keep each PR focused:
 | B.5 | Shape tool — rectangle + ellipse, `ShapeToolHandler` + `shape_overlay`, app.cpp Δ +8 LOC (PR #81) | ✅ |
 | B.6 | Text tool — click+type, `TextToolHandler` + `text_overlay` (pure-domain API), app.cpp Δ +5 LOC (PR #82) | ✅ |
 | B.7 | Image tool — click-to-place placeholder, `ImageToolHandler` + `image_overlay`, app.cpp Δ +7 LOC (PR #84) | ✅ |
+| **P.S.1** | **Persistence consolidation — shapes graduate** to `Document::shapes()` + `Add/RemoveShapeCommand` + `.noted` v3 (PR #86) | ✅ |
+| **P.S.2** | **Persistence consolidation — texts graduate** to `Document::texts()` + `Add/RemoveTextCommand` + `.noted` v4 (PR #87) | ✅ |
+| **P.S.3** | **Persistence consolidation — images graduate** to `Document::images()` + `Add/RemoveImageCommand` + `.noted` v5 (PR #88) | ✅ |
 | B.7.b | Image tool follow-up — nativefiledialog picker + stb_image decode + VMA `VkImage` upload + `ImTextureID` registry | |
 | **R.1** | **App-layer decomposition** — `ToolInputRouter` + `SelectionToolHandler` extracted (PR #75, ADR 0032) | ✅ |
 | **R.2** | **App-layer decomposition** — `CameraController` extracted (PR #76, ADR 0032) | ✅ |
