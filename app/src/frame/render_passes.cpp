@@ -31,14 +31,24 @@ struct CompositePush {
 static_assert(sizeof(CompositePush) == 16,
               "CompositePush must mirror shaders/fullscreen.slang CompositePush");
 
-// Clear values are constants per the design — the canvas's paper
-// shows over an opaque-black clear, the strokes target is fully
-// transparent at frame start so eraser alpha can't leak across
-// frames, and the swapchain clears to dark teal as a regression
-// tell for the composite quad ever leaving edges blank.
-constexpr VkClearColorValue kCanvasClear{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}};
+// Clear values — the "desk" colour shows everywhere outside a page.
+// Canvas clear + swapchain clear are deliberately the **same** RGB so
+// the visible background is uniform whether the composite quad covers
+// the swapchain (zoom ≥ 1) or shrinks inside it (zoom < 1). Picking a
+// dark neutral grey gives bright paper pages a clear figure/ground
+// contrast and reads as "paper sitting on a desk" — the Goodnotes /
+// Procreate convention. The strokes target stays fully transparent at
+// frame start so eraser alpha can't leak across frames.
+//
+// If a regression ever leaves a region without a draw — e.g. composite
+// quad miss, sized-zero page — the desk grey shows through rather than
+// a startling colour. That's the right default; the previous "dark
+// teal" tell was useful while wiring the composite path and has
+// served its purpose.
+constexpr VkClearColorValue kDeskClear{.float32 = {0.13F, 0.13F, 0.15F, 1.0F}};
+constexpr VkClearColorValue kCanvasClear{kDeskClear};
 constexpr VkClearColorValue kStrokesClear{.float32 = {0.0F, 0.0F, 0.0F, 0.0F}};
-constexpr VkClearColorValue kSwapchainClear{.float32 = {0.05F, 0.05F, 0.10F, 1.0F}};
+constexpr VkClearColorValue kSwapchainClear{kDeskClear};
 
 }  // namespace
 

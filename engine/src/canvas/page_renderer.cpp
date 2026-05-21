@@ -58,10 +58,20 @@ auto PageRenderer::create(const CreateInfo& info) -> Result<PageRenderer> {
     }
 
     // Pipeline: triangle list (the vertex shader builds a quad from
-    // gl_VertexIndex), no vertex input, no culling, no blend — the
-    // page background IS the base colour layer.
+    // gl_VertexIndex), no vertex input, no culling. Standard
+    // straight-alpha source-over blend so the fragment shader's
+    // shadow apron composites against the desk-grey canvas clear.
+    // The page body itself writes full alpha (= overwrite); only the
+    // shadow apron pixels carry partial alpha. See `page_bg.slang`
+    // and ADR 0033 for the visual model.
     VkPipelineColorBlendAttachmentState blend{};
-    blend.blendEnable = VK_FALSE;
+    blend.blendEnable = VK_TRUE;
+    blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    blend.colorBlendOp = VK_BLEND_OP_ADD;
+    blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    blend.alphaBlendOp = VK_BLEND_OP_ADD;
     blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
