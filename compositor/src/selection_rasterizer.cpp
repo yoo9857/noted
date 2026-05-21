@@ -1,8 +1,10 @@
 #include "noted/compositor/selection_rasterizer.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <utility>
+#include <vector>
 
 #include "noted/engine/gpu/allocator.hpp"
 #include "noted/engine/gpu/selection_mask.hpp"
@@ -15,6 +17,85 @@ namespace {
 [[nodiscard]] auto staging_size_bytes(VkExtent2D extent) noexcept -> VkDeviceSize {
     return static_cast<VkDeviceSize>(extent.width) * static_cast<VkDeviceSize>(extent.height) *
            noted::gpu::SelectionMask::bytes_per_texel();
+}
+
+// Scanline-fill a single polygon into `dest`. Standard odd-even
+// horizontal scanline algorithm: for each scan-line `y` within the
+// polygon's AABB (clipped to mask), gather the x-intersection of
+// every edge that straddles `y`, sort, and fill between consecutive
+// pairs.
+//
+// The edge straddling test uses the half-open convention
+// `(yi <= y) != (yj <= y)` — matches `LassoPolygon::contains` so the
+// rasterizer and the point-in-polygon predicate agree on the same
+// boundary semantics. (Different conventions create one-pixel
+// disagreements at horizontal edges.)
+//
+// `extent` is the clip rect; `dest` is the row-packed R8 mask. The
+// function is noexcept and allocates a small scratch vector for the
+// row's x-intersections — re-used across rows via the caller-
+// supplied buffer.
+void fill_polygon(const noted::domain::LassoPolygon& poly,
+                  VkExtent2D extent,
+                  std::span<std::uint8_t> dest,
+                  std::uint8_t fill_value,
+                  std::vector<double>& scratch_xs) noexcept {
+    if (poly.is_empty()) {
+        return;
+    }
+    const auto aabb = poly.aabb();
+    if (!aabb) {
+        return;
+    }
+    const auto& verts = poly.vertices();
+    const std::int32_t mask_w = static_cast<std::int32_t>(extent.width);
+    const std::int32_t mask_h = static_cast<std::int32_t>(extent.height);
+    const auto y0 = std::max<std::int32_t>(aabb->y, 0);
+    const auto y1 = std::min<std::int32_t>(aabb->bottom(), mask_h);
+    if (y1 <= y0) {
+        return;
+    }
+
+    const std::size_t stride = static_cast<std::size_t>(extent.width);
+    for (std::int32_t y = y0; y < y1; ++y) {
+        scratch_xs.clear();
+        const std::size_t n = verts.size();
+        std::size_t j = n - 1;
+        for (std::size_t i = 0; i < n; ++i) {
+            const auto& vi = verts[i];
+            const auto& vj = verts[j];
+            // Half-open in y — vertices on the scanline are counted
+            // once. Standard scanline-fill convention.
+            const bool y_split = (vi.y <= y) != (vj.y <= y);
+            if (y_split) {
+                const double t = static_cast<double>(y - vi.y) / static_cast<double>(vj.y - vi.y);
+                scratch_xs.push_back(static_cast<double>(vi.x) +
+                                     t * static_cast<double>(vj.x - vi.x));
+            }
+            j = i;
+        }
+        if (scratch_xs.empty()) {
+            continue;
+        }
+        std::sort(scratch_xs.begin(), scratch_xs.end());
+        // Fill spans [xs[k], xs[k+1]) for each consecutive pair.
+        // Round inwards (ceil left, floor right) so adjacent
+        // polygons sharing an edge don't double-fill that column.
+        for (std::size_t k = 0; k + 1 < scratch_xs.size(); k += 2) {
+            const auto lx_raw = scratch_xs[k];
+            const auto rx_raw = scratch_xs[k + 1];
+            const std::int32_t lx =
+                std::max<std::int32_t>(static_cast<std::int32_t>(std::ceil(lx_raw)), 0);
+            const std::int32_t rx =
+                std::min<std::int32_t>(static_cast<std::int32_t>(std::floor(rx_raw)) + 1, mask_w);
+            if (rx <= lx) {
+                continue;
+            }
+            auto* row =
+                dest.data() + (static_cast<std::size_t>(y) * stride) + static_cast<std::size_t>(lx);
+            std::memset(row, fill_value, static_cast<std::size_t>(rx - lx));
+        }
+    }
 }
 
 }  // namespace
@@ -54,6 +135,21 @@ void rasterize_to_buffer(const noted::domain::Selection& selection,
             auto* row =
                 dest.data() + (static_cast<std::size_t>(y) * stride) + static_cast<std::size_t>(x0);
             std::memset(row, fill_value, run);
+        }
+    }
+
+    // Polygon scanline fill. Allocate the x-intersection scratch
+    // buffer once and reuse across rows — avoids per-row malloc
+    // churn in the (common) inner loop. The reservation upper-
+    // bound is the maximum vertex count we expect; reserving a
+    // small constant covers the realistic stroke-grade densities
+    // and the vector grows transparently if a denser polygon
+    // arrives.
+    if (!selection.polygons().empty()) {
+        std::vector<double> scratch_xs;
+        scratch_xs.reserve(32);
+        for (const auto& poly : selection.polygons()) {
+            fill_polygon(poly, extent, dest, fill_value, scratch_xs);
         }
     }
 }

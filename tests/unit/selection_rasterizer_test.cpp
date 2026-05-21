@@ -145,3 +145,91 @@ TEST(RasterizeToBuffer, RasterMatchesSelectionContains) {
         }
     }
 }
+
+// ---- polygon scanline fill (lasso step 3) ---------------------------------
+
+namespace {
+using noted::domain::LassoPolygon;
+using noted::domain::Point2i;
+}  // namespace
+
+TEST(RasterizeToBuffer, PolygonSquareFillsExpectedPixels) {
+    LassoPolygon poly{{
+        Point2i{2, 2},
+        Point2i{6, 2},
+        Point2i{6, 6},
+        Point2i{2, 6},
+    }};
+    Selection sel = Selection::from_polygon(poly);
+    constexpr std::uint32_t kW = 10;
+    constexpr std::uint32_t kH = 10;
+    auto buf = make_buffer(kW * kH, 0);
+    rasterize_to_buffer(sel, {kW, kH}, buf);
+    // Interior pixels (3,3)..(5,5) should be filled. Edges may be
+    // edge-rounded; assert the interior + a few outside.
+    EXPECT_EQ(at(buf, kW, 4, 4), 255);
+    EXPECT_EQ(at(buf, kW, 3, 3), 255);
+    EXPECT_EQ(at(buf, kW, 5, 5), 255);
+    EXPECT_EQ(at(buf, kW, 0, 0), 0);
+    EXPECT_EQ(at(buf, kW, 8, 8), 0);
+    EXPECT_EQ(at(buf, kW, 7, 4), 0);
+}
+
+TEST(RasterizeToBuffer, PolygonTriangleRespectsSlope) {
+    // Triangle: (0,0), (10,0), (5,10). Filled area = lower triangle.
+    LassoPolygon poly{{Point2i{0, 0}, Point2i{10, 0}, Point2i{5, 10}}};
+    Selection sel = Selection::from_polygon(poly);
+    constexpr std::uint32_t kW = 12;
+    constexpr std::uint32_t kH = 12;
+    auto buf = make_buffer(kW * kH, 0);
+    rasterize_to_buffer(sel, {kW, kH}, buf);
+    EXPECT_EQ(at(buf, kW, 5, 5), 255);  // middle column, halfway down — inside
+    EXPECT_EQ(at(buf, kW, 0, 8), 0);    // far left, below the slope — outside
+    EXPECT_EQ(at(buf, kW, 10, 8), 0);   // far right, below the slope — outside
+}
+
+TEST(RasterizeToBuffer, PolygonAndRectUnion) {
+    Selection sel;
+    sel.add_rect({0, 0, 4, 4});
+    sel.add_polygon(LassoPolygon{{
+        Point2i{6, 6},
+        Point2i{10, 6},
+        Point2i{10, 10},
+        Point2i{6, 10},
+    }});
+    constexpr std::uint32_t kW = 12;
+    constexpr std::uint32_t kH = 12;
+    auto buf = make_buffer(kW * kH, 0);
+    rasterize_to_buffer(sel, {kW, kH}, buf);
+    EXPECT_EQ(at(buf, kW, 1, 1), 255);  // in rect
+    EXPECT_EQ(at(buf, kW, 8, 8), 255);  // in polygon
+    EXPECT_EQ(at(buf, kW, 5, 5), 0);    // in neither
+}
+
+TEST(RasterizeToBuffer, PolygonClippedToMaskBounds) {
+    // Polygon extending past the mask edges — fill is clipped, not
+    // skipped. (Mirrors the rect-clipping contract above.)
+    LassoPolygon poly{{
+        Point2i{-5, -5},
+        Point2i{100, -5},
+        Point2i{100, 100},
+        Point2i{-5, 100},
+    }};
+    Selection sel = Selection::from_polygon(poly);
+    constexpr std::uint32_t kW = 6;
+    constexpr std::uint32_t kH = 6;
+    auto buf = make_buffer(kW * kH, 0);
+    rasterize_to_buffer(sel, {kW, kH}, buf);
+    // Entire mask should be filled.
+    EXPECT_EQ(count(buf, 255), kW * kH);
+}
+
+TEST(RasterizeToBuffer, EmptyPolygonIsNoOp) {
+    LassoPolygon poly{{Point2i{0, 0}, Point2i{10, 10}}};  // < 3 vertices
+    EXPECT_TRUE(poly.is_empty());
+    Selection sel;
+    sel.add_polygon(poly);  // ignored by Selection (is_empty short-circuits)
+    auto buf = make_buffer(8 * 8, 0);
+    rasterize_to_buffer(sel, {8, 8}, buf);
+    EXPECT_EQ(count(buf, 255), 0U);
+}
