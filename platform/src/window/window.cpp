@@ -16,6 +16,21 @@
 #include "noted/engine/hook/registry.hpp"
 #include "noted/platform/window/pen_input.hpp"
 
+#if defined(_WIN32)
+#include <Windows.h>
+#include <dwmapi.h>
+#pragma comment(lib, "Dwmapi.lib")
+// DWMWA_WINDOW_CORNER_PREFERENCE (Win11 SDK member of the
+// DWMWINDOWATTRIBUTE enum) may be absent in older SDKs even when
+// the corner-preference enum itself is present. Provide a numeric
+// fallback so the call still compiles; on Windows 10 + earlier
+// DwmSetWindowAttribute returns an error code that we deliberately
+// ignore — the custom chrome layer still renders identically.
+#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+#define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
+#endif
+
 namespace noted::platform {
 
 namespace {
@@ -178,6 +193,11 @@ auto Window::create(const WindowDesc& desc) -> Result<Window> {
     auto* w = self.impl_->window.get();
     w->setTitle(QString::fromUtf8(desc.title.data(), static_cast<int>(desc.title.size())));
     w->resize(static_cast<int>(desc.width), static_cast<int>(desc.height));
+    if (desc.frameless) {
+        // Hide the OS-native title bar / chrome. The app paints its
+        // own Mac-style chrome (see `ui::widget::mac_chrome`).
+        w->setFlags(w->flags() | Qt::FramelessWindowHint);
+    }
     // High-DPI awareness is the Qt 6 default; nothing to opt into.
 
     // Attach the pen-input subsystem. On Windows this installs a
@@ -203,6 +223,18 @@ auto Window::create(const WindowDesc& desc) -> Result<Window> {
     }
 
     w->show();
+
+#if defined(_WIN32)
+    // Win11 DWM rounded corners on the native window frame. The
+    // attribute is a no-op on Windows 10 (DwmSetWindowAttribute
+    // returns failure silently) — the chrome layer above still
+    // delivers its custom title bar regardless.
+    if (desc.frameless) {
+        const HWND hwnd = reinterpret_cast<HWND>(w->winId());
+        DWM_WINDOW_CORNER_PREFERENCE pref = DWMWCP_ROUND;
+        (void) DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &pref, sizeof(pref));
+    }
+#endif
     return self;
 }
 
@@ -243,6 +275,39 @@ void Window::set_should_close(bool value) noexcept {
 void Window::set_title(std::string_view title) noexcept {
     if (impl_ && impl_->window) {
         impl_->window->setTitle(QString::fromUtf8(title.data(), static_cast<int>(title.size())));
+    }
+}
+
+void Window::minimize() noexcept {
+    if (impl_ && impl_->window) {
+        impl_->window->showMinimized();
+    }
+}
+
+void Window::toggle_maximize() noexcept {
+    if (!impl_ || !impl_->window) {
+        return;
+    }
+    if (impl_->window->visibility() == QWindow::Maximized) {
+        impl_->window->showNormal();
+    } else {
+        impl_->window->showMaximized();
+    }
+}
+
+void Window::request_close() noexcept {
+    if (impl_ && impl_->window) {
+        impl_->window->set_should_close(true);
+    }
+}
+
+auto Window::is_maximized() const noexcept -> bool {
+    return impl_ && impl_->window && impl_->window->visibility() == QWindow::Maximized;
+}
+
+void Window::start_system_drag() noexcept {
+    if (impl_ && impl_->window) {
+        impl_->window->startSystemMove();
     }
 }
 

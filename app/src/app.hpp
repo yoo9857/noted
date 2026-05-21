@@ -58,6 +58,7 @@
 #include "noted/ui/imgui_host.hpp"
 #include "noted/ui/theme/theme.hpp"
 #include "noted/ui/widget/debug_overlay.hpp"
+#include "noted/ui/widget/mac_chrome.hpp"
 #include "noted/ui/widget/menu_bar.hpp"
 #include "noted/ui/widget/outline_panel.hpp"
 

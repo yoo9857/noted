@@ -17,6 +17,13 @@ struct WindowDesc {
     std::uint32_t height = 1000;
     bool resizable = true;
     bool high_dpi = true;
+    // **Phase 2 of ADR 0034.** When true the OS-native title bar +
+    // window chrome are hidden and the app paints its own (Mac-style
+    // traffic-light buttons, drag region, theme — see
+    // `ui::widget::mac_chrome`). On Windows 11 the corners are
+    // rounded automatically via DWM; on Windows 10 / Linux the window
+    // is square-cornered but the custom chrome still renders.
+    bool frameless = true;
 };
 
 // RAII move-only handle around a Qt-backed window.
@@ -57,6 +64,21 @@ public:
     // Update the window's title bar text. The host calls this when
     // the document filename or dirty state changes.
     void set_title(std::string_view title) noexcept;
+
+    // Window-control verbs — used by the custom Mac-style chrome's
+    // traffic-light buttons (Phase 2 of ADR 0034). On a frameless
+    // window these are the only way the user can minimise / maximise
+    // / close; on a system-chrome window they back the same menu
+    // actions the OS provides.
+    void minimize() noexcept;
+    void toggle_maximize() noexcept;
+    void request_close() noexcept;
+    [[nodiscard]] auto is_maximized() const noexcept -> bool;
+
+    // Begin a system drag of the window from its current cursor
+    // position. The chrome's drag-region click handler calls this
+    // so the user can pick up the window by its custom title bar.
+    void start_system_drag() noexcept;
 
     void poll_events() noexcept;
 
