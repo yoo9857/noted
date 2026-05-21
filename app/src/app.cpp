@@ -827,6 +827,25 @@ void App::on_frame() {
     last_frame_time = now;
     imgui_host_->begin_frame(static_cast<float>(fb_w), static_cast<float>(fb_h), dt);
 
+    // Mac-style window chrome — drawn FIRST so it sits at the top
+    // of the Z-band. Wires the traffic-light buttons into
+    // platform::Window's verbs (minimize / toggle_maximize /
+    // request_close / start_system_drag). Phase 2 of ADR 0034.
+    const auto chrome =
+        noted::ui::widget::draw_mac_chrome(last_window_title_, window_->is_maximized());
+    if (chrome.close_clicked) {
+        window_->request_close();
+    }
+    if (chrome.minimize_clicked) {
+        window_->minimize();
+    }
+    if (chrome.maximize_clicked) {
+        window_->toggle_maximize();
+    }
+    if (chrome.drag_started) {
+        window_->start_system_drag();
+    }
+
     const noted::ui::widget::MenuBarStatus menu_status{
         .can_undo = session_.undo_stack().can_undo(),
         .can_redo = session_.undo_stack().can_redo(),

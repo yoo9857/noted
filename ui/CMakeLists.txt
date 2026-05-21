@@ -5,6 +5,7 @@ noted_add_module(
         src/imgui_input_bridge.cpp
         src/view/view.cpp
         src/widget/widget.cpp
+        src/widget/mac_chrome.cpp
         src/widget/menu_bar.cpp
         src/widget/layer_panel.cpp
         src/widget/outline_panel.cpp
