@@ -167,6 +167,29 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
     if (auto r = app->ensure_canvas_fits_pages(); !r) {
         return std::unexpected(std::move(r).error());
     }
+    // Centre the camera on the first page (or on the canvas centre
+    // if the document has no pages). Without this seed the canvas
+    // appears at the top-left of the window on first launch instead
+    // of the natural Goodnotes / Photoshop "open with the document
+    // centred" UX. Translation is in screen pixels:
+    //   screen = canvas * scale + translation
+    // We want the page-list centre's `canvas` position to land at
+    // the window centre on screen.
+    {
+        const auto& pages = app->session_.document().pages().pages();
+        double target_cx = app->camera_.canvas_extent_w() * 0.5;
+        double target_cy = app->camera_.canvas_extent_h() * 0.5;
+        if (!pages.empty()) {
+            const auto& p0 = pages.front();
+            target_cx = static_cast<double>(p0.origin_x_px) + p0.extent_w_px * 0.5;
+            target_cy = static_cast<double>(p0.origin_y_px) + p0.extent_h_px * 0.5;
+        }
+        const double tx =
+            static_cast<double>(sc_extent.width) * 0.5 - target_cx * app->camera_.scale();
+        const double ty =
+            static_cast<double>(sc_extent.height) * 0.5 - target_cy * app->camera_.scale();
+        app->camera_.set_translation(tx, ty);
+    }
 
     app->install_frame_hook();
 
@@ -944,6 +967,39 @@ void App::on_frame() {
                 palette_colors_[static_cast<std::size_t>(result.palette_delete_index)] = {
                     0.0F, 0.0F, 0.0F, 0.0F};
             }
+        }
+    }
+
+    // Navigator panel — canvas thumbnail with viewport-rect overlay.
+    // Click / drag inside the thumbnail re-centres the camera on the
+    // corresponding canvas point. Lives in the same right-side
+    // floating column as the colour picker.
+    {
+        noted::ui::widget::NavigatorInputs nav_in{};
+        nav_in.canvas_w = camera_.canvas_extent_w() > 0.0
+                              ? static_cast<std::uint32_t>(camera_.canvas_extent_w())
+                              : 0U;
+        nav_in.canvas_h = camera_.canvas_extent_h() > 0.0
+                              ? static_cast<std::uint32_t>(camera_.canvas_extent_h())
+                              : 0U;
+        nav_in.translation_x = camera_.translation_x();
+        nav_in.translation_y = camera_.translation_y();
+        nav_in.scale = camera_.scale();
+        nav_in.window_w = camera_.window_extent_w() > 0.0
+                              ? static_cast<std::uint32_t>(camera_.window_extent_w())
+                              : 0U;
+        nav_in.window_h = camera_.window_extent_h() > 0.0
+                              ? static_cast<std::uint32_t>(camera_.window_extent_h())
+                              : 0U;
+        constexpr float kNavigatorTopOffset = 420.0F;
+        const auto nav = noted::ui::widget::navigator_panel(
+            nav_in, session_.document().pages().pages(), kNavigatorTopOffset);
+        if (nav.pan_to_canvas_point) {
+            const auto [cx, cy] = *nav.pan_to_canvas_point;
+            const double window_cx = camera_.window_extent_w() * 0.5;
+            const double window_cy = camera_.window_extent_h() * 0.5;
+            camera_.set_translation(window_cx - cx * camera_.scale(),
+                                    window_cy - cy * camera_.scale());
         }
     }
 

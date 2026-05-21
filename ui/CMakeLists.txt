@@ -8,6 +8,7 @@ noted_add_module(
         src/widget/color_picker_panel.cpp
         src/widget/mac_chrome.cpp
         src/widget/menu_bar.cpp
+        src/widget/navigator_panel.cpp
         src/widget/layer_panel.cpp
         src/widget/outline_panel.cpp
         src/widget/page_strip.cpp
