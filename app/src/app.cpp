@@ -581,6 +581,20 @@ auto App::init_stroke_engine() -> noted::Result<void> {
     stroke_engine_->set_press_predicate([this](double canvas_x, double canvas_y) -> bool {
         return session_.document().pages().contains_point(canvas_x, canvas_y);
     });
+    // Wire the completion sink so each released stroke executes an
+    // AddStrokeCommand against the session's UndoStack. Strokes
+    // participate in undo/redo and survive save/load through
+    // `.noted` v7 (P.S.4). A failed execute() is non-fatal — the
+    // in-flight UX is already done; we surface the error to stderr
+    // and continue. The fallback "lost ink" is preferable to
+    // crashing mid-session.
+    stroke_engine_->set_stroke_sink([this](noted::stroke::Stroke s) {
+        if (auto r =
+                session_.execute(std::make_unique<noted::domain::AddStrokeCommand>(std::move(s)));
+            !r) {
+            std::cerr << r.error().format() << '\n';
+        }
+    });
     return {};
 }
 

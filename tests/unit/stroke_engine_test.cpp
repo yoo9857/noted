@@ -1,6 +1,8 @@
 #include "noted/engine/stroke/stroke_engine.hpp"
 
 #include <cmath>
+#include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -12,147 +14,166 @@ namespace {
 using PB = noted::hook::PointerButton;
 using StrokeEngine = noted::stroke::StrokeEngine;
 using BrushStyle = noted::stroke::BrushStyle;
+using Stroke = noted::stroke::Stroke;
 using noted::stroke::stamp_from_pressure;
 
-// Build an engine that has no pipeline / no subscriptions — pure
-// event processing. Pointer events are fed through inject_*
-// helpers which invoke the same on_* methods the hook
-// subscriptions would.
-//
-// Tests pin the per-event raw position / pressure pass-through; the
-// production stabilizer (BrushStyle default 0.5) smooths inputs and
-// would make the assertions noisy. Set stabilizer = 0 so the engine
-// stores samples verbatim — the stabilizer's own behaviour is unit-
-// tested elsewhere via the brush_from_pen clamp tests.
-auto make_test_engine() {
-    BrushStyle no_smoothing{};
-    no_smoothing.stabilizer = 0.0F;
-    return StrokeEngine{StrokeEngine::TestingTag{}, no_smoothing};
-}
+// A test harness that owns a StrokeEngine and a captured-stroke
+// vector. The engine's stroke_sink_ pushes completed strokes into
+// `completed`, so tests can assert against `completed.size()` and
+// `completed[i].samples` exactly the way the pre-P.S.4 tests asserted
+// against `eng.strokes()`. Wrapped as a helper so each test doesn't
+// repeat the sink wiring.
+struct EngineFixture {
+    StrokeEngine engine;
+    std::vector<Stroke> completed;
+
+    EngineFixture() : engine(make_engine_()) { wire_(); }
+
+    void inject_press(double x, double y, PB b, float pressure = 1.0F) {
+        engine.inject_press_(x, y, b, pressure);
+    }
+    void inject_move(double x, double y, float pressure = 1.0F) {
+        engine.inject_move_(x, y, pressure);
+    }
+    void inject_release(double x, double y, PB b) { engine.inject_release_(x, y, b); }
+
+private:
+    // Stabilizer = 0 so per-event raw position / pressure pass through
+    // verbatim — tests assert against exact values. The stabilizer's
+    // own behaviour is exercised separately via brush_from_pen clamp
+    // tests + the higher-level UX tests.
+    [[nodiscard]] static auto make_engine_() -> StrokeEngine {
+        BrushStyle no_smoothing{};
+        no_smoothing.stabilizer = 0.0F;
+        return StrokeEngine{StrokeEngine::TestingTag{}, no_smoothing};
+    }
+
+    void wire_() {
+        engine.set_stroke_sink([this](Stroke s) { completed.push_back(std::move(s)); });
+    }
+};
 
 }  // namespace
 
 // ---- Event semantics: press / move / release ------------------------------
 
 TEST(StrokeEngine, IgnoresMoveWithoutPress) {
-    auto eng = make_test_engine();
-    eng.inject_move_(100.0, 100.0);
-    eng.inject_move_(110.0, 105.0);
-    EXPECT_EQ(eng.total_sample_count(), 0U);
-    EXPECT_EQ(eng.stroke_count(), 0U);
-    EXPECT_FALSE(eng.is_drawing());
+    EngineFixture fx;
+    fx.inject_move(100.0, 100.0);
+    fx.inject_move(110.0, 105.0);
+    EXPECT_TRUE(fx.completed.empty());
+    EXPECT_FALSE(fx.engine.is_drawing());
+    EXPECT_EQ(fx.engine.current_stroke().samples.size(), 0U);
 }
 
 TEST(StrokeEngine, PressMoveAccumulatesIntoCurrentStroke) {
-    auto eng = make_test_engine();
-    eng.inject_press_(10.0, 20.0, PB::left);
-    EXPECT_TRUE(eng.is_drawing());
-    eng.inject_move_(11.0, 21.0);
-    eng.inject_move_(12.0, 22.0);
+    EngineFixture fx;
+    fx.inject_press(10.0, 20.0, PB::left);
+    EXPECT_TRUE(fx.engine.is_drawing());
+    fx.inject_move(11.0, 21.0);
+    fx.inject_move(12.0, 22.0);
 
-    // Mid-stroke: nothing committed yet, samples live in the
-    // in-flight stroke.
-    EXPECT_EQ(eng.stroke_count(), 0U);
-    EXPECT_EQ(eng.current_stroke().samples.size(), 3U);
-    EXPECT_FLOAT_EQ(eng.current_stroke().samples[0].x, 10.0F);
-    EXPECT_FLOAT_EQ(eng.current_stroke().samples[1].x, 11.0F);
-    EXPECT_FLOAT_EQ(eng.current_stroke().samples[2].x, 12.0F);
+    // Mid-stroke: nothing committed yet (sink not invoked), samples
+    // live in the in-flight stroke.
+    EXPECT_TRUE(fx.completed.empty());
+    ASSERT_EQ(fx.engine.current_stroke().samples.size(), 3U);
+    EXPECT_FLOAT_EQ(fx.engine.current_stroke().samples[0].x, 10.0F);
+    EXPECT_FLOAT_EQ(fx.engine.current_stroke().samples[1].x, 11.0F);
+    EXPECT_FLOAT_EQ(fx.engine.current_stroke().samples[2].x, 12.0F);
 }
 
-TEST(StrokeEngine, ReleaseCommitsStrokeToCompletedList) {
-    auto eng = make_test_engine();
-    eng.inject_press_(10.0, 20.0, PB::left);
-    eng.inject_move_(11.0, 21.0);
-    eng.inject_release_(11.0, 21.0, PB::left);
-    EXPECT_FALSE(eng.is_drawing());
+TEST(StrokeEngine, ReleaseEmitsCompletedStrokeViaSink) {
+    EngineFixture fx;
+    fx.inject_press(10.0, 20.0, PB::left);
+    fx.inject_move(11.0, 21.0);
+    fx.inject_release(11.0, 21.0, PB::left);
+    EXPECT_FALSE(fx.engine.is_drawing());
 
-    ASSERT_EQ(eng.stroke_count(), 1U);
+    ASSERT_EQ(fx.completed.size(), 1U);
     // current_stroke_ is reset after a commit.
-    EXPECT_EQ(eng.current_stroke().samples.size(), 0U);
-    ASSERT_EQ(eng.strokes()[0].samples.size(), 2U);
-    EXPECT_FLOAT_EQ(eng.strokes()[0].samples[0].x, 10.0F);
-    EXPECT_FLOAT_EQ(eng.strokes()[0].samples[1].x, 11.0F);
+    EXPECT_EQ(fx.engine.current_stroke().samples.size(), 0U);
+    ASSERT_EQ(fx.completed[0].samples.size(), 2U);
+    EXPECT_FLOAT_EQ(fx.completed[0].samples[0].x, 10.0F);
+    EXPECT_FLOAT_EQ(fx.completed[0].samples[1].x, 11.0F);
 }
 
-TEST(StrokeEngine, SingleSamplePressReleaseIsDroppedNotCommitted) {
-    // A press followed by an immediate release with no movement
-    // has nothing the ribbon tessellator can render. Storing it
-    // would just be noise — the engine drops it on release.
-    auto eng = make_test_engine();
-    eng.inject_press_(0.0, 0.0, PB::left);
-    eng.inject_release_(0.0, 0.0, PB::left);
-    EXPECT_EQ(eng.stroke_count(), 0U);
-    EXPECT_EQ(eng.total_sample_count(), 0U);
+TEST(StrokeEngine, SingleSamplePressReleaseEmitsNothing) {
+    // A press followed by an immediate release with no movement has
+    // nothing the ribbon tessellator can render. The engine drops it
+    // — no sink invocation.
+    EngineFixture fx;
+    fx.inject_press(0.0, 0.0, PB::left);
+    fx.inject_release(0.0, 0.0, PB::left);
+    EXPECT_TRUE(fx.completed.empty());
 }
 
 TEST(StrokeEngine, MovesAfterReleaseAreIgnored) {
-    auto eng = make_test_engine();
-    eng.inject_press_(0.0, 0.0, PB::left);
-    eng.inject_move_(1.0, 1.0);
-    eng.inject_release_(1.0, 1.0, PB::left);
-    eng.inject_move_(5.0, 5.0);  // mouse moves with no button — drop
-    eng.inject_move_(6.0, 6.0);
-    ASSERT_EQ(eng.stroke_count(), 1U);
-    EXPECT_EQ(eng.strokes()[0].samples.size(), 2U);  // press + first move only
+    EngineFixture fx;
+    fx.inject_press(0.0, 0.0, PB::left);
+    fx.inject_move(1.0, 1.0);
+    fx.inject_release(1.0, 1.0, PB::left);
+    fx.inject_move(5.0, 5.0);  // mouse moves with no button — drop
+    fx.inject_move(6.0, 6.0);
+    ASSERT_EQ(fx.completed.size(), 1U);
+    EXPECT_EQ(fx.completed[0].samples.size(), 2U);  // press + first move only
 }
 
 TEST(StrokeEngine, RightButtonDoesNotDraw) {
-    auto eng = make_test_engine();
-    eng.inject_press_(0.0, 0.0, PB::right);
-    eng.inject_move_(1.0, 1.0);
-    eng.inject_release_(1.0, 1.0, PB::right);
-    EXPECT_EQ(eng.total_sample_count(), 0U);
-    EXPECT_EQ(eng.stroke_count(), 0U);
-    EXPECT_FALSE(eng.is_drawing());
+    EngineFixture fx;
+    fx.inject_press(0.0, 0.0, PB::right);
+    fx.inject_move(1.0, 1.0);
+    fx.inject_release(1.0, 1.0, PB::right);
+    EXPECT_TRUE(fx.completed.empty());
+    EXPECT_FALSE(fx.engine.is_drawing());
 }
 
 TEST(StrokeEngine, OverlappingButtonsLeftOwnsTheStroke) {
     // Reasonable behaviour: left starts a stroke, a stray right
     // press does not end it; a left release does. Mirrors how
     // most paint tools behave.
-    auto eng = make_test_engine();
-    eng.inject_press_(0.0, 0.0, PB::left);
-    eng.inject_press_(0.0, 0.0, PB::right);  // shouldn't toggle drawing_
-    EXPECT_TRUE(eng.is_drawing());
-    eng.inject_move_(1.0, 1.0);
-    eng.inject_release_(1.0, 1.0, PB::right);  // wrong button — no-op
-    EXPECT_TRUE(eng.is_drawing());
-    eng.inject_release_(1.0, 1.0, PB::left);
-    EXPECT_FALSE(eng.is_drawing());
-    EXPECT_EQ(eng.stroke_count(), 1U);
+    EngineFixture fx;
+    fx.inject_press(0.0, 0.0, PB::left);
+    fx.inject_press(0.0, 0.0, PB::right);  // shouldn't toggle drawing_
+    EXPECT_TRUE(fx.engine.is_drawing());
+    fx.inject_move(1.0, 1.0);
+    fx.inject_release(1.0, 1.0, PB::right);  // wrong button — no-op
+    EXPECT_TRUE(fx.engine.is_drawing());
+    fx.inject_release(1.0, 1.0, PB::left);
+    EXPECT_FALSE(fx.engine.is_drawing());
+    EXPECT_EQ(fx.completed.size(), 1U);
 }
 
-TEST(StrokeEngine, MultipleStrokesAccumulate) {
-    auto eng = make_test_engine();
+TEST(StrokeEngine, MultipleStrokesEmitSequentially) {
+    EngineFixture fx;
     for (int i = 0; i < 3; ++i) {
-        eng.inject_press_(static_cast<double>(i * 10), 0.0, PB::left);
-        eng.inject_move_(static_cast<double>(i * 10 + 1), 0.0);
-        eng.inject_release_(static_cast<double>(i * 10 + 1), 0.0, PB::left);
+        fx.inject_press(static_cast<double>(i * 10), 0.0, PB::left);
+        fx.inject_move(static_cast<double>(i * 10 + 1), 0.0);
+        fx.inject_release(static_cast<double>(i * 10 + 1), 0.0, PB::left);
     }
-    EXPECT_EQ(eng.stroke_count(), 3U);
-    EXPECT_EQ(eng.total_sample_count(), 6U);
+    EXPECT_EQ(fx.completed.size(), 3U);
+    std::size_t total = 0;
+    for (const auto& s : fx.completed) {
+        total += s.samples.size();
+    }
+    EXPECT_EQ(total, 6U);
 }
 
-TEST(StrokeEngine, ClearStrokesResetsBothLists) {
-    auto eng = make_test_engine();
-    eng.inject_press_(0.0, 0.0, PB::left);
-    eng.inject_move_(1.0, 1.0);
-    eng.inject_release_(1.0, 1.0, PB::left);
-    eng.inject_press_(2.0, 2.0, PB::left);  // in-flight stroke
-    EXPECT_EQ(eng.stroke_count(), 1U);
-    EXPECT_EQ(eng.current_stroke().samples.size(), 1U);
-
-    eng.clear_strokes();
-    EXPECT_EQ(eng.stroke_count(), 0U);
-    EXPECT_EQ(eng.current_stroke().samples.size(), 0U);
-    EXPECT_EQ(eng.total_sample_count(), 0U);
-    // is_drawing() reflects pointer phase, not buffer state.
-    EXPECT_TRUE(eng.is_drawing());
+TEST(StrokeEngine, SetActiveFalseFinalisesInflightStroke) {
+    // When the host flips set_active(false) mid-stroke, the in-flight
+    // stroke is committed cleanly — no dangling drag state across a
+    // tool switch.
+    EngineFixture fx;
+    fx.inject_press(0.0, 0.0, PB::left);
+    fx.inject_move(1.0, 1.0);
+    fx.engine.set_active(false);
+    EXPECT_FALSE(fx.engine.is_drawing());
+    EXPECT_EQ(fx.engine.current_stroke().samples.size(), 0U);
+    EXPECT_EQ(fx.completed.size(), 1U);
 }
 
 TEST(StrokeEngine, ResizeUpdatesCanvasSize) {
-    auto eng = make_test_engine();
-    eng.inject_resize_(800U, 600U);
+    EngineFixture fx;
+    fx.engine.inject_resize_(800U, 600U);
     // No public getter for canvas_w_/h_ — but if record() were
     // callable without a pipeline it'd use these. Smoke test that
     // the event handler runs without UB / crash.
@@ -162,49 +183,61 @@ TEST(StrokeEngine, ResizeUpdatesCanvasSize) {
 // ---- Brush style snapshot per stroke -------------------------------------
 
 TEST(StrokeEngine, StrokeStyleIsSnapshotAtPressTime) {
-    StrokeEngine eng{StrokeEngine::TestingTag{}};
+    EngineFixture fx;
     BrushStyle s{};
     s.min_radius_px = 3.0F;
     s.max_radius_px = 9.0F;
     s.r = 0.5F;
     s.g = 0.25F;
     s.b = 0.0F;
-    eng.set_brush(s);
-    eng.inject_press_(0.0, 0.0, PB::left, 0.5F);
-    eng.inject_move_(1.0, 0.0, 0.5F);
-    eng.inject_release_(1.0, 0.0, PB::left);
+    s.stabilizer = 0.0F;
+    fx.engine.set_brush(s);
+    fx.inject_press(0.0, 0.0, PB::left, 0.5F);
+    fx.inject_move(1.0, 0.0, 0.5F);
+    fx.inject_release(1.0, 0.0, PB::left);
 
     // Mutate the brush AFTER the stroke is committed — the stored
     // style should retain the values captured at press time.
     BrushStyle different{};
     different.min_radius_px = 100.0F;
     different.r = 1.0F;
-    eng.set_brush(different);
+    fx.engine.set_brush(different);
 
-    ASSERT_EQ(eng.stroke_count(), 1U);
-    EXPECT_FLOAT_EQ(eng.strokes()[0].style.min_radius_px, 3.0F);
-    EXPECT_FLOAT_EQ(eng.strokes()[0].style.max_radius_px, 9.0F);
-    EXPECT_FLOAT_EQ(eng.strokes()[0].style.r, 0.5F);
+    ASSERT_EQ(fx.completed.size(), 1U);
+    EXPECT_FLOAT_EQ(fx.completed[0].style.min_radius_px, 3.0F);
+    EXPECT_FLOAT_EQ(fx.completed[0].style.max_radius_px, 9.0F);
+    EXPECT_FLOAT_EQ(fx.completed[0].style.r, 0.5F);
 }
 
 TEST(StrokeEngine, SamplesCarryPerEventPressure) {
-    // Stabilizer disabled so per-event pressure passes through
-    // verbatim — the stabilizer's smoothing behaviour is exercised
-    // separately.
-    BrushStyle no_smoothing{};
-    no_smoothing.stabilizer = 0.0F;
-    StrokeEngine eng{StrokeEngine::TestingTag{}, no_smoothing};
-    eng.inject_press_(0.0, 0.0, PB::left, /*pressure=*/0.25F);
-    eng.inject_move_(1.0, 1.0, /*pressure=*/0.5F);
-    eng.inject_move_(2.0, 2.0, /*pressure=*/0.75F);
-    eng.inject_release_(2.0, 2.0, PB::left);
+    EngineFixture fx;
+    fx.inject_press(0.0, 0.0, PB::left, /*pressure=*/0.25F);
+    fx.inject_move(1.0, 1.0, /*pressure=*/0.5F);
+    fx.inject_move(2.0, 2.0, /*pressure=*/0.75F);
+    fx.inject_release(2.0, 2.0, PB::left);
 
-    ASSERT_EQ(eng.stroke_count(), 1U);
-    const auto& s = eng.strokes()[0].samples;
+    ASSERT_EQ(fx.completed.size(), 1U);
+    const auto& s = fx.completed[0].samples;
     ASSERT_EQ(s.size(), 3U);
     EXPECT_FLOAT_EQ(s[0].pressure, 0.25F);
     EXPECT_FLOAT_EQ(s[1].pressure, 0.5F);
     EXPECT_FLOAT_EQ(s[2].pressure, 0.75F);
+}
+
+TEST(StrokeEngine, NoSinkDropsCompletedStrokeSilently) {
+    // The engine is allowed to run without a sink (standalone test
+    // mode, default constructor path). In that case completed
+    // strokes are silently discarded — the alternative would be an
+    // internal queue that grows without bound, since no caller
+    // would drain it.
+    BrushStyle no_smoothing{};
+    no_smoothing.stabilizer = 0.0F;
+    StrokeEngine eng{StrokeEngine::TestingTag{}, no_smoothing};
+    eng.inject_press_(0.0, 0.0, PB::left);
+    eng.inject_move_(1.0, 1.0);
+    eng.inject_release_(1.0, 1.0, PB::left);
+    // No assert needed — the test simply verifies "no crash, no UB".
+    SUCCEED();
 }
 
 // ---- stamp_from_pressure: pure mapping coverage --------------------------
@@ -291,20 +324,17 @@ TEST(StrokeEngineMode, SetModeRoundTrips) {
     EXPECT_EQ(eng.mode(), noted::stroke::DrawMode::draw);
 }
 
-TEST(StrokeEngineMode, SetModeDoesNotAffectAccumulatedStrokes) {
-    // Pen-then-erase should not retroactively rewrite the prior
-    // stroke's pipeline — accumulated samples are mode-agnostic
-    // pixels; the pipeline choice is per-record() not per-stroke.
-    StrokeEngine eng{StrokeEngine::TestingTag{}};
-    eng.inject_press_(10.0, 10.0, PB::left, 1.0F);
-    eng.inject_move_(20.0, 20.0, 1.0F);
-    eng.inject_release_(20.0, 20.0, PB::left);
-    EXPECT_EQ(eng.stroke_count(), 1U);
-    const auto sample_count_before = eng.total_sample_count();
-
-    eng.set_mode(noted::stroke::DrawMode::erase);
-    EXPECT_EQ(eng.stroke_count(), 1U);
-    EXPECT_EQ(eng.total_sample_count(), sample_count_before);
+TEST(StrokeEngineMode, StrokeCarriesModeSnapshotAtPress) {
+    EngineFixture fx;
+    fx.engine.set_mode(noted::stroke::DrawMode::erase);
+    fx.inject_press(0.0, 0.0, PB::left);
+    fx.inject_move(10.0, 0.0);
+    fx.inject_release(10.0, 0.0, PB::left);
+    // Even if we flip the engine mode AFTER the stroke is committed,
+    // the captured stroke retains its press-time mode.
+    fx.engine.set_mode(noted::stroke::DrawMode::draw);
+    ASSERT_EQ(fx.completed.size(), 1U);
+    EXPECT_EQ(fx.completed[0].mode, noted::stroke::DrawMode::erase);
 }
 
 TEST(StrokeEngineMode, WireStableOrdinals) {

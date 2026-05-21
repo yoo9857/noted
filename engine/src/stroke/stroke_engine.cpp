@@ -312,19 +312,6 @@ void StrokeEngine::set_view_transform(double translation_x,
     view_scale_ = scale;
 }
 
-auto StrokeEngine::total_sample_count() const noexcept -> std::size_t {
-    std::size_t n = current_stroke_.samples.size();
-    for (const auto& s : strokes_) {
-        n += s.samples.size();
-    }
-    return n;
-}
-
-void StrokeEngine::clear_strokes() noexcept {
-    strokes_.clear();
-    current_stroke_ = Stroke{};
-}
-
 namespace {
 
 // One stroke's slice inside the engine's shared vertex buffer —
@@ -340,13 +327,15 @@ struct StrokeSlice {
 
 }  // namespace
 
-void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept {
+void StrokeEngine::record(VkCommandBuffer cb,
+                          VkExtent2D canvas_extent,
+                          std::span<const Stroke> committed) noexcept {
     NOTED_PROFILE_ZONE_N("StrokeEngine::record");
     if (!pipeline_draw_.has_value() || !pipeline_erase_.has_value() || !layout_.has_value() ||
         !vertex_buffer_.has_value()) {
         return;
     }
-    if (strokes_.empty() && current_stroke_.samples.empty()) {
+    if (committed.empty() && current_stroke_.samples.empty()) {
         return;
     }
 
@@ -355,7 +344,7 @@ void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept
     // upload is one memcpy regardless of stroke count.
     std::vector<RibbonVertex> all_vertices;
     std::vector<StrokeSlice> slices;
-    slices.reserve(strokes_.size() + 1);
+    slices.reserve(committed.size() + 1);
 
     const auto append_stroke = [&](const Stroke& stroke) {
         // Subdivide each gap into 6 sub-segments via Catmull-Rom so
@@ -373,7 +362,7 @@ void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept
         slices.push_back({first, count, stroke.mode});
     };
 
-    for (const auto& stroke : strokes_) {
+    for (const auto& stroke : committed) {
         append_stroke(stroke);
     }
     if (!current_stroke_.samples.empty()) {
@@ -504,8 +493,8 @@ void StrokeEngine::set_active(bool active) noexcept {
     // confusing. Mirror what `on_released` does for a normal left-up.
     if (!input_active_ && drawing_) {
         drawing_ = false;
-        if (current_stroke_.samples.size() >= 2) {
-            strokes_.push_back(std::move(current_stroke_));
+        if (current_stroke_.samples.size() >= 2 && stroke_sink_) {
+            stroke_sink_(std::move(current_stroke_));
         }
         current_stroke_ = Stroke{};
     }
@@ -602,13 +591,16 @@ void StrokeEngine::on_released(const noted::hook::PointerReleased& e) noexcept {
         return;
     }
     drawing_ = false;
-    // Flush the in-flight stroke into the completed collection
-    // when it has anything to draw. Single-sample strokes (no
-    // movement between press and release) are dropped — the
-    // current ribbon tessellator emits nothing for them anyway,
-    // and storing them would just be noise.
-    if (current_stroke_.samples.size() >= 2) {
-        strokes_.push_back(std::move(current_stroke_));
+    // Flush the in-flight stroke into the host's persistence layer
+    // via the sink. Single-sample strokes (no movement between
+    // press and release) are dropped — the current ribbon
+    // tessellator emits nothing for them anyway, and a stroke with
+    // one sample is indistinguishable from a stray click. When no
+    // sink is set (standalone test mode), the stroke is silently
+    // dropped; tests that exercise the completion path install a
+    // capturing sink.
+    if (current_stroke_.samples.size() >= 2 && stroke_sink_) {
+        stroke_sink_(std::move(current_stroke_));
     }
     current_stroke_ = Stroke{};
 }

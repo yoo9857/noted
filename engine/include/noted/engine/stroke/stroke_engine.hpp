@@ -25,6 +25,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <vector>
 
 #include <vulkan/vulkan.h>
@@ -109,30 +110,26 @@ public:
     // permanently inert.
     void set_view_transform(double translation_x, double translation_y, double scale) noexcept;
 
-    // Drain-and-draw. Records vkCmdBindPipeline + per-stamp push constants
-    // + vkCmdDraw(6, 1, 0, 0) for every accumulated stamp. Caller is
-    // responsible for being inside an active vkCmdBeginRendering whose
-    // color attachment is the canvas (in COLOR_ATTACHMENT_OPTIMAL).
-    void record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept;
+    // Drain-and-draw. For each stroke in `committed` plus the in-flight
+    // `current_stroke_`, tessellates the ribbon, uploads it to the
+    // persistently-mapped vertex buffer, and records the per-mode
+    // pipeline + draw calls. Caller is responsible for being inside an
+    // active vkCmdBeginRendering whose color attachment is the
+    // strokes target (in COLOR_ATTACHMENT_OPTIMAL).
+    //
+    // `committed` is the host's authoritative stroke list — passed in
+    // by reference (no caching inside the engine) so undo/redo on the
+    // host side instantly reflects in what gets drawn. Typically
+    // `Document::strokes()`.
+    void record(VkCommandBuffer cb,
+                VkExtent2D canvas_extent,
+                std::span<const Stroke> committed) noexcept;
 
     // Inspect / control state — used by tests and the future debug UI.
-    // The engine stores vector-ink Strokes (a centerline polyline +
-    // per-sample pressure + the brush style snapshotted at stroke
-    // start). Render-time tessellation turns the centerline into a
-    // GPU ribbon — see `tessellate_ribbon` in stroke_geometry.hpp.
     [[nodiscard]] auto is_drawing() const noexcept -> bool { return drawing_; }
-    [[nodiscard]] auto stroke_count() const noexcept -> std::size_t { return strokes_.size(); }
-    [[nodiscard]] auto strokes() const noexcept -> const std::vector<Stroke>& { return strokes_; }
     // The in-flight stroke being accumulated while the pen is held
     // down. `samples` is empty between presses.
     [[nodiscard]] auto current_stroke() const noexcept -> const Stroke& { return current_stroke_; }
-    // Total samples across completed strokes + the in-flight one —
-    // handy for debug overlays and sanity-check tests.
-    [[nodiscard]] auto total_sample_count() const noexcept -> std::size_t;
-    // Drop every accumulated stroke + the in-flight one. Drag state
-    // (`is_drawing()`) is unaffected; clear purges geometry, not
-    // input phase.
-    void clear_strokes() noexcept;
 
     // Live brush style — read freely; mutate when the user changes brush
     // settings. Existing accumulated stamps are unchanged; only future
@@ -174,6 +171,20 @@ public:
     // the lift after a flick stays continuous).
     using PressPredicate = std::function<bool(double canvas_x, double canvas_y)>;
     void set_press_predicate(PressPredicate p) noexcept { press_predicate_ = std::move(p); }
+
+    // Stroke completion sink. The host installs this to route every
+    // released stroke into its persistence layer — typically as an
+    // `AddStrokeCommand` against `Document`. When no sink is set
+    // (test-only construction), completed strokes are silently
+    // dropped; tests that exercise the completion path install a
+    // capturing sink.
+    //
+    // The sink is invoked on the same thread that fires the
+    // PointerReleased event (the GLFW event-pump thread); the host
+    // is responsible for any cross-thread marshalling if its
+    // command stack lives elsewhere.
+    using StrokeSink = std::function<void(Stroke completed)>;
+    void set_stroke_sink(StrokeSink s) noexcept { stroke_sink_ = std::move(s); }
 
     // Test-only / no-hook constructor (production code goes through create()).
     // Build an engine with no pipeline + no subscriptions, just the
@@ -232,18 +243,18 @@ private:
     double view_tx_ = 0.0;
     double view_ty_ = 0.0;
     double view_scale_ = 1.0;
-    // Completed strokes (released-pen events flush current_stroke_
-    // into this vector). Order is preserved so the debug overlay
-    // and any future undo/redo command can identify them by index.
-    std::vector<Stroke> strokes_;
     // Stroke being accumulated between press and release. After
     // release, `samples` is empty and `style` is reset on the
-    // next press from `brush_`.
+    // next press from `brush_`. Committed strokes now live on the
+    // host's Document (P.S.4); the engine emits them via
+    // `stroke_sink_` on release and otherwise has no notion of
+    // them.
     Stroke current_stroke_{};
     BrushStyle brush_{};
     DrawMode mode_{DrawMode::draw};
     bool input_active_{true};
     PressPredicate press_predicate_{};
+    StrokeSink stroke_sink_{};
     // Stabilizer state — the smoothed cursor lags the raw pointer
     // by an amount controlled by `current_stroke_.style.stabilizer`.
     // Reset each press; updated on every move.
