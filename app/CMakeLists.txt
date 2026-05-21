@@ -12,6 +12,7 @@ add_executable(noted_app
     src/input/text_tool_handler.cpp
     src/input/image_tool_handler.cpp
     src/input/camera_controller.cpp
+    src/input/shape_recognizer.cpp
     src/frame/render_passes.cpp
     src/ui/ui_panels.cpp
 )

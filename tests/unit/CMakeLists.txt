@@ -25,6 +25,7 @@ add_executable(noted_unit_tests
     document_strokes_test.cpp
     image_asset_registry_test.cpp
     shape_detect_test.cpp
+    shape_recognizer_test.cpp
     tool_test.cpp
     tool_options_test.cpp
     selection_drag_test.cpp
@@ -39,6 +40,7 @@ add_executable(noted_unit_tests
     ${CMAKE_SOURCE_DIR}/app/src/input/tool_input_router.cpp
     ${CMAKE_SOURCE_DIR}/app/src/input/selection_tool_handler.cpp
     ${CMAKE_SOURCE_DIR}/app/src/input/camera_controller.cpp
+    ${CMAKE_SOURCE_DIR}/app/src/input/shape_recognizer.cpp
     # `app_config.cpp` pulls nlohmann/json (PRIVATE_DEP on domain).
     # Tests only need the `CanvasConfig` struct from the header; the
     # parser isn't exercised, so we don't compile the .cpp here.
