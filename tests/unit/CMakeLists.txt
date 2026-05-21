@@ -27,6 +27,7 @@ add_executable(noted_unit_tests
     shape_detect_test.cpp
     shape_recognizer_test.cpp
     clipboard_test.cpp
+    lasso_polygon_test.cpp
     tool_test.cpp
     tool_options_test.cpp
     selection_drag_test.cpp
