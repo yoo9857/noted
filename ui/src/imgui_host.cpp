@@ -8,7 +8,6 @@
 #include <utility>
 
 #include <imgui.h>
-#include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
 
 #include "noted/engine/gpu/device.hpp"
@@ -129,12 +128,11 @@ void check_vk_result(VkResult err) {
 }  // namespace
 
 auto ImGuiHost::create(const ImGuiHostCreateInfo& info) -> Result<ImGuiHost> {
-    if (info.instance == nullptr || info.physical_device == nullptr || info.device == nullptr ||
-        info.window == nullptr) {
+    if (info.instance == nullptr || info.physical_device == nullptr || info.device == nullptr) {
         return std::unexpected(
             noted::make_error(noted::ErrorCode::invalid_argument,
-                              "ImGuiHost::create: instance / physical_device / device / "
-                              "window must all be non-null"));
+                              "ImGuiHost::create: instance / physical_device / device must all be "
+                              "non-null"));
     }
     if (info.color_format == VK_FORMAT_UNDEFINED) {
         return std::unexpected(
@@ -184,14 +182,9 @@ auto ImGuiHost::create(const ImGuiHostCreateInfo& info) -> Result<ImGuiHost> {
     // bitmap font on any failure — never blocks create().
     (void) try_load_cjk_font(info.cjk_font_path, info.font_size_px);
 
-    // 3. GLFW backend — wires input and clipboard.
-    if (!ImGui_ImplGlfw_InitForVulkan(info.window, /*install_callbacks=*/true)) {
-        host.destroy();
-        return std::unexpected(
-            noted::make_error(noted::ErrorCode::invalid_state,
-                              "ImGuiHost::create: ImGui_ImplGlfw_InitForVulkan returned false"));
-    }
-    host.glfw_init_ = true;
+    // 3. Input bridge — feeds ImGui IO via the engine's hook
+    // registry. Replaces the GLFW backend (ADR 0034, phase 1).
+    host.input_bridge_ = ImGuiInputBridge::create();
 
     // 4. Vulkan backend. We use dynamic rendering so no VkRenderPass.
     VkFormat color_formats[1] = {info.color_format};
@@ -233,13 +226,12 @@ ImGuiHost::ImGuiHost(ImGuiHost&& other) noexcept
     : device_(other.device_),
       descriptor_pool_(other.descriptor_pool_),
       context_owned_(other.context_owned_),
-      glfw_init_(other.glfw_init_),
       vulkan_init_(other.vulkan_init_),
-      initialized_(other.initialized_) {
+      initialized_(other.initialized_),
+      input_bridge_(std::move(other.input_bridge_)) {
     other.device_ = VK_NULL_HANDLE;
     other.descriptor_pool_ = VK_NULL_HANDLE;
     other.context_owned_ = false;
-    other.glfw_init_ = false;
     other.vulkan_init_ = false;
     other.initialized_ = false;
 }
@@ -250,13 +242,12 @@ auto ImGuiHost::operator=(ImGuiHost&& other) noexcept -> ImGuiHost& {
         device_ = other.device_;
         descriptor_pool_ = other.descriptor_pool_;
         context_owned_ = other.context_owned_;
-        glfw_init_ = other.glfw_init_;
         vulkan_init_ = other.vulkan_init_;
         initialized_ = other.initialized_;
+        input_bridge_ = std::move(other.input_bridge_);
         other.device_ = VK_NULL_HANDLE;
         other.descriptor_pool_ = VK_NULL_HANDLE;
         other.context_owned_ = false;
-        other.glfw_init_ = false;
         other.vulkan_init_ = false;
         other.initialized_ = false;
     }
@@ -272,10 +263,8 @@ void ImGuiHost::destroy() noexcept {
         ImGui_ImplVulkan_Shutdown();
         vulkan_init_ = false;
     }
-    if (glfw_init_) {
-        ImGui_ImplGlfw_Shutdown();
-        glfw_init_ = false;
-    }
+    // input_bridge_ tears down its hook subscriptions in its dtor.
+    input_bridge_.reset();
     if (context_owned_) {
         ImGui::DestroyContext();
         context_owned_ = false;
@@ -288,12 +277,16 @@ void ImGuiHost::destroy() noexcept {
     initialized_ = false;
 }
 
-void ImGuiHost::begin_frame() noexcept {
+void ImGuiHost::begin_frame(float framebuffer_w_px,
+                            float framebuffer_h_px,
+                            float delta_seconds) noexcept {
     if (!initialized_) {
         return;
     }
+    if (input_bridge_) {
+        input_bridge_->new_frame(framebuffer_w_px, framebuffer_h_px, delta_seconds);
+    }
     ImGui_ImplVulkan_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 }
 

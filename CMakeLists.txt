@@ -82,18 +82,10 @@ include(FetchContent)
 # third-party headers (e.g., GLFW emits C4819 on Korean/Japanese code
 # pages) without lowering the warning level for our own code.
 
-set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(GLFW_INSTALL        OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(
-    glfw
-    GIT_REPOSITORY https://github.com/glfw/glfw.git
-    GIT_TAG 3.4
-    GIT_SHALLOW TRUE
-    SYSTEM
-)
-FetchContent_MakeAvailable(glfw)
+# GLFW removed in ADR 0034 phase 1 — Qt's QWindow + QVulkanInstance
+# took over windowing + surface creation. Window-host integration
+# now lives in `platform/window/window.cpp` (QWindow subclass) and
+# every consumer talks through `noted::platform::Window`.
 
 # Vulkan Memory Allocator — header-only with a CMake INTERFACE target.
 # We compile the implementation in exactly one TU (engine/src/gpu/allocator.cpp).
@@ -188,7 +180,10 @@ add_library(imgui STATIC
     "${imgui_SOURCE_DIR}/imgui_tables.cpp"
     "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
     "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp"
-    "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp"
+    # imgui_impl_glfw removed in ADR 0034 phase 1. Input is now
+    # fed via `ui::ImGuiInputBridge`, which subscribes to the
+    # engine's hook registry — single source of truth for all
+    # pointer / scroll / key events across the app.
 )
 target_include_directories(imgui SYSTEM PUBLIC
     "${imgui_SOURCE_DIR}"
@@ -204,7 +199,7 @@ target_include_directories(imgui SYSTEM PUBLIC
 target_compile_definitions(imgui PUBLIC
     "IMGUI_USER_CONFIG=\"noted/ui/imgui_user_config.hpp\""
 )
-target_link_libraries(imgui PUBLIC Vulkan::Vulkan glfw)
+target_link_libraries(imgui PUBLIC Vulkan::Vulkan)
 # imgui's TUs reference noted::harness::validate via the user config's
 # forward decl; the symbol resolves at final link time against
 # noted::engine. Adding it to PUBLIC so any consumer linking imgui

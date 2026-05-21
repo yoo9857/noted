@@ -4,9 +4,9 @@
 
 // The ImGuiHost::create rejection paths are pure-logic checks on the
 // CreateInfo struct's pointer + format / count fields. They run with
-// no GPU, no GLFW window — exactly what unit-test infrastructure
-// supplies. The success path requires a live Vulkan device and a
-// window; that is GPU-integration territory and runs against a
+// no GPU, no window — exactly what unit-test infrastructure supplies.
+// The success path requires a live Vulkan device + a window-bound
+// Vulkan surface; that is GPU-integration territory and runs against a
 // real renderer in the app binary (no CI GPU runner yet, see ADR
 // 0027 follow-ups).
 
@@ -29,7 +29,6 @@ TEST(ImGuiHostCreate, RejectsNullInstance) {
     ImGuiHostCreateInfo info{};
     info.physical_device = reinterpret_cast<const noted::gpu::PhysicalDevice*>(0x1);
     info.device = reinterpret_cast<const noted::gpu::Device*>(0x2);
-    info.window = reinterpret_cast<GLFWwindow*>(0x3);
     info.color_format = VK_FORMAT_R8G8B8A8_UNORM;
     auto r = ImGuiHost::create(info);
     EXPECT_FALSE(r);
@@ -40,7 +39,6 @@ TEST(ImGuiHostCreate, RejectsUndefinedColorFormat) {
     info.instance = reinterpret_cast<const noted::gpu::Instance*>(0x1);
     info.physical_device = reinterpret_cast<const noted::gpu::PhysicalDevice*>(0x2);
     info.device = reinterpret_cast<const noted::gpu::Device*>(0x3);
-    info.window = reinterpret_cast<GLFWwindow*>(0x4);
     info.color_format = VK_FORMAT_UNDEFINED;
     info.image_count = 2;
     auto r = ImGuiHost::create(info);
@@ -52,7 +50,6 @@ TEST(ImGuiHostCreate, RejectsImageCountBelowTwo) {
     info.instance = reinterpret_cast<const noted::gpu::Instance*>(0x1);
     info.physical_device = reinterpret_cast<const noted::gpu::PhysicalDevice*>(0x2);
     info.device = reinterpret_cast<const noted::gpu::Device*>(0x3);
-    info.window = reinterpret_cast<GLFWwindow*>(0x4);
     info.color_format = VK_FORMAT_R8G8B8A8_UNORM;
     info.image_count = 1;
     auto r = ImGuiHost::create(info);
@@ -64,7 +61,6 @@ TEST(ImGuiHostCreate, RejectsImageCountAboveSixteen) {
     info.instance = reinterpret_cast<const noted::gpu::Instance*>(0x1);
     info.physical_device = reinterpret_cast<const noted::gpu::PhysicalDevice*>(0x2);
     info.device = reinterpret_cast<const noted::gpu::Device*>(0x3);
-    info.window = reinterpret_cast<GLFWwindow*>(0x4);
     info.color_format = VK_FORMAT_R8G8B8A8_UNORM;
     info.image_count = 17;
     auto r = ImGuiHost::create(info);

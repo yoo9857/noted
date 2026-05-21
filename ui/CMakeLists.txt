@@ -2,6 +2,7 @@ noted_add_module(
     NAME    ui
     SOURCES
         src/imgui_host.cpp
+        src/imgui_input_bridge.cpp
         src/view/view.cpp
         src/widget/widget.cpp
         src/widget/menu_bar.cpp
@@ -18,5 +19,5 @@ noted_add_module(
         src/widget/debug_overlay.cpp
         src/theme/theme.cpp
         src/binding/binding.cpp
-    PUBLIC_DEPS  noted::domain noted::platform noted::engine imgui
+    PUBLIC_DEPS  noted::domain noted::platform noted::engine imgui Qt6::Core Qt6::Gui
 )

@@ -9,6 +9,7 @@
 // responsibility is owned by a named type instead of a 800-line
 // `main()`. See `app::App::create()`.
 
+#include <QGuiApplication>
 #include <cstdlib>
 #include <iostream>
 #include <utility>
@@ -42,8 +43,18 @@ void install_default_observers() {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
     NOTED_PROFILE_THREAD("main");
+    // QGuiApplication is required by every Qt-based windowing path
+    // (ADR 0034 phase 1). Constructed on the stack so its lifetime
+    // ends after `App` is destroyed — Qt's QWindow must outlive its
+    // application instance, and stack-order destruction reverses
+    // that into the correct teardown sequence (App dtor first,
+    // qt_app dtor second).
+    QGuiApplication qt_app(argc, argv);
+    qt_app.setApplicationName("noted");
+    qt_app.setOrganizationName("noted");
+
     install_default_observers();
 
     // Load runtime config: `<exe_dir>/noted.config.json` if present,
