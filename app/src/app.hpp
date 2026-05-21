@@ -63,6 +63,7 @@
 #include "noted/ui/widget/debug_overlay.hpp"
 #include "noted/ui/widget/mac_chrome.hpp"
 #include "noted/ui/widget/menu_bar.hpp"
+#include "noted/ui/widget/navigator_panel.hpp"
 #include "noted/ui/widget/outline_panel.hpp"
 #include "noted/ui/widget/top_toolbar.hpp"
 
