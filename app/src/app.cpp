@@ -950,6 +950,57 @@ void App::wire_keyboard_shortcuts(const noted::ui::widget::MenuBarStatus& status
         menu.quit_requested = true;
     }
 
+    // Clipboard chords — Ctrl+X (Cut), Ctrl+C (Copy), Ctrl+V (Paste),
+    // Delete (delete selection). Shapes only in v1; text / image /
+    // stroke clipboard land in follow-up PRs. Each branch is a
+    // single domain transition that goes through the UndoStack so
+    // the user can Ctrl+Z any of them.
+    const auto picks = noted::domain::shapes_in_selection(session_.document(), selection_);
+    if (!picks.empty() && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_C)) {
+        std::vector<noted::domain::tool::ShapePrimitive> copied;
+        copied.reserve(picks.size());
+        for (auto i : picks) {
+            copied.push_back(session_.document().shapes()[i]);
+        }
+        clipboard_.set_shapes(std::move(copied));
+    }
+    if (!picks.empty() && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_X)) {
+        std::vector<noted::domain::tool::ShapePrimitive> copied;
+        copied.reserve(picks.size());
+        for (auto i : picks) {
+            copied.push_back(session_.document().shapes()[i]);
+        }
+        clipboard_.set_shapes(std::move(copied));
+        if (auto r = session_.execute(std::make_unique<noted::domain::DeleteShapesCommand>(picks));
+            !r) {
+            std::cerr << r.error().format() << '\n';
+        }
+    }
+    if (!picks.empty() && ImGui::IsKeyPressed(ImGuiKey_Delete)) {
+        if (auto r = session_.execute(std::make_unique<noted::domain::DeleteShapesCommand>(picks));
+            !r) {
+            std::cerr << r.error().format() << '\n';
+        }
+    }
+    if (clipboard_.has_shapes() && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_V)) {
+        // Paste with a small offset so the user sees the new copies
+        // sitting just below+right of the source — matches every
+        // mainstream editor's UX.
+        constexpr double kPasteOffsetPx = 16.0;
+        auto pasted = clipboard_.shapes();
+        for (auto& s : pasted) {
+            s.x0 += kPasteOffsetPx;
+            s.y0 += kPasteOffsetPx;
+            s.x1 += kPasteOffsetPx;
+            s.y1 += kPasteOffsetPx;
+        }
+        if (auto r = session_.execute(
+                std::make_unique<noted::domain::PasteShapesCommand>(std::move(pasted)));
+            !r) {
+            std::cerr << r.error().format() << '\n';
+        }
+    }
+
     // F2 = rename the selected block. Gated on "have a selection",
     // "no rename already in flight", and (already-checked above)
     // "no text input is consuming keys." Pre-fills the buffer from

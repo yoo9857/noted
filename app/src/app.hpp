@@ -31,6 +31,8 @@
 #include <vulkan/vulkan.h>
 
 #include "noted/compositor/layer_compositor.hpp"
+#include "noted/domain/clipboard/clipboard.hpp"
+#include "noted/domain/clipboard/selection_ops.hpp"
 #include "noted/domain/selection/selection.hpp"
 #include "noted/domain/tool/tool.hpp"
 #include "noted/engine/canvas/camera.hpp"
@@ -283,6 +285,10 @@ private:
     // `gpu::SelectionMask` (ADR 0021 / 0022) so the compositor can clip
     // per-pixel operations to the region the user marked.
     noted::domain::Selection selection_{};
+    // Session-level shape clipboard (Cut / Copy / Paste). Lives on
+    // App so it survives Document open / save / close — the user's
+    // mental model is "I copied that, it should still be there".
+    noted::domain::Clipboard clipboard_{};
     // In-flight drag — `nullopt` between drags. Populated on Left-down
     // while the Select tool is active; updated on PointerMoved; applied
     // to `selection_` on PointerReleased. (Drag state now lives on the

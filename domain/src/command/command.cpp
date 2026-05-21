@@ -421,6 +421,114 @@ auto RemoveShapeCommand::undo(Document& doc) -> Result<void> {
 }
 
 // ============================================================================
+// DeleteShapesCommand
+// ============================================================================
+
+DeleteShapesCommand::DeleteShapesCommand(std::vector<std::size_t> indices)
+    : target_indices_(std::move(indices)) {
+    // Sort + dedup so the apply order (descending) is well-defined
+    // and the snapshot list comes back ascending for undo.
+    std::sort(target_indices_.begin(), target_indices_.end());
+    target_indices_.erase(std::unique(target_indices_.begin(), target_indices_.end()),
+                          target_indices_.end());
+}
+
+auto DeleteShapesCommand::apply(Document& doc) -> Result<void> {
+    if (target_indices_.empty()) {
+        applied_ = true;  // no-op succeeds — empty paste should not stall the stack
+        return {};
+    }
+    // Validate first. Refusing partway through would leave the
+    // document in a state the user didn't ask for.
+    for (auto idx : target_indices_) {
+        if (idx >= doc.shapes().size()) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::invalid_argument,
+                "DeleteShapesCommand::apply: index " + std::to_string(idx) +
+                    " out of range (size " + std::to_string(doc.shapes().size()) + ")"));
+        }
+    }
+    // Snapshot in ASC index order (matches the sorted list).
+    snapshots_.clear();
+    snapshots_.reserve(target_indices_.size());
+    for (auto idx : target_indices_) {
+        snapshots_.emplace_back(idx, doc.shapes()[idx]);
+    }
+    // Remove in DESCENDING order so the surviving indices stay
+    // stable during the loop.
+    for (auto it = target_indices_.rbegin(); it != target_indices_.rend(); ++it) {
+        auto r = doc.remove_shape(*it);
+        if (!r) {
+            return std::unexpected(std::move(r).error());
+        }
+    }
+    applied_ = true;
+    return {};
+}
+
+auto DeleteShapesCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_state, "DeleteShapesCommand::undo: command was not applied"));
+    }
+    // Re-insert ascending so each insertion uses the original index
+    // — earlier inserts shift later ones, but since we recorded
+    // original indices ascending, each subsequent original index
+    // is exactly where the next shape needs to land.
+    for (const auto& [idx, shape] : snapshots_) {
+        auto r = doc.insert_shape(idx, shape);
+        if (!r) {
+            return std::unexpected(std::move(r).error());
+        }
+    }
+    snapshots_.clear();
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
+// PasteShapesCommand
+// ============================================================================
+
+PasteShapesCommand::PasteShapesCommand(std::vector<noted::domain::tool::ShapePrimitive> shapes)
+    : shapes_(std::move(shapes)) {}
+
+auto PasteShapesCommand::apply(Document& doc) -> Result<void> {
+    if (shapes_.empty()) {
+        applied_ = true;
+        return {};
+    }
+    first_assigned_index_ = doc.shapes().size();
+    for (const auto& s : shapes_) {
+        auto r = doc.add_shape(s);
+        if (!r) {
+            return std::unexpected(std::move(r).error());
+        }
+    }
+    applied_ = true;
+    return {};
+}
+
+auto PasteShapesCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_state, "PasteShapesCommand::undo: command was not applied"));
+    }
+    // Remove the same number we added, from the end. Append-only
+    // semantics on apply means the last `shapes_.size()` indices
+    // are guaranteed to be ours.
+    for (std::size_t i = 0; i < shapes_.size(); ++i) {
+        const std::size_t idx = doc.shapes().size() - 1;
+        auto r = doc.remove_shape(idx);
+        if (!r) {
+            return std::unexpected(std::move(r).error());
+        }
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
 // AddTextCommand
 // ============================================================================
 
