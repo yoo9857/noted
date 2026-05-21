@@ -77,7 +77,7 @@ void draw_eraser_icon(ImDrawList* dl, ImVec2 c, float s, ImU32 col) {
 }
 
 void draw_select_icon(ImDrawList* dl, ImVec2 c, float s, ImU32 col) {
-    // Dashed-border rectangle = the selection marquee.
+    // Dashed-border rectangle = the rectangle selection marquee.
     const float r = s * 0.34F;
     constexpr int kDashes = 8;
     const ImVec2 corners[4] = {
@@ -96,6 +96,25 @@ void draw_select_icon(ImDrawList* dl, ImVec2 c, float s, ImU32 col) {
             const ImVec2 p1(a.x + (b.x - a.x) * t1, a.y + (b.y - a.y) * t1);
             dl->AddLine(p0, p1, col, 1.5F);
         }
+    }
+}
+
+void draw_lasso_icon(ImDrawList* dl, ImVec2 c, float s, ImU32 col) {
+    // Free-form closed curve — distinguishes the lasso from the
+    // rect-marquee Select tool. Plot a wobbly tear-drop shape via
+    // a 16-point ellipse with a sinusoidal radial perturbation;
+    // dashed so it reads as a "selection path" same as marquee.
+    constexpr int kSeg = 18;
+    const float r = s * 0.32F;
+    ImVec2 prev{};
+    for (int i = 0; i <= kSeg; ++i) {
+        const float t = static_cast<float>(i) / kSeg * 6.2831853F;
+        const float wob = 0.85F + 0.15F * std::sin(t * 3.0F);
+        const ImVec2 p(c.x + std::cos(t) * r * wob, c.y + std::sin(t) * r * wob);
+        if (i > 0 && (i % 2) == 0) {
+            dl->AddLine(prev, p, col, 1.5F);
+        }
+        prev = p;
     }
 }
 
@@ -181,10 +200,11 @@ struct ToolButton {
     std::string_view tooltip;
 };
 
-constexpr std::array<ToolButton, 6> kTools{{
+constexpr std::array<ToolButton, 7> kTools{{
     {ToolKind::pen, &draw_pen_icon, "Pen (B)"},
     {ToolKind::eraser, &draw_eraser_icon, "Eraser (E)"},
-    {ToolKind::select, &draw_select_icon, "Select (V)"},
+    {ToolKind::select, &draw_select_icon, "Rectangle select (V)"},
+    {ToolKind::lasso, &draw_lasso_icon, "Lasso (L)"},
     {ToolKind::shape, &draw_shape_icon, "Shape (U)"},
     {ToolKind::text, &draw_text_icon, "Text (T)"},
     {ToolKind::image, &draw_image_icon, "Image (I)"},
