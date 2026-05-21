@@ -59,6 +59,7 @@
 #include "noted/platform/window/window.hpp"
 #include "noted/ui/imgui_host.hpp"
 #include "noted/ui/theme/theme.hpp"
+#include "noted/ui/widget/color_picker_panel.hpp"
 #include "noted/ui/widget/debug_overlay.hpp"
 #include "noted/ui/widget/mac_chrome.hpp"
 #include "noted/ui/widget/menu_bar.hpp"
@@ -286,9 +287,24 @@ private:
     // per-pixel operations to the region the user marked.
     noted::domain::Selection selection_{};
     // Session-level shape clipboard (Cut / Copy / Paste). Lives on
-    // App so it survives Document open / save / close — the user's
-    // mental model is "I copied that, it should still be there".
+    // App so it survives Document open / save / close.
     noted::domain::Clipboard clipboard_{};
+    // User-curated colour palette for the right-side color picker.
+    // 16 slots (4×4 grid). Index 0 = most recently auto-added.
+    // Empty slots have alpha = 0 (rendered as placeholder).
+    //
+    // Two write paths:
+    //   - **Auto-add**: when the user commits a colour (HSV release
+    //     / hex Enter / swatch click), if the head slot doesn't
+    //     already hold that colour, the new colour is pushed onto
+    //     the front and the tail is evicted.
+    //   - **Manual add** (+ button): identical behaviour, just
+    //     user-driven.
+    //
+    // Delete path: right-click a swatch → that slot becomes empty
+    // (alpha = 0). Subsequent autosaves fill empty slots before
+    // evicting populated ones.
+    std::array<std::array<float, 4>, 16> palette_colors_{};
     // In-flight drag — `nullopt` between drags. Populated on Left-down
     // while the Select tool is active; updated on PointerMoved; applied
     // to `selection_` on PointerReleased. (Drag state now lives on the
