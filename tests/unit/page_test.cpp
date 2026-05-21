@@ -280,3 +280,37 @@ TEST(PageList, SetGapNegativeClampsToZero) {
     list.set_gap_px(-100.0F);
     EXPECT_FLOAT_EQ(list.gap_px(), 0.0F);
 }
+
+// ---- contains_point (ADR 0033 stroke press gate) --------------------------
+
+TEST(Page, ContainsPointInsideAndOnEdges) {
+    Page p{};
+    p.extent_w_px = 100.0F;
+    p.extent_h_px = 200.0F;
+    p.origin_x_px = 50.0F;
+    p.origin_y_px = 30.0F;
+
+    EXPECT_TRUE(p.contains_point(60.0, 50.0));
+    EXPECT_TRUE(p.contains_point(50.0, 30.0));     // top-left corner (closed)
+    EXPECT_FALSE(p.contains_point(150.0, 30.0));   // right edge (half-open)
+    EXPECT_FALSE(p.contains_point(50.0, 230.0));   // bottom edge (half-open)
+    EXPECT_FALSE(p.contains_point(49.999, 50.0));  // just left of origin
+    EXPECT_FALSE(p.contains_point(0.0, 0.0));      // far outside
+}
+
+TEST(PageList, ContainsPointEmptyAlwaysFalse) {
+    PageList list;
+    EXPECT_FALSE(list.contains_point(0.0, 0.0));
+    EXPECT_FALSE(list.contains_point(100.0, 100.0));
+}
+
+TEST(PageList, ContainsPointFindsAnyPage) {
+    PageList list{10.0F};
+    list.add_page(100.0F, 100.0F, PageBackground::blank);  // y: 0..100
+    list.add_page(100.0F, 100.0F, PageBackground::blank);  // y: 110..210
+    EXPECT_TRUE(list.contains_point(50.0, 50.0));          // page 0 body
+    EXPECT_TRUE(list.contains_point(50.0, 150.0));         // page 1 body
+    EXPECT_FALSE(list.contains_point(50.0, 105.0));        // gap between pages
+    EXPECT_FALSE(list.contains_point(50.0, 250.0));        // below last page
+    EXPECT_FALSE(list.contains_point(200.0, 50.0));        // right of pages
+}

@@ -467,6 +467,17 @@ void StrokeEngine::on_pressed(const noted::hook::PointerPressed& e) noexcept {
     if (e.button != noted::hook::PointerButton::left) {
         return;
     }
+    // Screen → canvas: subtract camera translation, divide by scale.
+    // Identity view (default) reduces to s.x = e.x.
+    const double canvas_x = (e.x - view_tx_) / view_scale_;
+    const double canvas_y = (e.y - view_ty_) / view_scale_;
+    // Press gate — the host can restrict drawing to specific regions
+    // (typically "inside any page rect"). When the predicate rejects
+    // the press, `drawing_` stays false so subsequent on_moved /
+    // on_released events also drop on the floor.
+    if (press_predicate_ && !press_predicate_(canvas_x, canvas_y)) {
+        return;
+    }
     drawing_ = true;
     // Snapshot the brush style + draw mode at stroke start — later
     // mid-stroke edits to `brush_` / `mode_` (tool switches, debug
@@ -477,11 +488,9 @@ void StrokeEngine::on_pressed(const noted::hook::PointerPressed& e) noexcept {
     current_stroke_.style = brush_;
     current_stroke_.mode = mode_;
     current_stroke_.samples.clear();
-    // Screen → canvas: subtract camera translation, divide by scale.
-    // Identity view (default) reduces to s.x = e.x.
     StrokeSample sample{};
-    sample.x = static_cast<float>((e.x - view_tx_) / view_scale_);
-    sample.y = static_cast<float>((e.y - view_ty_) / view_scale_);
+    sample.x = static_cast<float>(canvas_x);
+    sample.y = static_cast<float>(canvas_y);
     sample.pressure = e.pressure;
     current_stroke_.samples.push_back(sample);
 }
@@ -490,9 +499,25 @@ void StrokeEngine::on_moved(const noted::hook::PointerMoved& e) noexcept {
     if (!input_active_ || !drawing_) {
         return;
     }
+    const double canvas_x = (e.x - view_tx_) / view_scale_;
+    const double canvas_y = (e.y - view_ty_) / view_scale_;
+    // Mid-stroke gate — same predicate the press uses. Without this
+    // the user could start a stroke inside a page, then drag onto
+    // the desk and have the ribbon trail with them. Dropping these
+    // off-page samples keeps the drawn ribbon visually bounded by
+    // pages: a stroke that briefly exits a page and returns will
+    // bridge the gap with one straight segment between the last
+    // on-page sample and the next on-page sample (Goodnotes does
+    // visual clipping at the page edge; a stencil/mask approach
+    // for that lands as a follow-up — for now bridging is the
+    // closest cheap approximation and is the right default given
+    // the user's mental model of "paper, then desk").
+    if (press_predicate_ && !press_predicate_(canvas_x, canvas_y)) {
+        return;
+    }
     StrokeSample sample{};
-    sample.x = static_cast<float>((e.x - view_tx_) / view_scale_);
-    sample.y = static_cast<float>((e.y - view_ty_) / view_scale_);
+    sample.x = static_cast<float>(canvas_x);
+    sample.y = static_cast<float>(canvas_y);
     sample.pressure = e.pressure;
     current_stroke_.samples.push_back(sample);
 }

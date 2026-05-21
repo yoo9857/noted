@@ -22,6 +22,7 @@
 // Rationale: see docs/architecture/0015-stroke-engine-mvp.md.
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -159,6 +160,21 @@ public:
     [[nodiscard]] auto is_input_active() const noexcept -> bool { return input_active_; }
     void set_active(bool active) noexcept;
 
+    // Press gate — when set, only presses whose canvas coordinates
+    // satisfy the predicate start a stroke. The host (App) installs
+    // a predicate that asks the document's PageList "is this point
+    // inside any page rect?", so drawing is constrained to paper
+    // and never lands on the surrounding desk colour. Default is
+    // empty (any press starts a stroke) so test-only constructions
+    // and standalone use stay simple.
+    //
+    // Called only on `on_pressed`; mid-stroke `on_moved` samples are
+    // never re-validated so a stroke that started inside a page can
+    // still trail slightly off the edge (matches Goodnotes feel —
+    // the lift after a flick stays continuous).
+    using PressPredicate = std::function<bool(double canvas_x, double canvas_y)>;
+    void set_press_predicate(PressPredicate p) noexcept { press_predicate_ = std::move(p); }
+
     // Test-only / no-hook constructor (production code goes through create()).
     // Build an engine with no pipeline + no subscriptions, just the
     // accumulation state. Lets unit tests exercise the pointer-event →
@@ -227,6 +243,7 @@ private:
     BrushStyle brush_{};
     DrawMode mode_{DrawMode::draw};
     bool input_active_{true};
+    PressPredicate press_predicate_{};
 
     // RAII subscriptions — released when the engine goes out of scope.
     noted::hook::Subscription<noted::hook::PointerPressed> sub_pressed_;

@@ -142,6 +142,23 @@ private:
     // Swapchain re-create on OUT_OF_DATE / SUBOPTIMAL.
     [[nodiscard]] auto recreate_swapchain() -> noted::Result<void>;
 
+    // Compute the canvas extent that fits the current swapchain AND
+    // the entire page stack with a comfortable margin around the
+    // shadow apron. Clamped to a sane Vulkan-image upper bound. See
+    // ADR 0033 — the offscreen canvas can be **bigger than the
+    // swapchain**; the composite pass then transforms it into screen
+    // space via the camera. Slice 1 of ADR 0033 keeps the offscreen
+    // model; Slice 2 (ADR 0034, future) replaces it entirely.
+    [[nodiscard]] auto desired_canvas_extent() const noexcept -> VkExtent2D;
+
+    // If the current canvas / strokes target doesn't match
+    // `desired_canvas_extent()`, wait_idle + resize both + rewrite
+    // descriptors + update camera.canvas_extent. Called every frame
+    // before render — a no-op when extents already match. The
+    // wait_idle is unavoidable for resource resize, but only happens
+    // on page-list change or window resize.
+    [[nodiscard]] auto ensure_canvas_fits_pages() -> noted::Result<void>;
+
     // ---- Init steps used by create() ------------------------------------
     [[nodiscard]] auto init_engine_and_window() -> noted::Result<void>;
     [[nodiscard]] auto init_gpu_stack() -> noted::Result<void>;

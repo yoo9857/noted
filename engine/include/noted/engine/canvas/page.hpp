@@ -56,6 +56,16 @@ struct Page {
     // overwrite it on the next reflow.
     float origin_x_px{0.0F};
     float origin_y_px{0.0F};
+
+    // Half-open hit test: `x ∈ [origin_x, origin_x + extent_w)` and
+    // the same on y. Half-open keeps the test consistent with how a
+    // user perceives the right / bottom edge (a click exactly on the
+    // edge is "off the page" — same convention as ImGui rects and
+    // the `Selection::contains` predicate).
+    [[nodiscard]] auto contains_point(double x, double y) const noexcept -> bool {
+        return x >= origin_x_px && x < origin_x_px + extent_w_px && y >= origin_y_px &&
+               y < origin_y_px + extent_h_px;
+    }
 };
 
 // Vertically-stacked list of pages with a configurable gap between
@@ -119,6 +129,12 @@ public:
     // background frame or for the camera's "fit to width" math. 0
     // for an empty list.
     [[nodiscard]] auto max_width_px() const noexcept -> float;
+
+    // True if `(x, y)` (canvas pixels) falls inside any page. The
+    // stroke engine's press gate (`set_press_predicate`) uses this
+    // so drawing is constrained to paper and never lands on the
+    // surrounding desk colour — the Goodnotes interaction model.
+    [[nodiscard]] auto contains_point(double x, double y) const noexcept -> bool;
 
 private:
     void reflow_origins() noexcept;

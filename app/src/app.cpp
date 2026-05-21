@@ -143,14 +143,21 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
     // it at runtime via View → Page strip.
     app->menu_state_.show_page_strip = app->cfg_.ui.show_page_strip;
 
-    // Seed the camera's canvas + window extents from the swapchain
-    // before the first frame. The `framebuffer_resized` hook only
-    // fires on subsequent resizes — without this the very first
-    // render uses Camera's 1×1 defaults and the canvas collapses
-    // to a single pixel.
-    const auto extent = app->swapchain_->summary().extent;
-    app->camera_.set_canvas_extent(extent.width, extent.height);
-    app->camera_.set_window_extent(extent.width, extent.height);
+    // Seed the camera's canvas + window extents before the first
+    // frame. The `framebuffer_resized` hook only fires on subsequent
+    // resizes — without this the very first render uses Camera's
+    // 1×1 defaults and the canvas collapses to a single pixel.
+    //
+    // Initial pages have already been seeded by `init_page_renderer`,
+    // so call `ensure_canvas_fits_pages` to size the offscreen target
+    // to the page stack before the first paint. The camera's canvas
+    // extent is updated inside that call; window extent stays at the
+    // swapchain extent.
+    const auto sc_extent = app->swapchain_->summary().extent;
+    app->camera_.set_window_extent(sc_extent.width, sc_extent.height);
+    if (auto r = app->ensure_canvas_fits_pages(); !r) {
+        return std::unexpected(std::move(r).error());
+    }
 
     app->install_frame_hook();
 
@@ -564,6 +571,16 @@ auto App::init_stroke_engine() -> noted::Result<void> {
     }
     stroke_engine_ = std::move(*stroke);
     stroke_engine_->set_canvas_size(swapchain_->summary().extent);
+    // Page-bound the stroke engine: a press only starts a stroke
+    // when its canvas-pixel coordinates fall inside one of the
+    // document's pages. The desk colour around pages stays
+    // un-drawable — matches Goodnotes / Notability convention and
+    // makes the page-on-desk visual model (ADR 0033) feel real
+    // rather than decorative. The predicate captures `this` by
+    // pointer; App outlives the StrokeEngine.
+    stroke_engine_->set_press_predicate([this](double canvas_x, double canvas_y) -> bool {
+        return session_.document().pages().contains_point(canvas_x, canvas_y);
+    });
     return {};
 }
 
@@ -942,6 +959,14 @@ auto App::render_one_frame() -> noted::Result<void> {
     // the render path is the OUT_OF_DATE / SUBOPTIMAL recovery —
     // owner work that touches the swapchain handle, reallocates
     // canvas + strokes_target, and re-binds descriptors.
+    //
+    // Slice 2 of ADR 0033: before the render, make sure the canvas
+    // is large enough to contain the entire page stack. The check
+    // is cheap (one comparison); the wait_idle + resize path only
+    // fires when pages were added/removed/loaded.
+    if (auto r = ensure_canvas_fits_pages(); !r) {
+        return std::unexpected(std::move(r).error());
+    }
     auto rr = render_passes_->render_frame();
     if (!rr) {
         const auto code = rr.error().code;
@@ -975,10 +1000,15 @@ auto App::recreate_swapchain() -> noted::Result<void> {
     if (auto r = renderer_->rebind_swapchain(*device_, *swapchain_); !r) {
         return std::unexpected(std::move(r).error());
     }
-    if (auto r = canvas_->resize(*allocator_, swapchain_->summary().extent); !r) {
+    // Resize canvas + strokes to the desired extent that fits both
+    // the new swapchain AND the page stack. This is the same extent
+    // `ensure_canvas_fits_pages` would compute; calling it here
+    // collapses the OUT_OF_DATE recovery into a single resize.
+    const auto desired = desired_canvas_extent();
+    if (auto r = canvas_->resize(*allocator_, desired); !r) {
         return std::unexpected(std::move(r).error());
     }
-    if (auto r = strokes_target_->resize(*allocator_, swapchain_->summary().extent); !r) {
+    if (auto r = strokes_target_->resize(*allocator_, desired); !r) {
         return std::unexpected(std::move(r).error());
     }
     // Image views are fresh after resize — re-point both descriptors.
@@ -988,14 +1018,98 @@ auto App::recreate_swapchain() -> noted::Result<void> {
     noted::gpu::DescriptorWriter{strokes_set_}
         .write_combined_image_sampler(0, strokes_target_->view(), sampler_->handle())
         .commit();
-    // Keep the camera's notion of window / canvas extent aligned
-    // with the live swapchain. The framebuffer_resized hook also
-    // fires for window resizes, but recreate_swapchain runs on the
-    // OUT_OF_DATE recovery path too — covering both keeps the
-    // camera's shader transform consistent.
-    const auto ext = swapchain_->summary().extent;
-    camera_.set_canvas_extent(ext.width, ext.height);
-    camera_.set_window_extent(ext.width, ext.height);
+    // The camera's canvas extent must match the offscreen target;
+    // the window extent stays at the swapchain extent (the composite
+    // shader transforms canvas → window via these two).
+    const auto sc_ext = swapchain_->summary().extent;
+    camera_.set_canvas_extent(desired.width, desired.height);
+    camera_.set_window_extent(sc_ext.width, sc_ext.height);
+    return {};
+}
+
+auto App::desired_canvas_extent() const noexcept -> VkExtent2D {
+    // Vulkan promises 4096 in either dimension on every conformant
+    // device, and 16384 on every desktop GPU shipped this decade.
+    // 16384 covers ~20 stacked Letter pages — beyond that the user
+    // should switch to ADR 0034's direct-to-swapchain model.
+    constexpr std::uint32_t kMaxDim = 16384U;
+    // Comfortable margin around the page stack so the 24-px shadow
+    // apron + a bit of breathing room are never clipped.
+    constexpr float kPageMarginPx = 200.0F;
+
+    const auto sc_ext = swapchain_->summary().extent;
+    std::uint32_t w = sc_ext.width;
+    std::uint32_t h = sc_ext.height;
+
+    // Pages stack vertically with `gap_px` between them. Each page's
+    // origin_x may also be non-zero (newly-added pages are centred
+    // horizontally). Use the rightmost edge + margin as the width
+    // requirement; the total stacked height + margin as the height
+    // requirement.
+    const auto& pages = session_.document().pages();
+    if (!pages.empty()) {
+        float right_edge = 0.0F;
+        for (const auto& p : pages.pages()) {
+            const float r = p.origin_x_px + p.extent_w_px;
+            if (r > right_edge) {
+                right_edge = r;
+            }
+        }
+        const auto needed_w =
+            static_cast<std::uint32_t>(std::max(0.0F, right_edge + kPageMarginPx));
+        const auto needed_h =
+            static_cast<std::uint32_t>(std::max(0.0F, pages.total_height_px() + kPageMarginPx));
+        if (needed_w > w) {
+            w = needed_w;
+        }
+        if (needed_h > h) {
+            h = needed_h;
+        }
+    }
+
+    if (w > kMaxDim) {
+        w = kMaxDim;
+    }
+    if (h > kMaxDim) {
+        h = kMaxDim;
+    }
+    if (w == 0U) {
+        w = 1U;
+    }
+    if (h == 0U) {
+        h = 1U;
+    }
+    return {.width = w, .height = h};
+}
+
+auto App::ensure_canvas_fits_pages() -> noted::Result<void> {
+    if (!canvas_.has_value() || !strokes_target_.has_value()) {
+        return {};  // not initialised yet
+    }
+    const auto desired = desired_canvas_extent();
+    const auto current = canvas_->extent();
+    if (current.width == desired.width && current.height == desired.height) {
+        return {};  // already correct — the common path, free
+    }
+    // Wait for any in-flight frame to finish — the canvas image is
+    // still referenced by the previous frame's command buffer until
+    // the per-frame fence has been waited on. wait_idle is the
+    // sledgehammer; the cost is acceptable because this path only
+    // runs on page-list change or window resize, not per frame.
+    device_->wait_idle();
+    if (auto r = canvas_->resize(*allocator_, desired); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    if (auto r = strokes_target_->resize(*allocator_, desired); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    noted::gpu::DescriptorWriter{canvas_set_}
+        .write_combined_image_sampler(0, canvas_->view(), sampler_->handle())
+        .commit();
+    noted::gpu::DescriptorWriter{strokes_set_}
+        .write_combined_image_sampler(0, strokes_target_->view(), sampler_->handle())
+        .commit();
+    camera_.set_canvas_extent(desired.width, desired.height);
     return {};
 }
 
