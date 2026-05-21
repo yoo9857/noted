@@ -1,27 +1,30 @@
 #pragma once
 
-// ImGuiHost — RAII lifecycle wrapper around Dear ImGui's Vulkan +
-// GLFW backends.
+// ImGuiHost — RAII lifecycle wrapper around Dear ImGui's Vulkan
+// backend + the platform-agnostic input bridge.
 //
 // Sequence (one per process):
 //
-//     auto host = ui::ImGuiHost::create({ ...vulkan + window... });
+//     auto host = ui::ImGuiHost::create({ ...vulkan only... });
 //     while (running) {
-//         host->begin_frame();
+//         host->begin_frame(fb_w, fb_h, dt);
 //         ImGui::ShowDemoWindow();           // user UI code
-//         host->end_frame(command_buffer);   // record draw into the cb
+//         host->finalize_frame();
+//         host->render_into(command_buffer); // record draw into the cb
 //     }
-//     // host's destructor runs ImGui_ImplVulkan_Shutdown +
-//     // ImGui_ImplGlfw_Shutdown + ImGui::DestroyContext.
+//     // host's destructor runs ImGui_ImplVulkan_Shutdown + bridge
+//     // teardown + ImGui::DestroyContext.
+//
+// Phase 1 of ADR 0034: replaced the GLFW backend
+// (`imgui_impl_glfw`) with `ui::ImGuiInputBridge`, which feeds ImGui
+// IO from the engine's hook registry. ImGui no longer cares which
+// platform window framework hosts it.
 //
 // Failure policy (ADR 0003):
 //   - create() returns Result<ImGuiHost>; rejection paths cover
-//     null device / queue / window pointers and Vulkan resource
-//     creation failures. No exceptions propagate.
-//   - begin_frame / end_frame are noexcept. ImGui's own
-//     assertions (IM_ASSERT) currently route through the standard
-//     `assert()` — routing through harness::validate is deferred
-//     to a small follow-up PR (see ADR 0027).
+//     null device pointers and Vulkan resource creation failures.
+//     No exceptions propagate.
+//   - begin_frame / finalize_frame / render_into are noexcept.
 //
 // Threading:
 //   - Dear ImGui's global context model means only one ImGuiHost
@@ -29,16 +32,17 @@
 //     non-default-constructible to enforce this with type-level
 //     ergonomics rather than runtime checks.
 //
-// Rationale: see docs/architecture/0027-ui-stack-selection.md.
+// Rationale: see docs/architecture/0027-ui-stack-selection.md
+// and docs/architecture/0034-ui-framework-migration-qt6.md.
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 
 #include <vulkan/vulkan.h>
 
 #include "noted/engine/error/error.hpp"
-
-struct GLFWwindow;
+#include "noted/ui/imgui_input_bridge.hpp"
 
 namespace noted::gpu {
 class Device;
@@ -52,7 +56,6 @@ struct ImGuiHostCreateInfo {
     const noted::gpu::Instance* instance{nullptr};
     const noted::gpu::PhysicalDevice* physical_device{nullptr};
     const noted::gpu::Device* device{nullptr};
-    GLFWwindow* window{nullptr};
 
     // Image format the backend will write to via dynamic rendering.
     // Typically `Swapchain::summary().color_format`.
@@ -90,9 +93,11 @@ public:
     ~ImGuiHost();
 
     // Top of frame — must be called once per frame, before any
-    // ImGui::* drawing calls. noexcept: ImGui's frame setup never
-    // throws under the supported config.
-    void begin_frame() noexcept;
+    // ImGui::* drawing calls. `framebuffer_w_px` / `framebuffer_h_px`
+    // are the current swapchain image extent (in pixels — already
+    // HiDPI-scaled). `delta_seconds` is the time since the previous
+    // call; the host passes its frame-loop's measured Δ.
+    void begin_frame(float framebuffer_w_px, float framebuffer_h_px, float delta_seconds) noexcept;
 
     // Finalize the frame's ImGui state and produce internal draw
     // data. Must be called every frame regardless of whether
@@ -117,9 +122,9 @@ private:
     VkDevice device_{VK_NULL_HANDLE};
     VkDescriptorPool descriptor_pool_{VK_NULL_HANDLE};
     bool context_owned_{false};
-    bool glfw_init_{false};
     bool vulkan_init_{false};
     bool initialized_{false};
+    std::unique_ptr<ImGuiInputBridge> input_bridge_{};
 };
 
 }  // namespace noted::ui

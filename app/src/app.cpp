@@ -1,9 +1,8 @@
 #include "app.hpp"
 
-#define GLFW_INCLUDE_VULKAN
-
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -13,8 +12,8 @@
 #include <string>
 #include <utility>
 
-#include <GLFW/glfw3.h>
 #include <imgui.h>
+#include <vulkan/vulkan.h>
 
 #include "noted/compositor/layer_payload.hpp"
 #include "noted/domain/command/commands.hpp"
@@ -43,24 +42,34 @@ noted::harness::FeatureFlag flag_validation_layers{"gpu.enable_validation_layers
                                                    /*default=*/true};
 noted::harness::FeatureFlag flag_force_vsync{"gpu.force_vsync_fifo", /*default=*/false};
 
-[[nodiscard]] auto glfw_required_extensions() -> std::span<const char* const> {
-    std::uint32_t count = 0;
-    const char** ptr = glfwGetRequiredInstanceExtensions(&count);
-    return {ptr, static_cast<std::size_t>(count)};
+// Surface extensions our VkInstance needs so QVulkanInstance can
+// build a VkSurfaceKHR for the QWindow. The list is fixed per
+// platform; previously this came from glfwGetRequiredInstanceExtensions
+// but Qt's bridge does not expose an equivalent for the
+// "use-this-existing-VkInstance" path, so we hardcode it.
+[[nodiscard]] auto required_surface_extensions() -> std::span<const char* const> {
+#if defined(_WIN32)
+    static constexpr std::array<const char*, 2> kExts{"VK_KHR_surface", "VK_KHR_win32_surface"};
+#elif defined(__APPLE__)
+    static constexpr std::array<const char*, 3> kExts{
+        "VK_KHR_surface", "VK_EXT_metal_surface", "VK_KHR_portability_enumeration"};
+#else
+    static constexpr std::array<const char*, 3> kExts{
+        "VK_KHR_surface", "VK_KHR_xcb_surface", "VK_KHR_wayland_surface"};
+#endif
+    return {kExts.data(), kExts.size()};
 }
 
-[[nodiscard]] auto create_window_surface(VkInstance instance, noted::platform::Window& window)
-    -> noted::Result<VkSurfaceKHR> {
-    VkSurfaceKHR raw = VK_NULL_HANDLE;
-    if (auto vr = glfwCreateWindowSurface(instance, window.native_handle(), nullptr, &raw);
-        vr != VK_SUCCESS) {
-        return std::unexpected(
-            noted::make_error(noted::ErrorCode::gpu_surface_lost,
-                              std::string{"glfwCreateWindowSurface failed: VkResult="} +
-                                  std::to_string(static_cast<int>(vr))));
-    }
-    return raw;
+// Monotonic time-since-startup in seconds. Replaces glfwGetTime.
+[[nodiscard]] auto monotonic_seconds() noexcept -> double {
+    static const auto epoch = std::chrono::steady_clock::now();
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - epoch).count();
 }
+
+// Surface creation moved into `Window::create_surface` (ADR 0034
+// phase 1) — the Window now owns the QVulkanInstance bridge that
+// generates the VkSurfaceKHR, so App stops carrying any
+// platform-specific surface logic.
 
 [[nodiscard]] auto load_shader(const noted::gpu::Device& device, const std::filesystem::path& path)
     -> noted::Result<noted::gpu::ShaderModule> {
@@ -131,7 +140,7 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
     // paint — avoids the "noted" → "noted — Untitled" flash on
     // frame 0.
     app->last_window_title_ = app->session_.title();
-    glfwSetWindowTitle(app->window_->native_handle(), app->last_window_title_.c_str());
+    app->window_->set_title(app->last_window_title_);
 
     // Apply the configured default theme exactly once before the
     // first frame so the very first paint is already styled.
@@ -231,14 +240,14 @@ auto App::init_gpu_stack() -> noted::Result<void> {
         .api_version = VK_API_VERSION_1_3,
         .enable_validation = static_cast<bool>(flag_validation_layers),
         .extra_extensions = {},
-        .surface_extensions = glfw_required_extensions(),
+        .surface_extensions = required_surface_extensions(),
     });
     if (!instance) {
         return std::unexpected(std::move(instance).error());
     }
     instance_.emplace(std::move(*instance));
 
-    auto raw_surface = create_window_surface(instance_->handle(), *window_);
+    auto raw_surface = window_->create_surface(instance_->handle());
     if (!raw_surface) {
         return std::unexpected(std::move(raw_surface).error());
     }
@@ -598,8 +607,7 @@ auto App::init_stroke_engine() -> noted::Result<void> {
         // Notify the smart-shape recognizer so it can attempt
         // detection after the configured hold-still interval. The
         // tick happens in `on_frame`.
-        shape_recognizer_.on_stroke_added(raw_cmd->assigned_index(),
-                                          static_cast<double>(glfwGetTime()));
+        shape_recognizer_.on_stroke_added(raw_cmd->assigned_index(), monotonic_seconds());
     });
     return {};
 }
@@ -636,7 +644,6 @@ auto App::init_renderer_and_imgui() -> noted::Result<void> {
         .instance = &*instance_,
         .physical_device = &*physical_,
         .device = &*device_,
-        .window = window_->native_handle(),
         .color_format = swapchain_->summary().color_format,
         .image_count = swapchain_->summary().image_count,
         .cjk_font_path = cjk_font_path,
@@ -721,11 +728,11 @@ void App::install_frame_hook() {
     // subscriptions.
     (void) noted::hook::registry().on_pointer_pressed.subscribe(
         [this](const noted::hook::PointerPressed&) {
-            shape_recognizer_.on_pointer_active(static_cast<double>(glfwGetTime()));
+            shape_recognizer_.on_pointer_active(monotonic_seconds());
         });
     (void) noted::hook::registry().on_pointer_moved.subscribe(
         [this](const noted::hook::PointerMoved&) {
-            shape_recognizer_.on_pointer_active(static_cast<double>(glfwGetTime()));
+            shape_recognizer_.on_pointer_active(monotonic_seconds());
         });
 
     // Default smart-shape recognizer config — enabled by default so
@@ -769,7 +776,7 @@ auto App::should_break_loop() -> bool {
     if (prompt_.has_confirmed_exit() || !session_.is_dirty()) {
         return true;
     }
-    glfwSetWindowShouldClose(window_->native_handle(), GLFW_FALSE);
+    window_->set_should_close(false);
     if (prompt_.pending_action() != DirtyPrompt::PendingAction::quit) {
         prompt_.arm(DirtyPrompt::PendingAction::quit);
     }
@@ -797,9 +804,7 @@ void App::on_frame() {
     // the freehand stroke for a recognised ShapePrimitive — two
     // separate commands so the user can Ctrl+Z once to restore
     // the raw stroke if they wanted the freehand.
-    if (auto action =
-            shape_recognizer_.tick(session_.document(), static_cast<double>(glfwGetTime()));
-        action) {
+    if (auto action = shape_recognizer_.tick(session_.document(), monotonic_seconds()); action) {
         if (auto r = session_.execute(
                 std::make_unique<noted::domain::RemoveStrokeCommand>(action->stroke_index));
             !r) {
@@ -815,7 +820,12 @@ void App::on_frame() {
     // so ImGui::* calls below land in the same frame the renderer
     // will draw. finalize_frame is called unconditionally so a
     // swapchain-out-of-date error doesn't leave the frame dangling.
-    imgui_host_->begin_frame();
+    const auto [fb_w, fb_h] = window_->framebuffer_size();
+    static double last_frame_time = monotonic_seconds();
+    const double now = monotonic_seconds();
+    const float dt = static_cast<float>(now - last_frame_time);
+    last_frame_time = now;
+    imgui_host_->begin_frame(static_cast<float>(fb_w), static_cast<float>(fb_h), dt);
 
     const noted::ui::widget::MenuBarStatus menu_status{
         .can_undo = session_.undo_stack().can_undo(),
@@ -837,7 +847,7 @@ void App::on_frame() {
         // Render fatal — force loop exit by signalling confirmed
         // exit so should_break_loop returns true regardless of
         // dirty state. Better than crashing with state mid-flight.
-        glfwSetWindowShouldClose(window_->native_handle(), GLFW_TRUE);
+        window_->set_should_close(true);
     }
 
     engine_.end_frame();
@@ -919,7 +929,7 @@ void App::handle_menu_actions(const noted::ui::widget::MenuBarResult& menu) {
     if (menu.quit_requested) {
         // Loop-top intercept will catch the dirty case; clean docs
         // exit immediately on the next iteration.
-        glfwSetWindowShouldClose(window_->native_handle(), GLFW_TRUE);
+        window_->set_should_close(true);
     }
     if (menu.file_new_requested) {
         if (session_.is_dirty()) {
@@ -1014,7 +1024,7 @@ void App::refresh_window_title_if_changed() {
     auto t = session_.title();
     if (t != last_window_title_) {
         last_window_title_ = std::move(t);
-        glfwSetWindowTitle(window_->native_handle(), last_window_title_.c_str());
+        window_->set_title(last_window_title_);
     }
 }
 
@@ -1263,7 +1273,7 @@ void App::run_image_picker() {
 void App::execute_pending_dirty_action(DirtyPrompt::PendingAction action) {
     switch (action) {
         case DirtyPrompt::PendingAction::quit:
-            glfwSetWindowShouldClose(window_->native_handle(), GLFW_TRUE);
+            window_->set_should_close(true);
             break;
         case DirtyPrompt::PendingAction::new_doc:
             session_.reset_to_blank();

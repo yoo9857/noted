@@ -13,7 +13,7 @@ noted_add_module(
         src/image_io/image_io.cpp
         src/io/noted_file.cpp
         src/io/file_picker.cpp
-    PUBLIC_DEPS   noted::engine noted::domain glfw
+    PUBLIC_DEPS   noted::engine noted::domain Qt6::Core Qt6::Gui
     PRIVATE_DEPS  stb_image miniz nfd
 )
 

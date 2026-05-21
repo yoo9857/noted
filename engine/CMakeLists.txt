@@ -36,7 +36,6 @@ noted_add_module(
         src/canvas/page_renderer.cpp
     PUBLIC_DEPS
         Vulkan::Vulkan
-        glfw
         VulkanMemoryAllocator
 )
 
