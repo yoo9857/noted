@@ -1,6 +1,7 @@
 #include "noted/engine/stroke/stroke_geometry.hpp"
 
 #include <cmath>
+#include <unordered_set>
 
 #include <gtest/gtest.h>
 
@@ -60,116 +61,169 @@ TEST(Tessellate, ConsecutiveDuplicateSamplesCollapse) {
     EXPECT_TRUE(tessellate_ribbon(s).empty());
 }
 
-// ---- Two-sample straight segment ------------------------------------------
+// ---- Per-segment TRIANGLE_LIST topology ------------------------------------
+//
+// Tessellator now emits 6 vertices per segment (2 triangles forming
+// a rounded-cap quad), not 2 per sample. See `stroke_geometry.hpp`.
 
-TEST(Tessellate, TwoSamplesProduceFourVertices) {
+TEST(Tessellate, TwoSamplesProduceSixVertices) {
     auto s = fixed_width_stroke({
         {.x = 0.0F, .y = 0.0F, .pressure = 1.0F},
         {.x = 10.0F, .y = 0.0F, .pressure = 1.0F},
     });
     const auto verts = tessellate_ribbon(s);
-    ASSERT_EQ(verts.size(), 4U);
+    ASSERT_EQ(verts.size(), 6U);
 }
 
-TEST(Tessellate, TwoSamplesNormalsArePerpendicularToTangent) {
-    // Horizontal segment (1, 0). The unit perpendicular in screen
-    // space (y-down) is (0, 1) — so the "left" vertex is sample +
-    // (0, -1)*w and "right" is sample + (0, 1)*w when nx/ny are
-    // taken as (-dy/len, dx/len). With dx=10, dy=0 → nx=0, ny=1.
-    // left  = (x, y) - (0, 1) * 4 = (x, y - 4)
-    // right = (x, y) + (0, 1) * 4 = (x, y + 4)
+TEST(Tessellate, NSegmentsProduceSixNVertices) {
+    Stroke s;
+    s.style.min_radius_px = 4.0F;
+    s.style.max_radius_px = 4.0F;
+    s.style.alpha_gamma = 1.0F;
+    for (int i = 0; i < 50; ++i) {
+        s.samples.push_back({.x = static_cast<float>(i), .y = 0.0F, .pressure = 1.0F});
+    }
+    const auto verts = tessellate_ribbon(s);
+    // 49 segments × 6 vertices each = 294.
+    EXPECT_EQ(verts.size(), 49U * 6U);
+}
+
+// ---- Quad geometry (single horizontal segment) -----------------------------
+//
+// Tangent (1, 0), radius 4. The segment's quad extends by radius along
+// the tangent past each endpoint and ±radius along the perpendicular
+// (0, 1). For samples A=(0,0), B=(10,0), r=4 the four corners are:
+//   V0 (A - t*r - n*r) = (0 - 4, 0 - 4) = (-4, -4)
+//   V1 (A - t*r + n*r) = (-4, +4)
+//   V2 (B + t*r - n*r) = (14, -4)
+//   V3 (B + t*r + n*r) = (14, +4)
+// Triangle list emits these as (V0, V1, V2, V1, V3, V2).
+
+TEST(Tessellate, HorizontalSegmentEmitsExtendedQuadCorners) {
     auto s = fixed_width_stroke({
         {.x = 0.0F, .y = 0.0F, .pressure = 1.0F},
         {.x = 10.0F, .y = 0.0F, .pressure = 1.0F},
     });
     const auto verts = tessellate_ribbon(s);
-    ASSERT_EQ(verts.size(), 4U);
+    ASSERT_EQ(verts.size(), 6U);
 
-    // Sample 0: left at (0, -4), right at (0, 4)
-    EXPECT_TRUE(near_f(verts[0].x, 0.0F));
+    // Triangle 1: V0, V1, V2 → (-4,-4), (-4,4), (14,-4)
+    EXPECT_TRUE(near_f(verts[0].x, -4.0F));
     EXPECT_TRUE(near_f(verts[0].y, -4.0F));
-    EXPECT_TRUE(near_f(verts[1].x, 0.0F));
+    EXPECT_TRUE(near_f(verts[1].x, -4.0F));
     EXPECT_TRUE(near_f(verts[1].y, 4.0F));
-
-    // Sample 1: left at (10, -4), right at (10, 4)
-    EXPECT_TRUE(near_f(verts[2].x, 10.0F));
+    EXPECT_TRUE(near_f(verts[2].x, 14.0F));
     EXPECT_TRUE(near_f(verts[2].y, -4.0F));
-    EXPECT_TRUE(near_f(verts[3].x, 10.0F));
+
+    // Triangle 2: V1, V3, V2 → (-4,4), (14,4), (14,-4)
+    EXPECT_TRUE(near_f(verts[3].x, -4.0F));
     EXPECT_TRUE(near_f(verts[3].y, 4.0F));
+    EXPECT_TRUE(near_f(verts[4].x, 14.0F));
+    EXPECT_TRUE(near_f(verts[4].y, 4.0F));
+    EXPECT_TRUE(near_f(verts[5].x, 14.0F));
+    EXPECT_TRUE(near_f(verts[5].y, -4.0F));
 }
 
-// ---- Three-sample collinear stroke ----------------------------------------
+TEST(Tessellate, SdfCoordsAreAtQuadCorners) {
+    // V0 / V2 are on the LEFT edge (side = -1); V1 / V3 are on the
+    // RIGHT edge (side = +1). V0 / V1 are at the start-cap rim
+    // (t = -1); V2 / V3 are at the end-cap rim (t = +1).
+    auto s = fixed_width_stroke({
+        {.x = 0.0F, .y = 0.0F, .pressure = 1.0F},
+        {.x = 10.0F, .y = 0.0F, .pressure = 1.0F},
+    });
+    const auto verts = tessellate_ribbon(s);
+    ASSERT_EQ(verts.size(), 6U);
+    // Triangle 1: V0, V1, V2
+    EXPECT_TRUE(near_f(verts[0].side, -1.0F));
+    EXPECT_TRUE(near_f(verts[0].t, -1.0F));
+    EXPECT_TRUE(near_f(verts[1].side, 1.0F));
+    EXPECT_TRUE(near_f(verts[1].t, -1.0F));
+    EXPECT_TRUE(near_f(verts[2].side, -1.0F));
+    EXPECT_TRUE(near_f(verts[2].t, 1.0F));
+}
 
-TEST(Tessellate, CollinearThreeSamplesProduceSixVertices) {
+TEST(Tessellate, KEncodesBodyHalfLengthOverRadius) {
+    // Segment length 10, radius 4 → K = 5/4 = 1.25.
+    auto s = fixed_width_stroke({
+        {.x = 0.0F, .y = 0.0F, .pressure = 1.0F},
+        {.x = 10.0F, .y = 0.0F, .pressure = 1.0F},
+    });
+    const auto verts = tessellate_ribbon(s);
+    ASSERT_EQ(verts.size(), 6U);
+    for (const auto& v : verts) {
+        EXPECT_TRUE(near_f(v.K, 1.25F, 0.001F)) << "K should be constant within a segment";
+    }
+}
+
+// ---- Multiple segments -----------------------------------------------------
+
+TEST(Tessellate, ThreeSamplesProduceTwoSegmentQuads) {
     auto s = fixed_width_stroke({
         {.x = 0.0F, .y = 0.0F, .pressure = 1.0F},
         {.x = 5.0F, .y = 0.0F, .pressure = 1.0F},
         {.x = 10.0F, .y = 0.0F, .pressure = 1.0F},
     });
     const auto verts = tessellate_ribbon(s);
-    ASSERT_EQ(verts.size(), 6U);
-
-    // Middle sample's tangent is the average of two horizontal
-    // segments → still horizontal → normal still (0, 1).
-    EXPECT_TRUE(near_f(verts[2].x, 5.0F));
-    EXPECT_TRUE(near_f(verts[2].y, -4.0F));
-    EXPECT_TRUE(near_f(verts[3].x, 5.0F));
-    EXPECT_TRUE(near_f(verts[3].y, 4.0F));
+    // 2 segments × 6 vertices = 12.
+    ASSERT_EQ(verts.size(), 12U);
 }
 
-// ---- Pressure-modulated width --------------------------------------------
+// ---- U-turn robustness (the bug per-segment topology was built to fix) -----
 
-TEST(Tessellate, PressureRampWidensRibbon) {
-    Stroke s;
-    s.samples = {
-        {.x = 0.0F, .y = 0.0F, .pressure = 0.0F},
-        {.x = 10.0F, .y = 0.0F, .pressure = 0.5F},
-        {.x = 20.0F, .y = 0.0F, .pressure = 1.0F},
-    };
-    // Brush with min=2, max=10 — pressure 0 → r=2, pressure 1 →
-    // r=10 modulo the gamma curve.
-    s.style.min_radius_px = 2.0F;
-    s.style.max_radius_px = 10.0F;
-    s.style.alpha_gamma = 1.0F;
-
+TEST(Tessellate, UTurnZigzagDoesNotCollapseAnyVertex) {
+    // The old per-sample triangle-strip tessellator pinched the
+    // ribbon at sharp direction reversals because the average-
+    // tangent perpendicular flipped between adjacent samples. The
+    // per-segment scheme is robust by construction: each segment
+    // is independent, so no vertex collapses no matter how sharp
+    // the turn.
+    auto s = fixed_width_stroke({
+        {.x = 0.0F, .y = 0.0F, .pressure = 1.0F},
+        {.x = 10.0F, .y = 0.0F, .pressure = 1.0F},
+        {.x = 0.0F, .y = 0.0F, .pressure = 1.0F},   // 180° U-turn
+        {.x = 10.0F, .y = 0.0F, .pressure = 1.0F},  // and back again
+    });
     const auto verts = tessellate_ribbon(s);
-    ASSERT_EQ(verts.size(), 6U);
+    // 3 segments × 6 = 18 (coalesce keeps the U-turn samples since
+    // their (x, y) differs between consecutive entries even though
+    // their values coincide with earlier samples).
+    ASSERT_EQ(verts.size(), 18U);
 
-    const float w0 = std::abs(verts[1].y - verts[0].y) * 0.5F;
-    const float w1 = std::abs(verts[3].y - verts[2].y) * 0.5F;
-    const float w2 = std::abs(verts[5].y - verts[4].y) * 0.5F;
-
-    EXPECT_LT(w0, w1);
-    EXPECT_LT(w1, w2);
-    // First sample's pressure 0 → minimum radius.
-    EXPECT_TRUE(near_f(w0, 2.0F, 0.1F));
-    // Last sample's pressure 1 → maximum radius.
-    EXPECT_TRUE(near_f(w2, 10.0F, 0.1F));
+    // No two adjacent vertices in the same triangle should share
+    // a position — that would mean a zero-area triangle, the
+    // signature of the old pinch bug.
+    for (std::size_t tri = 0; tri < verts.size(); tri += 3U) {
+        const auto& v0 = verts[tri];
+        const auto& v1 = verts[tri + 1U];
+        const auto& v2 = verts[tri + 2U];
+        EXPECT_FALSE(near_f(v0.x, v1.x) && near_f(v0.y, v1.y)) << "tri=" << tri;
+        EXPECT_FALSE(near_f(v1.x, v2.x) && near_f(v1.y, v2.y)) << "tri=" << tri;
+        EXPECT_FALSE(near_f(v0.x, v2.x) && near_f(v0.y, v2.y)) << "tri=" << tri;
+    }
 }
 
-// ---- Non-axis-aligned turn -----------------------------------------------
+// ---- Right-angle turn -----------------------------------------------------
 
-TEST(Tessellate, RightAngleTurnAveragesIncomingOutgoing) {
-    // Right turn: horizontal segment, then vertical segment. The
-    // middle sample's tangent averages (1,0) and (0,1) → (0.5,0.5).
-    // Normal = (-0.5,0.5) normalized → (-√2/2, √2/2). Half-width
-    // is 4, so:
-    //   left  = (5,0) - 4*(-√2/2, √2/2) = (5 + 2√2, -2√2)
-    //   right = (5,0) + 4*(-√2/2, √2/2) = (5 - 2√2,  2√2)
+TEST(Tessellate, RightAngleTurnEmitsTwoIndependentSegments) {
+    // Each segment's quad is computed from its own sample pair, so
+    // the right turn at the middle sample produces two segment
+    // quads that share the corner point (5, 0) at the inner end of
+    // segment 1 and the outer start of segment 2. The fragment
+    // shader's capsule SDF rounds the join naturally where the two
+    // capsules overlap.
     auto s = fixed_width_stroke({
         {.x = 0.0F, .y = 0.0F, .pressure = 1.0F},
         {.x = 5.0F, .y = 0.0F, .pressure = 1.0F},
         {.x = 5.0F, .y = 5.0F, .pressure = 1.0F},
     });
     const auto verts = tessellate_ribbon(s);
-    ASSERT_EQ(verts.size(), 6U);
+    ASSERT_EQ(verts.size(), 12U);
 
-    const float root2_half = std::sqrt(2.0F) * 0.5F;
-    const float expected_offset = 4.0F * root2_half;  // 2√2 ≈ 2.828
-    EXPECT_TRUE(near_f(verts[2].x, 5.0F + expected_offset, 0.01F));
-    EXPECT_TRUE(near_f(verts[2].y, 0.0F - expected_offset, 0.01F));
-    EXPECT_TRUE(near_f(verts[3].x, 5.0F - expected_offset, 0.01F));
-    EXPECT_TRUE(near_f(verts[3].y, 0.0F + expected_offset, 0.01F));
+    // First segment: horizontal, K = 2.5/4 = 0.625
+    EXPECT_TRUE(near_f(verts[0].K, 0.625F, 0.001F));
+    // Second segment: vertical of same length, same K.
+    EXPECT_TRUE(near_f(verts[6].K, 0.625F, 0.001F));
 }
 
 // ---- Colour propagation ---------------------------------------------------
@@ -189,7 +243,7 @@ TEST(Tessellate, EveryVertexCarriesBrushColor) {
     s.style.max_radius_px = 4.0F;
 
     const auto verts = tessellate_ribbon(s);
-    ASSERT_EQ(verts.size(), 4U);
+    ASSERT_EQ(verts.size(), 6U);
     for (const auto& v : verts) {
         EXPECT_TRUE(near_f(v.r, 0.8F, 0.05F));
         EXPECT_TRUE(near_f(v.g, 0.2F, 0.05F));
@@ -198,18 +252,4 @@ TEST(Tessellate, EveryVertexCarriesBrushColor) {
         // gamma=1 → unchanged.
         EXPECT_TRUE(near_f(v.a, 1.0F, 0.01F));
     }
-}
-
-// ---- Vertex count grows linearly -------------------------------------------
-
-TEST(Tessellate, VertexCountIsTwicePerCoalescedSample) {
-    Stroke s;
-    s.style.min_radius_px = 4.0F;
-    s.style.max_radius_px = 4.0F;
-    s.style.alpha_gamma = 1.0F;
-    for (int i = 0; i < 50; ++i) {
-        s.samples.push_back({.x = static_cast<float>(i), .y = 0.0F, .pressure = 1.0F});
-    }
-    const auto verts = tessellate_ribbon(s);
-    EXPECT_EQ(verts.size(), 100U);
 }

@@ -67,6 +67,12 @@ struct PenOptions {
     float b{0.0F};
     float a{1.0F};
 
+    // Input-stabilizer weight (Procreate "Streamline" equivalent).
+    // 0 = raw input; 0.5 = moderate jitter rejection with mild lag;
+    // higher = visibly trails the cursor. Mirrored into
+    // `BrushStyle::stabilizer` by `brush_from_pen`.
+    float stabilizer{0.5F};
+
     [[nodiscard]] auto operator==(const PenOptions&) const noexcept -> bool = default;
 };
 

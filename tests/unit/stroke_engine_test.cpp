@@ -18,8 +18,16 @@ using noted::stroke::stamp_from_pressure;
 // event processing. Pointer events are fed through inject_*
 // helpers which invoke the same on_* methods the hook
 // subscriptions would.
+//
+// Tests pin the per-event raw position / pressure pass-through; the
+// production stabilizer (BrushStyle default 0.5) smooths inputs and
+// would make the assertions noisy. Set stabilizer = 0 so the engine
+// stores samples verbatim — the stabilizer's own behaviour is unit-
+// tested elsewhere via the brush_from_pen clamp tests.
 auto make_test_engine() {
-    return StrokeEngine{StrokeEngine::TestingTag{}};
+    BrushStyle no_smoothing{};
+    no_smoothing.stabilizer = 0.0F;
+    return StrokeEngine{StrokeEngine::TestingTag{}, no_smoothing};
 }
 
 }  // namespace
@@ -180,7 +188,12 @@ TEST(StrokeEngine, StrokeStyleIsSnapshotAtPressTime) {
 }
 
 TEST(StrokeEngine, SamplesCarryPerEventPressure) {
-    StrokeEngine eng{StrokeEngine::TestingTag{}};
+    // Stabilizer disabled so per-event pressure passes through
+    // verbatim — the stabilizer's smoothing behaviour is exercised
+    // separately.
+    BrushStyle no_smoothing{};
+    no_smoothing.stabilizer = 0.0F;
+    StrokeEngine eng{StrokeEngine::TestingTag{}, no_smoothing};
     eng.inject_press_(0.0, 0.0, PB::left, /*pressure=*/0.25F);
     eng.inject_move_(1.0, 1.0, /*pressure=*/0.5F);
     eng.inject_move_(2.0, 2.0, /*pressure=*/0.75F);

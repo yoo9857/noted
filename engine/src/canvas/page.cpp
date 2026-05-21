@@ -116,6 +116,15 @@ auto PageList::max_width_px() const noexcept -> float {
     return w;
 }
 
+auto PageList::contains_point(double x, double y) const noexcept -> bool {
+    for (const auto& p : pages_) {
+        if (p.contains_point(x, y)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void PageList::reflow_origins() noexcept {
     float cursor_y = 0.0F;
     for (auto& p : pages_) {

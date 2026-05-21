@@ -1,7 +1,9 @@
 // Page background shader — draws one paper-coloured page rectangle
 // with an optional pattern (blank / lined / grid / dotted) into the
-// canvas. One draw call per page; the compositor pass then composites
-// any layers + strokes on top.
+// canvas, surrounded by a soft drop shadow so the page reads as a
+// piece of paper sitting on the "desk" clear-colour beneath. One draw
+// call per page; the compositor pass then composites any layers +
+// strokes on top.
 //
 // Coordinate plumbing:
 //   - `u_page.origin_px` + `u_page.extent_px` describe the page's
@@ -10,6 +12,13 @@
 //     vertex shader uses it for pixel → NDC.
 //   - `u_page.bg_kind` selects the fragment pattern (0..3 — wire
 //     ordinals match `noted::canvas::PageBackground`).
+//
+// Quad coverage: the vertex shader emits a quad **larger** than the
+// page rect by `kShadowMargin` on every side so the fragment shader
+// has pixels to draw the shadow into. The fragment classifies each
+// pixel as page-body (opaque paper + pattern) or shadow (semi-
+// transparent black falling off with distance). Alpha blend on the
+// pipeline composites the shadow over the desk-grey canvas clear.
 //
 // Push budget: 32 bytes — well under the Vulkan 128-byte minimum.
 
@@ -26,8 +35,20 @@ PageBgPush u_page;
 
 struct VOut {
     float4 pos      : SV_Position;
-    float2 local_px : TEXCOORD0;  // pixel offset inside the page, [0, extent]
+    float2 local_px : TEXCOORD0;  // pixel offset inside the page; negative
+                                  // or > extent_px in the shadow apron
 };
+
+// How far the quad extends past the page rect on every side. Chosen
+// to give a perceptible shadow without dominating the visual at
+// typical page extents (Letter / A4 at 1× zoom). Pairs with
+// kShadowOpacity below.
+static const float kShadowMargin = 24.0;
+
+// Peak alpha of the shadow at the page edge. At kShadowMargin away
+// the alpha tapers to zero via smoothstep so the shadow blends
+// seamlessly into the desk colour.
+static const float kShadowOpacity = 0.45;
 
 [shader("vertex")]
 VOut vs_page_bg(uint vid : SV_VertexID) {
@@ -39,13 +60,15 @@ VOut vs_page_bg(uint vid : SV_VertexID) {
         float2(1, 0), float2(1, 1), float2(0, 1),
     };
     const float2 corner = corners[vid];
-    const float2 local_px = corner * u_page.extent_px;
-    const float2 px = u_page.origin_px + local_px;
+    // Map the unit quad to (-margin) … (extent + margin) on each
+    // axis so the fragment shader has shadow-apron pixels to draw.
+    const float2 extended_px = corner * (u_page.extent_px + 2.0 * kShadowMargin) - kShadowMargin;
+    const float2 px = u_page.origin_px + extended_px;
     const float2 ndc = px / u_page.canvas_size * 2.0 - 1.0;
 
     VOut o;
     o.pos = float4(ndc, 0.0, 1.0);
-    o.local_px = local_px;
+    o.local_px = extended_px;  // negative / > extent → in the shadow apron
     return o;
 }
 
@@ -76,27 +99,49 @@ float dotted(float2 p, float period, float radius) {
 
 [shader("fragment")]
 float4 ps_page_bg(VOut input) : SV_Target {
-    // Pattern parameters — chosen to look at home next to a US Letter
-    // page at 72 DPI. A 32 px line spacing maps to roughly a 0.44 in
-    // gap, close to standard wide-ruled notebook paper.
-    const float kLineSpacing = 32.0;
-    const float kDotSpacing = 24.0;
-    const float kDotRadius = 1.4;
+    // Inside / outside test against the page rect. `local_px` is the
+    // pixel offset from the page's top-left, possibly negative or
+    // beyond the extent inside the shadow apron.
+    const bool inside_x = input.local_px.x >= 0.0 && input.local_px.x <= u_page.extent_px.x;
+    const bool inside_y = input.local_px.y >= 0.0 && input.local_px.y <= u_page.extent_px.y;
 
-    float ink = 0.0;
-    if (u_page.bg_kind == 1u) {
-        // lined — horizontal only
-        ink = stripe(input.local_px.y, kLineSpacing, 1.0);
-    } else if (u_page.bg_kind == 2u) {
-        // grid — horizontal + vertical
-        ink = max(stripe(input.local_px.y, kLineSpacing, 1.0),
-                  stripe(input.local_px.x, kLineSpacing, 1.0));
-    } else if (u_page.bg_kind == 3u) {
-        // dotted — small dots at grid intersections
-        ink = dotted(input.local_px, kDotSpacing, kDotRadius);
+    if (inside_x && inside_y) {
+        // Page body — same paper + pattern logic as before, written
+        // at full alpha so blend over the desk clear leaves the
+        // exact paper colour.
+        const float kLineSpacing = 32.0;
+        const float kDotSpacing = 24.0;
+        const float kDotRadius = 1.4;
+
+        float ink = 0.0;
+        if (u_page.bg_kind == 1u) {
+            // lined — horizontal only
+            ink = stripe(input.local_px.y, kLineSpacing, 1.0);
+        } else if (u_page.bg_kind == 2u) {
+            // grid — horizontal + vertical
+            ink = max(stripe(input.local_px.y, kLineSpacing, 1.0),
+                      stripe(input.local_px.x, kLineSpacing, 1.0));
+        } else if (u_page.bg_kind == 3u) {
+            // dotted — small dots at grid intersections
+            ink = dotted(input.local_px, kDotSpacing, kDotRadius);
+        }
+        // bg_kind == 0 (blank): ink stays 0 → solid paper.
+
+        const float3 rgb = lerp(kPaper, kLine, ink);
+        return float4(rgb, 1.0);
     }
-    // bg_kind == 0 (blank): ink stays 0 → solid paper.
 
-    const float3 rgb = lerp(kPaper, kLine, ink);
-    return float4(rgb, 1.0);
+    // Shadow apron — distance from the nearest page edge, in pixels.
+    // For pixels outside the rect on both axes this is the Euclidean
+    // distance to the nearest corner; on one axis only it collapses
+    // to the perpendicular distance to that edge.
+    const float2 to_edge =
+        max(float2(0.0, 0.0), max(-input.local_px, input.local_px - u_page.extent_px));
+    const float dist = length(to_edge);
+    // Smoothstep falloff: peak opacity at the page edge, zero at the
+    // apron's outer boundary. Squared shape (1 - x)^2 gives a more
+    // natural drop-shadow profile than a linear ramp.
+    const float t = saturate(dist / kShadowMargin);
+    const float falloff = (1.0 - t) * (1.0 - t);
+    return float4(0.0, 0.0, 0.0, falloff * kShadowOpacity);
 }

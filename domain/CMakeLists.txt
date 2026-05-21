@@ -7,6 +7,7 @@ noted_add_module(
         src/io/document_json.cpp
         src/layer/layer.cpp
         src/selection/selection.cpp
+        src/shape_detect/shape_detect.cpp
         src/tool/tool.cpp
         src/tool/options.cpp
         src/tool/selection_drag.cpp

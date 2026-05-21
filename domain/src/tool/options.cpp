@@ -50,6 +50,11 @@ auto brush_from_pen(const PenOptions& opt) noexcept -> noted::stroke::BrushStyle
     b.g = opt.g;
     b.b = opt.b;
     b.a = opt.a;
+    // Clamp stabilizer at the data boundary so a runaway slider
+    // value can't lock the smoothed cursor in place.
+    b.stabilizer = (opt.stabilizer < 0.0F)    ? 0.0F
+                   : (opt.stabilizer > 0.95F) ? 0.95F
+                                              : opt.stabilizer;
     return b;
 }
 

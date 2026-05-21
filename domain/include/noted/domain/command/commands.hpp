@@ -289,6 +289,44 @@ private:
     bool applied_{false};
 };
 
+// Append a vector-ink stroke to the document's strokes list. Same
+// pattern as `AddShapeCommand` / `AddTextCommand` / `AddImageCommand`
+// — the snapshot is moved in on construction, applied on `apply`,
+// rolled back on `undo`.
+class AddStrokeCommand final : public Command {
+public:
+    explicit AddStrokeCommand(noted::stroke::Stroke stroke);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override { return "Add stroke"; }
+
+    [[nodiscard]] auto assigned_index() const noexcept -> std::size_t { return assigned_index_; }
+
+private:
+    noted::stroke::Stroke stroke_;
+    std::size_t assigned_index_{0};
+    bool applied_{false};
+};
+
+// Remove a stroke at the given index. Snapshots the stroke on apply
+// so undo can re-insert it in place.
+class RemoveStrokeCommand final : public Command {
+public:
+    explicit RemoveStrokeCommand(std::size_t index);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override {
+        return "Remove stroke";
+    }
+
+private:
+    std::size_t target_index_;
+    noted::stroke::Stroke snapshot_{};
+    bool applied_{false};
+};
+
 // Rename a block.
 class SetNameCommand final : public Command {
 public:

@@ -129,7 +129,7 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
         .stride = sizeof(RibbonVertex),
         .rate = VK_VERTEX_INPUT_RATE_VERTEX,
     }}};
-    const std::array<noted::gpu::VertexInputAttribute, 2> vb_attrs{{
+    const std::array<noted::gpu::VertexInputAttribute, 5> vb_attrs{{
         {
             .location = 0,
             .binding = 0,
@@ -142,23 +142,62 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
             .format = VK_FORMAT_R32G32B32A32_SFLOAT,
             .offset = offsetof(RibbonVertex, r),
         },
+        {
+            // Per-segment SDF coords. See `shaders/polyline.slang` +
+            // `stroke_geometry.hpp` RibbonVertex docs for the
+            // capsule reconstruction.
+            .location = 2,
+            .binding = 0,
+            .format = VK_FORMAT_R32_SFLOAT,
+            .offset = offsetof(RibbonVertex, side),
+        },
+        {
+            .location = 3,
+            .binding = 0,
+            .format = VK_FORMAT_R32_SFLOAT,
+            .offset = offsetof(RibbonVertex, t),
+        },
+        {
+            // Per-segment aspect ratio K = body-half-length / radius.
+            // Constant across all 4 quad vertices.
+            .location = 4,
+            .binding = 0,
+            .format = VK_FORMAT_R32_SFLOAT,
+            .offset = offsetof(RibbonVertex, K),
+        },
     }};
 
     constexpr VkColorComponentFlags kRgbaMask = VK_COLOR_COMPONENT_R_BIT |
                                                 VK_COLOR_COMPONENT_G_BIT |
                                                 VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
-    // Draw pipeline: normal painter's-algorithm alpha blend.
-    //   color: dst = src * src.a + dst * (1 - src.a)
-    //   alpha: dst.a = src.a + dst.a * (1 - src.a)  (premultiplied-correct)
+    // Draw pipeline: SRC_OVER on colour, MAX on alpha.
+    //   color: dst.rgb = src.rgb * src.a + dst.rgb * (1 - src.a)
+    //   alpha: dst.a   = max(src.a, dst.a)
+    //
+    // The MAX-on-alpha (rather than the textbook premul-correct
+    // `src.a + dst.a*(1-src.a)`) gives the right within-stroke
+    // semantic: a stroke's coverage is the UNION of all its
+    // ribbon segments, not the sum. Adjacent per-segment capsules
+    // overlap heavily at their shared sample point — without MAX
+    // the overlapping AA bands would build up extra alpha there
+    // (and the body too for semi-transparent brushes), producing
+    // bright "veins" or darker patches at segment joins. With MAX
+    // the visible result of a single stroke is constant-alpha
+    // regardless of self-overlap.
+    //
+    // Inter-stroke compositing stays correct because colour still
+    // uses SRC_OVER: a later darker stroke drawn over an earlier
+    // lighter one composites normally; only the alpha channel
+    // refuses to grow past the per-pixel max contribution.
     VkPipelineColorBlendAttachmentState draw_blend{};
     draw_blend.blendEnable = VK_TRUE;
     draw_blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
     draw_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     draw_blend.colorBlendOp = VK_BLEND_OP_ADD;
     draw_blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    draw_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    draw_blend.alphaBlendOp = VK_BLEND_OP_ADD;
+    draw_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    draw_blend.alphaBlendOp = VK_BLEND_OP_MAX;
     draw_blend.colorWriteMask = kRgbaMask;
 
     // Erase pipeline: destination-out on BOTH colour and alpha so the
@@ -182,7 +221,14 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
             .add_stage(VK_SHADER_STAGE_VERTEX_BIT, *info.vs_module, "main")
             .add_stage(VK_SHADER_STAGE_FRAGMENT_BIT, *info.ps_module, "main")
             .vertex_input(vb_bindings, vb_attrs)
-            .topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP)
+            // Per-segment quads — TRIANGLE_LIST is the right topology
+            // because adjacent segments do NOT share vertices (each
+            // quad has its own per-segment K + side/t SDF coords).
+            // Strip topology was the old per-sample model; switching
+            // to per-segment fixes the U-turn / zigzag bug where the
+            // averaged-tangent perpendicular flipped and pinched the
+            // ribbon. See `stroke_geometry.hpp::tessellate_ribbon`.
+            .topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
             .rasterization(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
             .color_blend_attachment(blend)
             .color_format(info.canvas_format)
@@ -312,7 +358,12 @@ void StrokeEngine::record(VkCommandBuffer cb, VkExtent2D canvas_extent) noexcept
     slices.reserve(strokes_.size() + 1);
 
     const auto append_stroke = [&](const Stroke& stroke) {
-        auto ribbon = tessellate_ribbon(stroke);
+        // Subdivide each gap into 6 sub-segments via Catmull-Rom so
+        // slow / coarse input still produces a visibly smooth curve
+        // even at zoom > 1. Costs ~6× the per-segment vertex output;
+        // CPU side scales linearly in sample count — negligible at
+        // v0.x stroke densities. See `stroke_geometry.hpp`.
+        auto ribbon = tessellate_ribbon(stroke, /*subdivisions_per_segment=*/6);
         if (ribbon.empty()) {
             return;
         }
@@ -467,6 +518,17 @@ void StrokeEngine::on_pressed(const noted::hook::PointerPressed& e) noexcept {
     if (e.button != noted::hook::PointerButton::left) {
         return;
     }
+    // Screen → canvas: subtract camera translation, divide by scale.
+    // Identity view (default) reduces to s.x = e.x.
+    const double canvas_x = (e.x - view_tx_) / view_scale_;
+    const double canvas_y = (e.y - view_ty_) / view_scale_;
+    // Press gate — the host can restrict drawing to specific regions
+    // (typically "inside any page rect"). When the predicate rejects
+    // the press, `drawing_` stays false so subsequent on_moved /
+    // on_released events also drop on the floor.
+    if (press_predicate_ && !press_predicate_(canvas_x, canvas_y)) {
+        return;
+    }
     drawing_ = true;
     // Snapshot the brush style + draw mode at stroke start — later
     // mid-stroke edits to `brush_` / `mode_` (tool switches, debug
@@ -477,11 +539,15 @@ void StrokeEngine::on_pressed(const noted::hook::PointerPressed& e) noexcept {
     current_stroke_.style = brush_;
     current_stroke_.mode = mode_;
     current_stroke_.samples.clear();
-    // Screen → canvas: subtract camera translation, divide by scale.
-    // Identity view (default) reduces to s.x = e.x.
+    // Stabilizer: initialize the smoothed cursor at the press
+    // position so the first sample lands exactly where the user
+    // pressed (no initial lag).
+    smooth_x_ = canvas_x;
+    smooth_y_ = canvas_y;
+    smooth_pressure_ = e.pressure;
     StrokeSample sample{};
-    sample.x = static_cast<float>((e.x - view_tx_) / view_scale_);
-    sample.y = static_cast<float>((e.y - view_ty_) / view_scale_);
+    sample.x = static_cast<float>(canvas_x);
+    sample.y = static_cast<float>(canvas_y);
     sample.pressure = e.pressure;
     current_stroke_.samples.push_back(sample);
 }
@@ -490,10 +556,41 @@ void StrokeEngine::on_moved(const noted::hook::PointerMoved& e) noexcept {
     if (!input_active_ || !drawing_) {
         return;
     }
+    const double canvas_x = (e.x - view_tx_) / view_scale_;
+    const double canvas_y = (e.y - view_ty_) / view_scale_;
+    // **No mid-stroke predicate gate.** The press predicate already
+    // refuses to START a stroke on the desk. Once the stroke is
+    // alive, samples accumulate continuously regardless of whether
+    // the raw cursor strays past a page edge — the GPU per-page
+    // scissor in `record_strokes_pass` clips the visible ribbon at
+    // the exact page rectangle, so off-page samples never paint.
+    //
+    // The previous version of this method dropped off-page samples,
+    // which had the user-visible failure mode: when the user
+    // tracked along the inside edge of a page and the cursor
+    // wandered fractionally past the boundary, every move event
+    // along that excursion was discarded and the stroke "froze".
+    // Letting all moves through makes the ink follow the cursor
+    // continuously inside the page; the user sees the ribbon stop
+    // cleanly at the edge (scissor) and resume when they bring
+    // the cursor back inside, without any data being silently
+    // dropped.
+    // Stabilizer (Procreate Streamline equivalent): weighted average
+    // of the previous smoothed position and the raw pointer. The
+    // `stabilizer` weight applies to the previous sample, so
+    // `smooth = lerp(raw, smooth, stabilizer)`. Clamp the weight to
+    // [0, 0.95] so a runaway / hostile value can't lock the smoothed
+    // cursor in place. Pressure smooths with the same weight so a
+    // jittery tablet stylus doesn't produce strobing width changes.
+    const float w = std::clamp(current_stroke_.style.stabilizer, 0.0F, 0.95F);
+    smooth_x_ = smooth_x_ * static_cast<double>(w) + canvas_x * static_cast<double>(1.0F - w);
+    smooth_y_ = smooth_y_ * static_cast<double>(w) + canvas_y * static_cast<double>(1.0F - w);
+    smooth_pressure_ = std::clamp(smooth_pressure_ * w + e.pressure * (1.0F - w), 0.0F, 1.0F);
+
     StrokeSample sample{};
-    sample.x = static_cast<float>((e.x - view_tx_) / view_scale_);
-    sample.y = static_cast<float>((e.y - view_ty_) / view_scale_);
-    sample.pressure = e.pressure;
+    sample.x = static_cast<float>(smooth_x_);
+    sample.y = static_cast<float>(smooth_y_);
+    sample.pressure = smooth_pressure_;
     current_stroke_.samples.push_back(sample);
 }
 

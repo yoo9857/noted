@@ -24,6 +24,16 @@ void draw_pen(noted::domain::tool::PenOptions& opt) {
         "Pressure curve", &opt.alpha_gamma, 0.2F, 4.0F, "%.2f", ImGuiSliderFlags_Logarithmic);
 
     ImGui::Spacing();
+    // Explicit opacity ("농도") slider — the ColorEdit4 below has an
+    // alpha bar too, but a separate slider makes the control more
+    // discoverable and lets the user lower opacity without diving
+    // into the colour picker. Both write to opt.a.
+    ImGui::SliderFloat("Opacity", &opt.a, 0.0F, 1.0F, "%.2f");
+    // Input stabilizer — Procreate "Streamline" equivalent. 0 = raw
+    // input, 0.5 = moderate jitter smoothing, > 0.8 = visible lag.
+    ImGui::SliderFloat("Stabilizer", &opt.stabilizer, 0.0F, 0.95F, "%.2f");
+
+    ImGui::Spacing();
     float colour[4] = {opt.r, opt.g, opt.b, opt.a};
     if (ImGui::ColorEdit4(
             "Colour", colour, ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_Float)) {

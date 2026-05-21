@@ -1,5 +1,8 @@
 #include "frame/render_passes.hpp"
 
+#include <algorithm>
+#include <cstdint>
+
 #include "noted/compositor/layer_compositor.hpp"
 #include "noted/engine/canvas/camera.hpp"
 #include "noted/engine/canvas/page_renderer.hpp"
@@ -31,14 +34,24 @@ struct CompositePush {
 static_assert(sizeof(CompositePush) == 16,
               "CompositePush must mirror shaders/fullscreen.slang CompositePush");
 
-// Clear values are constants per the design — the canvas's paper
-// shows over an opaque-black clear, the strokes target is fully
-// transparent at frame start so eraser alpha can't leak across
-// frames, and the swapchain clears to dark teal as a regression
-// tell for the composite quad ever leaving edges blank.
-constexpr VkClearColorValue kCanvasClear{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}};
+// Clear values — the "desk" colour shows everywhere outside a page.
+// Canvas clear + swapchain clear are deliberately the **same** RGB so
+// the visible background is uniform whether the composite quad covers
+// the swapchain (zoom ≥ 1) or shrinks inside it (zoom < 1). Picking a
+// dark neutral grey gives bright paper pages a clear figure/ground
+// contrast and reads as "paper sitting on a desk" — the Goodnotes /
+// Procreate convention. The strokes target stays fully transparent at
+// frame start so eraser alpha can't leak across frames.
+//
+// If a regression ever leaves a region without a draw — e.g. composite
+// quad miss, sized-zero page — the desk grey shows through rather than
+// a startling colour. That's the right default; the previous "dark
+// teal" tell was useful while wiring the composite path and has
+// served its purpose.
+constexpr VkClearColorValue kDeskClear{.float32 = {0.13F, 0.13F, 0.15F, 1.0F}};
+constexpr VkClearColorValue kCanvasClear{kDeskClear};
 constexpr VkClearColorValue kStrokesClear{.float32 = {0.0F, 0.0F, 0.0F, 0.0F}};
-constexpr VkClearColorValue kSwapchainClear{.float32 = {0.05F, 0.05F, 0.10F, 1.0F}};
+constexpr VkClearColorValue kSwapchainClear{kDeskClear};
 
 }  // namespace
 
@@ -118,7 +131,50 @@ void RenderPasses::record_strokes_pass(VkCommandBuffer cb, VkExtent2D ext) {
     // to transparent black each frame by the renderer). Draw strokes
     // accumulate alpha; eraser strokes subtract alpha — both behaviours
     // come from the engine's two pipelines + the active `DrawMode`.
-    stroke_engine_.record(cb, ext);
+    //
+    // ADR 0033 paint-bounded-to-pages: re-record with a per-page
+    // scissor so the ribbon is clipped EXACTLY to each page rect.
+    // Without this the brush radius leaks past the page edge into the
+    // shadow apron / desk colour (overshoot), and the user's
+    // mental model "Photoshop precision — only the paper accepts
+    // paint" breaks. Multiple record calls re-tessellate the same
+    // ribbon set N times for N pages, which is fine at v0.x stroke
+    // counts (sub-ms). A future refactor can split tessellation +
+    // draw to amortise the work; not worth the surface-area churn
+    // before the stroke count actually justifies it.
+    //
+    // Pages don't overlap horizontally / vertically by construction
+    // (the PageList reflows them into a vertical stack), so a
+    // per-page scissor is the natural mask shape — no need for
+    // stencil at this scale.
+    const auto& pages = session_.document().pages();
+    if (pages.empty()) {
+        return;  // nothing to paint onto
+    }
+    for (const auto& page : pages.pages()) {
+        // Clamp the scissor against the render area so a future
+        // page with bad geometry can't trip Vulkan's validation
+        // layer (scissor outside the framebuffer is undefined).
+        const std::int32_t ox = static_cast<std::int32_t>(page.origin_x_px);
+        const std::int32_t oy = static_cast<std::int32_t>(page.origin_y_px);
+        const std::int32_t pw = static_cast<std::int32_t>(page.extent_w_px);
+        const std::int32_t ph = static_cast<std::int32_t>(page.extent_h_px);
+        if (pw <= 0 || ph <= 0) {
+            continue;
+        }
+        const std::int32_t fx = std::max(0, ox);
+        const std::int32_t fy = std::max(0, oy);
+        const std::int32_t fr = std::min(static_cast<std::int32_t>(ext.width), ox + pw);
+        const std::int32_t fb = std::min(static_cast<std::int32_t>(ext.height), oy + ph);
+        if (fr <= fx || fb <= fy) {
+            continue;  // fully off-canvas
+        }
+        VkRect2D scissor{};
+        scissor.offset = {fx, fy};
+        scissor.extent = {static_cast<std::uint32_t>(fr - fx), static_cast<std::uint32_t>(fb - fy)};
+        vkCmdSetScissor(cb, /*firstScissor=*/0, /*scissorCount=*/1, &scissor);
+        stroke_engine_.record(cb, ext);
+    }
 }
 
 void RenderPasses::record_overlay_pass(VkCommandBuffer cb, VkExtent2D /*ext*/) {

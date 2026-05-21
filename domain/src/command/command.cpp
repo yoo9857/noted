@@ -550,6 +550,70 @@ auto RemoveImageCommand::undo(Document& doc) -> Result<void> {
 }
 
 // ============================================================================
+// AddStrokeCommand
+// ============================================================================
+
+AddStrokeCommand::AddStrokeCommand(noted::stroke::Stroke stroke) : stroke_(std::move(stroke)) {}
+
+auto AddStrokeCommand::apply(Document& doc) -> Result<void> {
+    auto r = doc.add_stroke(stroke_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    assigned_index_ = *r;
+    applied_ = true;
+    return {};
+}
+
+auto AddStrokeCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_state, "AddStrokeCommand::undo: command was not applied"));
+    }
+    auto r = doc.remove_stroke(assigned_index_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
+// RemoveStrokeCommand
+// ============================================================================
+
+RemoveStrokeCommand::RemoveStrokeCommand(std::size_t index) : target_index_(index) {}
+
+auto RemoveStrokeCommand::apply(Document& doc) -> Result<void> {
+    if (target_index_ >= doc.strokes().size()) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_argument,
+            "RemoveStrokeCommand::apply: index " + std::to_string(target_index_) +
+                " out of range (size " + std::to_string(doc.strokes().size()) + ")"));
+    }
+    snapshot_ = doc.strokes()[target_index_];
+    auto r = doc.remove_stroke(target_index_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = true;
+    return {};
+}
+
+auto RemoveStrokeCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_state, "RemoveStrokeCommand::undo: command was not applied"));
+    }
+    auto r = doc.insert_stroke(target_index_, snapshot_);
+    if (!r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
 // UndoStack
 // ============================================================================
 
