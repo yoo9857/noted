@@ -173,7 +173,11 @@ void RenderPasses::record_strokes_pass(VkCommandBuffer cb, VkExtent2D ext) {
         scissor.offset = {fx, fy};
         scissor.extent = {static_cast<std::uint32_t>(fr - fx), static_cast<std::uint32_t>(fb - fy)};
         vkCmdSetScissor(cb, /*firstScissor=*/0, /*scissorCount=*/1, &scissor);
-        stroke_engine_.record(cb, ext);
+        // Committed strokes live on `Document::strokes()` as of P.S.4;
+        // pass them by const-ref-span into the engine each frame so
+        // undo/redo on the host side reflects instantly without any
+        // cache sync.
+        stroke_engine_.record(cb, ext, session_.document().strokes());
     }
 }
 
