@@ -65,6 +65,14 @@ struct ImGuiHostCreateInfo {
     // frame-in-flight count for ImGui's per-frame state.
     std::uint32_t image_count{2};
 
+    // Optional symbol-rich fallback font. Merged into the ImGui
+    // atlas after the primary CJK face so missing glyphs (icon
+    // characters from the dingbat / geometric / arrows blocks) get
+    // rendered by the fallback instead of as the tofu box. On
+    // Windows this is typically Segoe UI Symbol; on macOS Apple
+    // Symbols; on Linux DejaVu Sans. Empty path skips the merge.
+    std::filesystem::path symbol_font_path{};
+
     // Optional CJK-capable TrueType / OpenType font. When set and the
     // file exists, ImGuiHost loads it as the primary font with the
     // Korean glyph range merged in (Hangul Syllables + Jamo + Latin

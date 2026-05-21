@@ -640,12 +640,17 @@ auto App::init_renderer_and_imgui() -> noted::Result<void> {
     } else {
         std::cout << "[font] using CJK font: " << cjk_font_path.string() << '\n';
     }
+    auto symbol_font_path = probe_symbol_font();
+    if (!symbol_font_path.empty()) {
+        std::cout << "[font] using symbol fallback: " << symbol_font_path.string() << '\n';
+    }
     auto imgui_host = noted::ui::ImGuiHost::create({
         .instance = &*instance_,
         .physical_device = &*physical_,
         .device = &*device_,
         .color_format = swapchain_->summary().color_format,
         .image_count = swapchain_->summary().image_count,
+        .symbol_font_path = symbol_font_path,
         .cjk_font_path = cjk_font_path,
         .font_size_px = cfg_.font.size_px,
     });
@@ -855,6 +860,33 @@ void App::on_frame() {
     apply_theme_if_changed();
     wire_keyboard_shortcuts(menu_status, menu);
     handle_menu_actions(menu);
+
+    // 12 o'clock floating toolbar (Phase 3 of ADR 0034). Sits just
+    // below the menu bar, hosts the per-tool icon buttons + undo /
+    // redo. Replaces the retired left-rail `tool_palette`.
+    {
+        constexpr float kMenuBarGuessPx = 22.0F;  // ImGui's main menu bar height at default font
+        constexpr float kToolbarTopMarginPx = 8.0F;
+        const float toolbar_y =
+            noted::ui::widget::mac_chrome_height_px() + kMenuBarGuessPx + kToolbarTopMarginPx;
+        const noted::ui::widget::TopToolbarStatus toolbar_status{
+            .can_undo = menu_status.can_undo,
+            .can_redo = menu_status.can_redo,
+        };
+        const auto tt = noted::ui::widget::top_toolbar(tools_.active, toolbar_status, toolbar_y);
+        if (tt.switch_request && *tt.switch_request != tools_.active) {
+            tools_.active = *tt.switch_request;
+            if (tool_input_router_) {
+                tool_input_router_->set_active(tools_.active);
+            }
+        }
+        if (tt.undo_clicked && session_.undo_stack().can_undo()) {
+            (void) session_.undo();
+        }
+        if (tt.redo_clicked && session_.undo_stack().can_redo()) {
+            (void) session_.redo();
+        }
+    }
 
     draw_widgets();
     refresh_window_title_if_changed();

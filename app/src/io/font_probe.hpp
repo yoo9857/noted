@@ -13,4 +13,10 @@ namespace noted::app {
 
 [[nodiscard]] auto probe_cjk_font() -> std::filesystem::path;
 
+// Symbol-rich fallback font for UI icon glyphs that the CJK font
+// doesn't carry. Merged into the ImGui atlas after the primary CJK
+// face — when the primary lacks a glyph, ImGui falls through to
+// this face. Empty path means no fallback (icons render as tofu).
+[[nodiscard]] auto probe_symbol_font() -> std::filesystem::path;
+
 }  // namespace noted::app
