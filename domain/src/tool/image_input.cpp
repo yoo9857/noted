@@ -15,7 +15,10 @@ namespace {
 
 }  // namespace
 
-auto image_primitive_from(double x, double y, const ImageOptions& opt) noexcept -> ImagePrimitive {
+auto image_primitive_from(double x,
+                          double y,
+                          const ImageOptions& opt,
+                          noted::domain::AssetId asset_id) noexcept -> ImagePrimitive {
     ImagePrimitive p{};
     p.x = x;
     p.y = y;
@@ -25,6 +28,7 @@ auto image_primitive_from(double x, double y, const ImageOptions& opt) noexcept 
     p.g = opt.g;
     p.b = opt.b;
     p.a = opt.a;
+    p.asset_id = asset_id;
     return p;
 }
 

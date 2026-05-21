@@ -2,6 +2,7 @@ noted_add_module(
     NAME    domain
     SOURCES
         src/document/document.cpp
+        src/document/image_asset_registry.cpp
         src/command/command.cpp
         src/io/document_json.cpp
         src/layer/layer.cpp
