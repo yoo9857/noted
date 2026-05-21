@@ -23,6 +23,7 @@
 #include "noted/engine/hook/registry.hpp"
 #include "noted/engine/profile.hpp"
 #include "noted/platform/fs/fs.hpp"
+#include "noted/platform/image_io/image_io.hpp"
 #include "noted/platform/io/file_picker.hpp"
 #include "noted/platform/io/noted_file.hpp"
 
@@ -185,6 +186,7 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
         .save_for_dirty_prompt = [raw]() -> bool { return raw->save_for_dirty_prompt(); },
         .execute_pending_dirty_action =
             [raw](DirtyPrompt::PendingAction a) { raw->execute_pending_dirty_action(a); },
+        .on_pick_image = [raw]() { raw->run_image_picker(); },
     });
 
     return app;
@@ -1022,6 +1024,48 @@ auto App::save_for_dirty_prompt() -> bool {
         return false;
     }
     return true;
+}
+
+void App::run_image_picker() {
+    auto picked = noted::platform::io::pick_image_open();
+    if (!picked) {
+        std::cerr << picked.error().format() << '\n';
+        return;
+    }
+    if (!picked->has_value()) {
+        return;  // user cancelled
+    }
+    const auto path = **picked;
+
+    // Decode the file just to read its intrinsic dimensions; the
+    // decoded RGBA bytes are discarded here (B.7.b.2b's GPU upload
+    // path will re-decode at upload time). Using `load_rgba8`
+    // rather than a header-only `stbi_info` because the helper is
+    // already in `platform::image_io` and the cost on the UI thread
+    // for a typical photo is negligible.
+    auto loaded = noted::platform::image_io::load_rgba8(path);
+    if (!loaded) {
+        std::cerr << loaded.error().format() << '\n';
+        return;
+    }
+
+    // Register a fresh asset on the document. Direct mutation
+    // (no command) for now — undo coverage for asset lifecycle
+    // ships with B.7.b.2b's GPU upload work, when the lifecycle
+    // becomes user-visible enough to warrant it.
+    noted::domain::ImageAsset asset{};
+    asset.source_path = path.string();
+    asset.intrinsic_w_px = loaded->width;
+    asset.intrinsic_h_px = loaded->height;
+    const auto id = session_.document().image_assets_mut().allocate(std::move(asset));
+
+    // Stamp the queued asset id + intrinsic dimensions onto the
+    // Image tool's options. The next click-to-place commits an
+    // `ImagePrimitive` carrying this asset id at this footprint;
+    // the user can still scale via the size sliders afterwards.
+    tools_.image.pending_asset_id = id;
+    tools_.image.width_px = static_cast<float>(loaded->width);
+    tools_.image.height_px = static_cast<float>(loaded->height);
 }
 
 void App::execute_pending_dirty_action(DirtyPrompt::PendingAction action) {

@@ -166,3 +166,28 @@ TEST(ImagePrimitiveEquality, AssetIdDifferenceCompares) {
     ImagePrimitive b = image_primitive_from(0.0, 0.0, ImageOptions{}, /*asset_id=*/2U);
     EXPECT_NE(a, b);
 }
+
+// ---- ImageOptions.pending_asset_id (B.7.b.2) ------------------------------
+
+TEST(ImageOptionsPendingAssetId, DefaultIsInvalid) {
+    ImageOptions opt{};
+    EXPECT_EQ(opt.pending_asset_id, invalid_asset_id);
+}
+
+TEST(ImageOptionsPendingAssetId, ParticipatesInEquality) {
+    ImageOptions a{};
+    ImageOptions b{};
+    b.pending_asset_id = 7U;
+    EXPECT_NE(a, b);
+    a.pending_asset_id = 7U;
+    EXPECT_EQ(a, b);
+}
+
+TEST(ImagePrimitiveAssetId, HandlerWiringPatternSnapshotsViaOptions) {
+    // Mirrors the call shape ImageToolHandler::on_pressed uses:
+    //   image_primitive_from(cx, cy, opt, opt.pending_asset_id)
+    ImageOptions opt{};
+    opt.pending_asset_id = 9U;
+    const auto p = image_primitive_from(1.0, 2.0, opt, opt.pending_asset_id);
+    EXPECT_EQ(p.asset_id, 9U);
+}
