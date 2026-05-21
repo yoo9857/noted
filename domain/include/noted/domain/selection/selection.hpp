@@ -62,6 +62,52 @@ struct SelectionRect {
 [[nodiscard]] auto intersect(SelectionRect a,
                              SelectionRect b) noexcept -> std::optional<SelectionRect>;
 
+// 2D integer point used by `LassoPolygon`. Lives in the same header
+// to avoid an avoidable include / forward-declare dance.
+struct Point2i {
+    std::int32_t x{0};
+    std::int32_t y{0};
+    [[nodiscard]] auto operator==(const Point2i&) const noexcept -> bool = default;
+};
+
+// Free-form polygon used by the lasso tool to describe a non-
+// rectangular selection. Closed by convention — the last vertex is
+// implicitly connected to the first; the closing vertex is NOT
+// duplicated. Stored alongside the rectangle list inside `Selection`;
+// the union of both is the effective selected region.
+class LassoPolygon {
+public:
+    LassoPolygon() = default;
+    explicit LassoPolygon(std::vector<Point2i> vertices) noexcept
+        : vertices_(std::move(vertices)) {}
+
+    [[nodiscard]] auto vertices() const noexcept -> const std::vector<Point2i>& {
+        return vertices_;
+    }
+    [[nodiscard]] auto size() const noexcept -> std::size_t { return vertices_.size(); }
+
+    // Fewer than 3 vertices = degenerate (line segment can't enclose
+    // area). Such polygons answer `contains() == false` for every
+    // point.
+    [[nodiscard]] auto is_empty() const noexcept -> bool { return vertices_.size() < 3; }
+
+    [[nodiscard]] auto aabb() const noexcept -> std::optional<SelectionRect>;
+
+    // Point-in-polygon via odd-even ray-cast (Jordan curve theorem).
+    // O(n) per call; edges are treated as half-open in y to avoid
+    // double-counting vertices on the scan line — the standard
+    // scanline-fill convention.
+    [[nodiscard]] auto contains(std::int32_t x, std::int32_t y) const noexcept -> bool;
+
+    void push(Point2i p) { vertices_.push_back(p); }
+    void clear() noexcept { vertices_.clear(); }
+
+    [[nodiscard]] auto operator==(const LassoPolygon&) const noexcept -> bool = default;
+
+private:
+    std::vector<Point2i> vertices_;
+};
+
 // Set of rectangles whose union is the selected region.
 //
 // All mutators normalize the internal list (drop empties, sort, dedup
@@ -79,19 +125,31 @@ public:
     // Build a single-rect selection. Empty rect → empty selection.
     [[nodiscard]] static auto from_rect(SelectionRect r) -> Selection;
 
-    // Empty selection — nothing is selected.
-    [[nodiscard]] auto is_empty() const noexcept -> bool { return rects_.empty(); }
+    // Build a single-polygon selection. Empty polygon (<3 vertices)
+    // → empty selection.
+    [[nodiscard]] static auto from_polygon(LassoPolygon p) -> Selection;
+
+    // Empty when there are neither rects nor polygons.
+    [[nodiscard]] auto is_empty() const noexcept -> bool {
+        return rects_.empty() && polygons_.empty();
+    }
 
     [[nodiscard]] auto rects() const noexcept -> const std::vector<SelectionRect>& {
         return rects_;
     }
+    [[nodiscard]] auto polygons() const noexcept -> const std::vector<LassoPolygon>& {
+        return polygons_;
+    }
 
-    [[nodiscard]] auto size() const noexcept -> std::size_t { return rects_.size(); }
+    [[nodiscard]] auto size() const noexcept -> std::size_t {
+        return rects_.size() + polygons_.size();
+    }
 
-    // Tightest enclosing rect. Empty selection returns nullopt.
+    // Tightest enclosing rect over BOTH rects and polygon AABBs.
+    // Empty selection returns nullopt.
     [[nodiscard]] auto bounds() const noexcept -> std::optional<SelectionRect>;
 
-    // True if (x, y) lies inside any constituent rect.
+    // True if (x, y) lies inside any constituent rect OR polygon.
     [[nodiscard]] auto contains(std::int32_t x, std::int32_t y) const noexcept -> bool;
 
     // ---- Set operations ----------------------------------------------------
@@ -110,10 +168,16 @@ public:
     // bottom bands + left / right side strips of the overlap).
     auto subtract_rect(SelectionRect r) -> Selection&;
 
-    void clear() noexcept { rects_.clear(); }
+    // Add a polygon. Stored as-is; rasterizer handles the union.
+    auto add_polygon(LassoPolygon p) -> Selection&;
+
+    void clear() noexcept {
+        rects_.clear();
+        polygons_.clear();
+    }
 
     [[nodiscard]] auto operator==(const Selection& other) const noexcept -> bool {
-        return rects_ == other.rects_;
+        return rects_ == other.rects_ && polygons_ == other.polygons_;
     }
 
 private:
@@ -122,6 +186,7 @@ private:
     void normalize_();
 
     std::vector<SelectionRect> rects_;
+    std::vector<LassoPolygon> polygons_;
 };
 
 }  // namespace noted::domain
