@@ -589,11 +589,17 @@ auto App::init_stroke_engine() -> noted::Result<void> {
     // and continue. The fallback "lost ink" is preferable to
     // crashing mid-session.
     stroke_engine_->set_stroke_sink([this](noted::stroke::Stroke s) {
-        if (auto r =
-                session_.execute(std::make_unique<noted::domain::AddStrokeCommand>(std::move(s)));
-            !r) {
+        auto cmd = std::make_unique<noted::domain::AddStrokeCommand>(std::move(s));
+        auto* raw_cmd = cmd.get();
+        if (auto r = session_.execute(std::move(cmd)); !r) {
             std::cerr << r.error().format() << '\n';
+            return;
         }
+        // Notify the smart-shape recognizer so it can attempt
+        // detection after the configured hold-still interval. The
+        // tick happens in `on_frame`.
+        shape_recognizer_.on_stroke_added(raw_cmd->assigned_index(),
+                                          static_cast<double>(glfwGetTime()));
     });
     return {};
 }
@@ -705,6 +711,31 @@ void App::install_frame_hook() {
     image_handler_ = image_handler.get();
     tool_input_router_->register_handler(std::move(image_handler));
     tool_input_router_->set_active(tools_.active);
+
+    // Subscribe pointer events to notify the smart-shape recognizer
+    // so any pen motion cancels a pending recognition. Without this,
+    // a user who released and then started drawing again before the
+    // hold-still elapsed could still get their second stroke
+    // auto-converted off the back of the first stroke's pending
+    // detection. The hook lambdas capture `this`; App outlives the
+    // subscriptions.
+    (void) noted::hook::registry().on_pointer_pressed.subscribe(
+        [this](const noted::hook::PointerPressed&) {
+            shape_recognizer_.on_pointer_active(static_cast<double>(glfwGetTime()));
+        });
+    (void) noted::hook::registry().on_pointer_moved.subscribe(
+        [this](const noted::hook::PointerMoved&) {
+            shape_recognizer_.on_pointer_active(static_cast<double>(glfwGetTime()));
+        });
+
+    // Default smart-shape recognizer config — enabled by default so
+    // the "draw and hold" gesture works out of the box (Goodnotes
+    // convention). A brush_options toggle to switch it off lands in
+    // the UI-overhaul slice.
+    noted::app::input::ShapeRecognizerConfig rec_cfg{};
+    rec_cfg.enabled = true;
+    rec_cfg.hold_seconds = 0.6;
+    shape_recognizer_.set_config(rec_cfg);
 }
 
 // ---- Frame loop -----------------------------------------------------------
@@ -759,6 +790,26 @@ void App::on_frame() {
     // event so stamps land at canvas pixels, not screen pixels.
     stroke_engine_->set_view_transform(
         camera_.translation_x(), camera_.translation_y(), camera_.scale());
+
+    // Smart-shape recognizer tick. Runs detection on the last
+    // completed stroke if the configured hold-still interval has
+    // elapsed without further pointer activity. On success, swaps
+    // the freehand stroke for a recognised ShapePrimitive — two
+    // separate commands so the user can Ctrl+Z once to restore
+    // the raw stroke if they wanted the freehand.
+    if (auto action =
+            shape_recognizer_.tick(session_.document(), static_cast<double>(glfwGetTime()));
+        action) {
+        if (auto r = session_.execute(
+                std::make_unique<noted::domain::RemoveStrokeCommand>(action->stroke_index));
+            !r) {
+            std::cerr << r.error().format() << '\n';
+        } else if (auto r2 = session_.execute(
+                       std::make_unique<noted::domain::AddShapeCommand>(action->shape));
+                   !r2) {
+            std::cerr << r2.error().format() << '\n';
+        }
+    }
 
     // ImGui frame setup happens BEFORE renderer.render_with_canvas
     // so ImGui::* calls below land in the same frame the renderer

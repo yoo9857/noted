@@ -66,6 +66,7 @@
 #include "input/camera_controller.hpp"
 #include "input/image_tool_handler.hpp"
 #include "input/selection_tool_handler.hpp"
+#include "input/shape_recognizer.hpp"
 #include "input/shape_tool_handler.hpp"
 #include "input/text_tool_handler.hpp"
 #include "input/tool_input_router.hpp"
@@ -318,6 +319,11 @@ private:
     noted::app::input::ShapeToolHandler* shape_handler_{nullptr};
     noted::app::input::TextToolHandler* text_handler_{nullptr};
     noted::app::input::ImageToolHandler* image_handler_{nullptr};
+    // Smart-shape "draw and hold" recogniser. Ticked once per frame
+    // from on_frame after the pointer events for the frame have been
+    // drained; emits RemoveStroke + AddShape commands when the
+    // configured hold elapses on a recognisable stroke.
+    noted::app::input::ShapeRecognizer shape_recognizer_{};
 
     // ---- Canvas view --------------------------------------------------
     // Pan + scale state shared by the composite pass (camera-projected
