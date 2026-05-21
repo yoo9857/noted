@@ -37,7 +37,7 @@ constexpr ImU32 kTitleText = IM_COL32(0xD0, 0xD0, 0xD2, 0xFF);
                                       float radius,
                                       ImU32 fill,
                                       ImU32 hover_fill,
-                                      char glyph,
+                                      const char* glyph,
                                       bool show_glyph) -> bool {
     const auto mouse = ImGui::GetIO().MousePos;
     const float dx = mouse.x - centre.x;
@@ -48,13 +48,13 @@ constexpr ImU32 kTitleText = IM_COL32(0xD0, 0xD0, 0xD2, 0xFF);
     // a tinted background. macOS uses ~8 % black on the border.
     dl->AddCircle(centre, radius, IM_COL32(0x00, 0x00, 0x00, 0x33), 24, 1.0F);
     if (show_glyph && hovered) {
-        // Single-char monospace glyph centred in the button. Mac
-        // uses tiny SF Symbols here (×, –, +); ImGui's default font
-        // doesn't have those at small sizes, so we use plain ASCII
-        // approximations.
-        const char buf[2] = {glyph, '\0'};
-        const ImVec2 ts = ImGui::CalcTextSize(buf);
-        dl->AddText(ImVec2(centre.x - ts.x * 0.5F, centre.y - ts.y * 0.5F), kGlyph, buf);
+        // UTF-8 string passed by the caller — the CJK font's
+        // extended Unicode range table (loaded by
+        // `ui::imgui_host::try_load_cjk_font`) now covers the
+        // miscellaneous-technical block that holds these glyphs,
+        // so they render properly instead of as tofu.
+        const ImVec2 ts = ImGui::CalcTextSize(glyph);
+        dl->AddText(ImVec2(centre.x - ts.x * 0.5F, centre.y - ts.y * 0.5F), kGlyph, glyph);
     }
     return hovered;
 }
@@ -105,16 +105,19 @@ auto draw_mac_chrome(std::string_view title, bool is_maximized) -> MacChromeResu
                                               (std::abs(mouse.x - yellow_cx) <= r) ||
                                               (std::abs(mouse.x - green_cx) <= r));
 
-        const bool red_hov =
-            draw_traffic_light(dl, ImVec2(red_cx, cy), r, kRedFill, kRedHover, 'x', hovered_any);
+        // ✕ U+2715 MULTIPLICATION X — close
+        // − U+2212 MINUS SIGN — minimise / restore
+        // + ASCII PLUS — maximise
+        const bool red_hov = draw_traffic_light(
+            dl, ImVec2(red_cx, cy), r, kRedFill, kRedHover, "\xe2\x9c\x95", hovered_any);
         const bool yel_hov = draw_traffic_light(
-            dl, ImVec2(yellow_cx, cy), r, kYellowFill, kYellowHover, '-', hovered_any);
+            dl, ImVec2(yellow_cx, cy), r, kYellowFill, kYellowHover, "\xe2\x88\x92", hovered_any);
         const bool grn_hov = draw_traffic_light(dl,
                                                 ImVec2(green_cx, cy),
                                                 r,
                                                 kGreenFill,
                                                 kGreenHover,
-                                                is_maximized ? '-' : '+',
+                                                is_maximized ? "\xe2\x88\x92" : "+",
                                                 hovered_any);
 
         // Click handling — left button up / down inside the circle.

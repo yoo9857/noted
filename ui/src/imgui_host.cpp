@@ -62,7 +62,9 @@ void check_vk_result(VkResult err) {
 // Returns true when the custom font took effect, false on fallback.
 // The caller (create()) does not act on the return value beyond
 // logging — both paths produce a usable atlas.
-[[nodiscard]] auto try_load_cjk_font(const std::filesystem::path& path, float size_px) -> bool {
+[[nodiscard]] auto try_load_cjk_font(const std::filesystem::path& path,
+                                     const std::filesystem::path& symbol_path,
+                                     float size_px) -> bool {
     ImGuiIO& io = ImGui::GetIO();
     if (path.empty()) {
         return false;
@@ -92,11 +94,35 @@ void check_vk_result(VkResult err) {
     cfg.OversampleV = 1;
     cfg.PixelSnapH = false;
 
-    // GetGlyphRangesKorean() returns ranges that cover Latin basic +
-    // Hangul Syllables + Hangul Jamo. Sufficient for the user's
-    // primary language; an extended-CJK build can swap to a merged
-    // KR+JP+CN range in a follow-up if Japanese/Chinese typing lands.
-    const ImWchar* ranges = io.Fonts->GetGlyphRangesKorean();
+    // Range table — Latin basic + Hangul Syllables + Hangul Jamo
+    // (Korean coverage) PLUS the Unicode BMP symbol blocks we use
+    // for UI iconography (arrows, geometric shapes, dingbats,
+    // miscellaneous symbols / technical). Without the symbol blocks
+    // the top toolbar's ✎ / ⌫ / ▭ glyphs render as the "missing
+    // glyph" tofu box (Phase 3 follow-up).
+    //
+    // The array MUST stay alive for the lifetime of the atlas —
+    // ImGui stores the pointer, doesn't copy. `static` local
+    // satisfies this.
+    static const ImWchar kRanges[] = {
+        0x0020, 0x007E,  // Basic Latin
+        0x00A0, 0x00FF,  // Latin-1 Supplement
+        0x2010, 0x205E,  // General Punctuation
+        0x2190, 0x21FF,  // Arrows
+        0x2200, 0x22FF,  // Mathematical Operators
+        0x2300, 0x23FF,  // Miscellaneous Technical
+        0x2500, 0x257F,  // Box Drawing
+        0x2580, 0x259F,  // Block Elements
+        0x25A0, 0x25FF,  // Geometric Shapes
+        0x2600, 0x26FF,  // Miscellaneous Symbols
+        0x2700, 0x27BF,  // Dingbats
+        0x3000, 0x303F,  // CJK Symbols and Punctuation
+        0x3131, 0x318E,  // Hangul Compatibility Jamo
+        0xAC00, 0xD7A3,  // Hangul Syllables
+        0xFF00, 0xFFEF,  // Halfwidth and Fullwidth Forms
+        0,
+    };
+    const ImWchar* ranges = kRanges;
 
     // The file content is owned by ImGui after AddFontFromFileTTF —
     // it reads the bytes and keeps them. ImGui's loader returns nullptr
@@ -115,6 +141,42 @@ void check_vk_result(VkResult err) {
         io.Fonts->Clear();
         return false;
     }
+    // Merge symbol-rich fallback font for icon glyphs the primary
+    // CJK face doesn't carry. MergeMode = true means the new font's
+    // glyphs are added to the SAME ImFont*, with the primary's
+    // glyphs taking precedence — ImGui's per-character lookup
+    // falls through to the merged font when the primary has no
+    // glyph at that codepoint. Missing fallback file is non-fatal:
+    // we still have the primary CJK face for text, just no icons.
+    if (!symbol_path.empty()) {
+        std::error_code sec;
+        if (std::filesystem::exists(symbol_path, sec) && !sec) {
+            static const ImWchar kSymbolRanges[] = {
+                0x2010, 0x205E,  // General Punctuation
+                0x2190, 0x21FF,  // Arrows
+                0x2200, 0x22FF,  // Mathematical Operators
+                0x2300, 0x23FF,  // Miscellaneous Technical
+                0x2500, 0x257F,  // Box Drawing
+                0x2580, 0x259F,  // Block Elements
+                0x25A0, 0x25FF,  // Geometric Shapes
+                0x2600, 0x26FF,  // Miscellaneous Symbols
+                0x2700, 0x27BF,  // Dingbats
+                0,
+            };
+            ImFontConfig sym_cfg{};
+            sym_cfg.MergeMode = true;
+            sym_cfg.PixelSnapH = true;
+            sym_cfg.OversampleH = 2;
+            sym_cfg.OversampleV = 1;
+            if (io.Fonts->AddFontFromFileTTF(
+                    symbol_path.string().c_str(), size_px, &sym_cfg, kSymbolRanges) == nullptr) {
+                std::fprintf(stderr,
+                             "ImGuiHost: symbol font merge '%s' failed; continuing without icons\n",
+                             symbol_path.string().c_str());
+            }
+        }
+    }
+
     if (!io.Fonts->Build()) {
         std::fprintf(stderr,
                      "ImGuiHost: ImFontAtlas::Build() failed for '%s'; falling back to default\n",
@@ -180,7 +242,7 @@ auto ImGuiHost::create(const ImGuiHostCreateInfo& info) -> Result<ImGuiHost> {
     // backend init so ImGui_ImplVulkan_Init's lazy font-texture upload
     // sees the final atlas. The helper falls back to the default
     // bitmap font on any failure — never blocks create().
-    (void) try_load_cjk_font(info.cjk_font_path, info.font_size_px);
+    (void) try_load_cjk_font(info.cjk_font_path, info.symbol_font_path, info.font_size_px);
 
     // 3. Input bridge — feeds ImGui IO via the engine's hook
     // registry. Replaces the GLFW backend (ADR 0034, phase 1).

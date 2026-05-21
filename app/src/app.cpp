@@ -640,12 +640,17 @@ auto App::init_renderer_and_imgui() -> noted::Result<void> {
     } else {
         std::cout << "[font] using CJK font: " << cjk_font_path.string() << '\n';
     }
+    auto symbol_font_path = probe_symbol_font();
+    if (!symbol_font_path.empty()) {
+        std::cout << "[font] using symbol fallback: " << symbol_font_path.string() << '\n';
+    }
     auto imgui_host = noted::ui::ImGuiHost::create({
         .instance = &*instance_,
         .physical_device = &*physical_,
         .device = &*device_,
         .color_format = swapchain_->summary().color_format,
         .image_count = swapchain_->summary().image_count,
+        .symbol_font_path = symbol_font_path,
         .cjk_font_path = cjk_font_path,
         .font_size_px = cfg_.font.size_px,
     });
