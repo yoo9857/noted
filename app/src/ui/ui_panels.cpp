@@ -98,7 +98,8 @@ UiPanels::UiPanels(Deps d) noexcept
       images_(d.images),
       prompt_(d.prompt),
       save_for_dirty_prompt_(std::move(d.save_for_dirty_prompt)),
-      execute_pending_dirty_action_(std::move(d.execute_pending_dirty_action)) {}
+      execute_pending_dirty_action_(std::move(d.execute_pending_dirty_action)),
+      on_pick_image_(std::move(d.on_pick_image)) {}
 
 auto UiPanels::create(Deps deps) -> std::unique_ptr<UiPanels> {
     return std::unique_ptr<UiPanels>(new UiPanels{std::move(deps)});
@@ -120,8 +121,17 @@ void UiPanels::draw() {
         tools_.active = *tool_result.switch_request;
     }
     // Brush options panel — slider / colour-picker writes mutate
-    // `tools_.pen` / `tools_.eraser` in place.
-    noted::ui::widget::brush_options(tools_, &menu_state_.show_brush_options);
+    // `tools_.pen` / `tools_.eraser` in place. The "Pick image…"
+    // button on the Image-tool section is signalled back via the
+    // result struct because dialog reach + Document mutation cannot
+    // live in the ui layer.
+    {
+        const auto bo_result = noted::ui::widget::brush_options(
+            tools_, session_.document().image_assets(), &menu_state_.show_brush_options);
+        if (bo_result.pick_image_requested && on_pick_image_) {
+            on_pick_image_();
+        }
+    }
     // Per-frame push of the active tool's brush + mode into the
     // stroke engine. Live-update: slider drags and colour-picker
     // edits take effect on the very next stroke. The in-flight

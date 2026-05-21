@@ -52,6 +52,10 @@ struct ImageOptions {
     // 8…4096 px — anything beyond that is a deliberate authoring
     // choice and can be edited via `Document::images()` once
     // persistence lands.
+    //
+    // B.7.b.2 mutates these on a successful "Pick image…" so the
+    // placeholder's footprint matches the picked file's intrinsic
+    // dimensions immediately. The sliders still adjust afterwards.
     float width_px{200.0F};
     float height_px{200.0F};
 
@@ -63,6 +67,14 @@ struct ImageOptions {
     float g{1.0F};
     float b{1.0F};
     float a{1.0F};
+
+    // Currently-selected asset id, set by the "Pick image…" button
+    // in `brush_options`. `image_primitive_from` snapshots this into
+    // the committed primitive's `asset_id`. `invalid_asset_id` means
+    // "no asset selected — placeholder mode" (the v0.x default). The
+    // selection persists across primitive placements: one pick can
+    // back many committed images.
+    noted::domain::AssetId pending_asset_id{noted::domain::invalid_asset_id};
 
     [[nodiscard]] auto operator==(const ImageOptions&) const noexcept -> bool = default;
 };

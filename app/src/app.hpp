@@ -127,6 +127,18 @@ private:
     [[nodiscard]] auto save_for_dirty_prompt() -> bool;
     void execute_pending_dirty_action(DirtyPrompt::PendingAction action);
 
+    // "Pick image…" callback installed into `UiPanels` Deps. Runs
+    // the OS image-open dialog, decodes the file via stb_image to
+    // capture intrinsic dimensions, and allocates a fresh `AssetId`
+    // in `session_.document().image_assets()`. On success the
+    // current `tools_.image` is updated so the next click-to-place
+    // commits an `ImagePrimitive` carrying the new asset id +
+    // intrinsic dimensions.
+    //
+    // Errors print to stderr (same pattern as `save_for_dirty_prompt`).
+    // User cancel is a silent no-op.
+    void run_image_picker();
+
     // Swapchain re-create on OUT_OF_DATE / SUBOPTIMAL.
     [[nodiscard]] auto recreate_swapchain() -> noted::Result<void>;
 
