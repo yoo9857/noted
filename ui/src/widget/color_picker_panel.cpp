@@ -19,24 +19,11 @@ constexpr ImU32 kPanelFillBottom = IM_COL32(0x1A, 0x1A, 0x1E, 0xF2);
 constexpr ImU32 kPanelHighlight = IM_COL32(0xFF, 0xFF, 0xFF, 0x14);
 constexpr ImU32 kPanelBorder = IM_COL32(0x00, 0x00, 0x00, 0x80);
 
-void draw_panel_chrome(ImDrawList* dl, ImVec2 min, ImVec2 max) {
-    constexpr float kRounding = 12.0F;
-    for (int i = 1; i <= 5; ++i) {
-        const float off = static_cast<float>(i) * 1.5F;
-        const ImU32 col = IM_COL32(0, 0, 0, 0x28 - i * 0x06);
-        dl->AddRectFilled(ImVec2(min.x - off, min.y + off * 0.4F),
-                          ImVec2(max.x + off, max.y + off + 2.0F),
-                          col,
-                          kRounding + off);
-    }
-    dl->AddRectFilledMultiColor(
-        min, max, kPanelFillTop, kPanelFillTop, kPanelFillBottom, kPanelFillBottom);
-    dl->AddRect(min, max, kPanelBorder, kRounding, 0, 1.0F);
-    dl->AddLine(ImVec2(min.x + kRounding * 0.6F, min.y + 1.0F),
-                ImVec2(max.x - kRounding * 0.6F, min.y + 1.0F),
-                kPanelHighlight,
-                1.0F);
-}
+// `draw_panel_chrome` retired — the colour picker now uses ImGui's
+// own window decoration, which already provides a clean rounded
+// chrome. Layering a custom gradient + rounded outline on top
+// produced visible rectangular overlap at the corners (the
+// underlying `AddRectFilledMultiColor` doesn't honour rounding).
 
 }  // namespace
 

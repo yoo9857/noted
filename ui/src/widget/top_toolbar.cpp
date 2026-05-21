@@ -225,15 +225,17 @@ void draw_pill_shadow(ImDrawList* dl, ImVec2 min, ImVec2 max, float rounding) {
 }
 
 void draw_pill_body(ImDrawList* dl, ImVec2 min, ImVec2 max, float rounding) {
-    // Top-down gradient — bright at top, dark at bottom — gives the
-    // pill the glossy "embossed" look macOS Dock has. ImGui's
-    // AddRectFilledMultiColor goes top-left, top-right, bot-right,
-    // bot-left.
-    dl->AddRectFilledMultiColor(
-        min, max, kPillFillTop, kPillFillTop, kPillFillBottom, kPillFillBottom);
-    // Rounded mask: re-fill the corners with the underlying colour
-    // using AddRectFilled with rounding to apply the round shape.
-    // Then a one-px inner highlight stroke at the top.
+    // ImGui's `AddRectFilledMultiColor` does NOT support rounding —
+    // it always fills the whole bounding box, so the gradient
+    // square corners visibly poked past the rounded outline. Use
+    // a single-colour rounded fill instead, then layer a second
+    // rounded rect over the top half to fake a soft gradient. Both
+    // calls honour rounding, so the corners stay clean.
+    dl->AddRectFilled(min, max, kPillFillBottom, rounding);
+    // Top half lighter — gives the embossed "Dock" feel without
+    // breaking the rounded silhouette.
+    const ImVec2 top_max(max.x, (min.y + max.y) * 0.5F + 1.0F);
+    dl->AddRectFilled(min, top_max, kPillFillTop, rounding, ImDrawFlags_RoundCornersTop);
     dl->AddRect(min, max, kPillBorder, rounding, 0, 1.0F);
     dl->AddLine(ImVec2(min.x + rounding * 0.6F, min.y + 1.0F),
                 ImVec2(max.x - rounding * 0.6F, min.y + 1.0F),

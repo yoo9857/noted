@@ -66,17 +66,17 @@ auto navigator_panel(const NavigatorInputs& in,
                             thumb_min.y + (thumb_h - canvas_draw_h) * 0.5F);
     const ImVec2 canvas_max(canvas_min.x + canvas_draw_w, canvas_min.y + canvas_draw_h);
 
-    // Faint outline of the actual canvas area so the user can
-    // distinguish it from the panel padding (the bands above/below
-    // or left/right of the canvas inside the thumb).
-    dl->AddRect(canvas_min, canvas_max, kPageBorder, 0.0F, 0, 0.5F);
-
-    // Pages → centred canvas drawing area.
+    // The canvas frame and the page outlines used to draw with the
+    // same grey, producing a visible "ghost rectangle" wherever the
+    // two overlapped — page borders overshooting the canvas outline,
+    // canvas outline showing through the centred padding bands. The
+    // fix is simple: no separate canvas outline (the dark thumb +
+    // bright page fills give enough boundary) and no page borders
+    // (the fill colour stands out cleanly on its own).
     for (const auto& p : pages) {
         const ImVec2 p_min(canvas_min.x + p.origin_x_px * s, canvas_min.y + p.origin_y_px * s);
         const ImVec2 p_max(p_min.x + p.extent_w_px * s, p_min.y + p.extent_h_px * s);
         dl->AddRectFilled(p_min, p_max, kPageFill);
-        dl->AddRect(p_min, p_max, kPageBorder, 0.0F, 0, 0.5F);
     }
 
     // Viewport rectangle. The visible canvas region is:
