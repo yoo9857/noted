@@ -36,4 +36,11 @@ namespace noted::platform::io {
 [[nodiscard]] auto pick_noted_save(std::string_view default_name)
     -> Result<std::optional<std::filesystem::path>>;
 
+// Show the OS open dialog filtered to raster image formats (PNG / JPG /
+// JPEG / BMP / TGA) — the four extensions `platform::image_io::load_rgba8`
+// can decode via stb_image. Same return semantics as `pick_noted_open`:
+// path on success, `std::nullopt` on user cancel, error on NFD-internal
+// failure. B.7.b.2's Image-tool "Pick image…" entry point.
+[[nodiscard]] auto pick_image_open() -> Result<std::optional<std::filesystem::path>>;
+
 }  // namespace noted::platform::io

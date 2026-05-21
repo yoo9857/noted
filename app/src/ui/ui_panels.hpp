@@ -123,6 +123,12 @@ public:
         // Acts on whichever pending action the prompt resolved
         // (quit / new_doc).
         std::function<void(noted::app::DirtyPrompt::PendingAction)> execute_pending_dirty_action;
+        // "Pick image…" button on the brush-options panel fires
+        // through here. App routes it into the OS file dialog +
+        // image decode + asset registration. No args / return —
+        // any state the picker needs to mutate is captured by the
+        // closure (Document, ToolState).
+        std::function<void()> on_pick_image;
     };
 
     [[nodiscard]] static auto create(Deps deps) -> std::unique_ptr<UiPanels>;
@@ -172,6 +178,7 @@ private:
     noted::app::DirtyPrompt& prompt_;
     std::function<bool()> save_for_dirty_prompt_;
     std::function<void(noted::app::DirtyPrompt::PendingAction)> execute_pending_dirty_action_;
+    std::function<void()> on_pick_image_;
 };
 
 }  // namespace noted::app::ui

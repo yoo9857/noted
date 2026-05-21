@@ -1,6 +1,11 @@
 #include "noted/ui/widget/brush_options.hpp"
 
+#include <filesystem>
+#include <string>
+
 #include <imgui.h>
+
+#include "noted/domain/document/image_asset_registry.hpp"
 
 namespace noted::ui::widget {
 
@@ -62,7 +67,8 @@ void draw_text(noted::domain::tool::TextOptions& opt) {
     }
 }
 
-void draw_image(noted::domain::tool::ImageOptions& opt) {
+[[nodiscard]] auto draw_image(noted::domain::tool::ImageOptions& opt,
+                              const noted::domain::ImageAssetRegistry& image_assets) -> bool {
     ImGui::TextDisabled("Image");
     ImGui::Spacing();
 
@@ -86,7 +92,42 @@ void draw_image(noted::domain::tool::ImageOptions& opt) {
     }
 
     ImGui::Spacing();
-    ImGui::TextDisabled("(file picker + GPU upload land in B.7.b)");
+    // "Pick image…" button — fires only the request flag; the
+    // dialog itself runs in the App-side glue because the file
+    // dialog touches platform APIs and Document mutation, both of
+    // which the ui layer is forbidden from reaching into.
+    const bool clicked = ImGui::Button("Pick image…");
+
+    // Current asset label — filename of the picked source, or a
+    // placeholder hint if nothing's queued yet. Resolves via the
+    // document's image-asset registry.
+    if (opt.pending_asset_id != noted::domain::invalid_asset_id) {
+        if (const auto* asset = image_assets.find(opt.pending_asset_id); asset != nullptr) {
+            // Show just the filename — full paths get awkward in a
+            // narrow panel. std::filesystem::path::filename returns
+            // empty for sources with no separator; fall back to the
+            // raw string in that edge case.
+            std::filesystem::path p{asset->source_path};
+            std::string label = p.filename().empty() ? asset->source_path : p.filename().string();
+            ImGui::SameLine();
+            ImGui::TextUnformatted(label.c_str());
+            ImGui::TextDisabled("%u × %u px", asset->intrinsic_w_px, asset->intrinsic_h_px);
+        } else {
+            // The pending id doesn't resolve — the registry was
+            // cleared (e.g. doc reload) but the tool state still
+            // references the old id. Reset cleanly.
+            opt.pending_asset_id = noted::domain::invalid_asset_id;
+            ImGui::SameLine();
+            ImGui::TextDisabled("(no image picked)");
+        }
+    } else {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(no image picked)");
+    }
+
+    ImGui::Spacing();
+    ImGui::TextDisabled("(GPU upload + real raster render land in B.7.b.2b)");
+    return clicked;
 }
 
 void draw_shape(noted::domain::tool::ShapeOptions& opt) {
@@ -118,14 +159,17 @@ void draw_shape(noted::domain::tool::ShapeOptions& opt) {
 
 }  // namespace
 
-void brush_options(noted::domain::tool::ToolState& tools, bool* open) {
+auto brush_options(noted::domain::tool::ToolState& tools,
+                   const noted::domain::ImageAssetRegistry& image_assets,
+                   bool* open) -> BrushOptionsResult {
+    BrushOptionsResult result{};
     if (open != nullptr && !*open) {
-        return;
+        return result;
     }
     ImGui::SetNextWindowSize(ImVec2{260.0F, 0.0F}, ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("Brush options", open)) {
         ImGui::End();
-        return;
+        return result;
     }
     using noted::domain::tool::ToolKind;
     switch (tools.active) {
@@ -145,10 +189,11 @@ void brush_options(noted::domain::tool::ToolState& tools, bool* open) {
             draw_text(tools.text);
             break;
         case ToolKind::image:
-            draw_image(tools.image);
+            result.pick_image_requested = draw_image(tools.image, image_assets);
             break;
     }
     ImGui::End();
+    return result;
 }
 
 }  // namespace noted::ui::widget
