@@ -23,12 +23,90 @@ namespace {
     return out;
 }
 
+// Centripetal Catmull-Rom interpolation between p1 and p2 with p0,
+// p3 as the surrounding context. t ∈ [0, 1] traces from p1 (t=0)
+// to p2 (t=1). The curve is C¹-continuous across samples and
+// passes through every original sample.
+//
+// Pressure interpolates linearly between p1 and p2 — Catmull-Rom on
+// pressure too would risk overshoot above 1 or below 0 with sharp
+// pressure transitions, and the difference is invisible at typical
+// sample rates.
+[[nodiscard]] auto catmull_rom_lerp(const StrokeSample& p0,
+                                    const StrokeSample& p1,
+                                    const StrokeSample& p2,
+                                    const StrokeSample& p3,
+                                    float t) noexcept -> StrokeSample {
+    const float t2 = t * t;
+    const float t3 = t2 * t;
+    StrokeSample r{};
+    r.x = 0.5F * (2.0F * p1.x + (-p0.x + p2.x) * t +
+                  (2.0F * p0.x - 5.0F * p1.x + 4.0F * p2.x - p3.x) * t2 +
+                  (-p0.x + 3.0F * p1.x - 3.0F * p2.x + p3.x) * t3);
+    r.y = 0.5F * (2.0F * p1.y + (-p0.y + p2.y) * t +
+                  (2.0F * p0.y - 5.0F * p1.y + 4.0F * p2.y - p3.y) * t2 +
+                  (-p0.y + 3.0F * p1.y - 3.0F * p2.y + p3.y) * t3);
+    r.pressure = p1.pressure * (1.0F - t) + p2.pressure * t;
+    return r;
+}
+
+// Replace `samples` with a denser sequence along the Catmull-Rom
+// interpolant. Phantom endpoint samples are reflections of the
+// adjacent real sample around the endpoint, which gives a natural
+// non-overshooting tangent at the stroke's start / end.
+[[nodiscard]] auto subdivide(const std::vector<StrokeSample>& samples,
+                             int subdivisions) -> std::vector<StrokeSample> {
+    if (subdivisions <= 1 || samples.size() < 2U) {
+        return samples;
+    }
+    std::vector<StrokeSample> out;
+    out.reserve(samples.size() * static_cast<std::size_t>(subdivisions));
+    const auto N = samples.size();
+    for (std::size_t i = 0; i + 1U < N; ++i) {
+        const StrokeSample& p1 = samples[i];
+        const StrokeSample& p2 = samples[i + 1U];
+
+        StrokeSample p0{};
+        if (i == 0U) {
+            // Reflect p2 around p1 for the phantom "before" sample.
+            p0.x = 2.0F * p1.x - p2.x;
+            p0.y = 2.0F * p1.y - p2.y;
+            p0.pressure = p1.pressure;
+        } else {
+            p0 = samples[i - 1U];
+        }
+
+        StrokeSample p3{};
+        if (i + 2U >= N) {
+            // Reflect p1 around p2 for the phantom "after" sample.
+            p3.x = 2.0F * p2.x - p1.x;
+            p3.y = 2.0F * p2.y - p1.y;
+            p3.pressure = p2.pressure;
+        } else {
+            p3 = samples[i + 2U];
+        }
+
+        for (int j = 0; j < subdivisions; ++j) {
+            const float t = static_cast<float>(j) / static_cast<float>(subdivisions);
+            out.push_back(catmull_rom_lerp(p0, p1, p2, p3, t));
+        }
+    }
+    // Append the original last sample so the smoothed curve reaches
+    // the endpoint exactly.
+    out.push_back(samples.back());
+    return out;
+}
+
 }  // namespace
 
-auto tessellate_ribbon(const Stroke& stroke) -> std::vector<RibbonVertex> {
-    const auto samples = coalesce(stroke.samples);
+auto tessellate_ribbon(const Stroke& stroke,
+                       int subdivisions_per_segment) -> std::vector<RibbonVertex> {
+    auto samples = coalesce(stroke.samples);
     if (samples.size() < 2) {
         return {};
+    }
+    if (subdivisions_per_segment > 1) {
+        samples = subdivide(samples, subdivisions_per_segment);
     }
 
     std::vector<RibbonVertex> out;

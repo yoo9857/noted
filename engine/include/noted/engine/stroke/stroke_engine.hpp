@@ -244,6 +244,12 @@ private:
     DrawMode mode_{DrawMode::draw};
     bool input_active_{true};
     PressPredicate press_predicate_{};
+    // Stabilizer state — the smoothed cursor lags the raw pointer
+    // by an amount controlled by `current_stroke_.style.stabilizer`.
+    // Reset each press; updated on every move.
+    double smooth_x_{0.0};
+    double smooth_y_{0.0};
+    float smooth_pressure_{1.0F};
 
     // RAII subscriptions — released when the engine goes out of scope.
     noted::hook::Subscription<noted::hook::PointerPressed> sub_pressed_;
