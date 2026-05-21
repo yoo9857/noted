@@ -70,6 +70,7 @@
 #include "frame/render_passes.hpp"
 #include "input/camera_controller.hpp"
 #include "input/image_tool_handler.hpp"
+#include "input/lasso_tool_handler.hpp"
 #include "input/selection_tool_handler.hpp"
 #include "input/shape_recognizer.hpp"
 #include "input/shape_tool_handler.hpp"
@@ -340,6 +341,7 @@ private:
     // can read `current_drag()` per frame without walking the handler
     // list.
     noted::app::input::SelectionToolHandler* selection_handler_{nullptr};
+    noted::app::input::LassoToolHandler* lasso_handler_{nullptr};
     noted::app::input::ShapeToolHandler* shape_handler_{nullptr};
     noted::app::input::TextToolHandler* text_handler_{nullptr};
     noted::app::input::ImageToolHandler* image_handler_{nullptr};

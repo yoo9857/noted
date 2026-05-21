@@ -39,8 +39,8 @@ TEST(ToolKindOrdinals, MatchSchemaContract) {
 
 TEST(ToolKindBounds, FirstAndLastMatchCount) {
     EXPECT_EQ(kFirstTool, ToolKind::pen);
-    EXPECT_EQ(kLastTool, ToolKind::image);
-    EXPECT_EQ(kToolCount, 6U);
+    EXPECT_EQ(kLastTool, ToolKind::lasso);
+    EXPECT_EQ(kToolCount, 7U);
     // kFirstTool..kLastTool spans exactly kToolCount tools.
     EXPECT_EQ(
         static_cast<std::size_t>(static_cast<int>(kLastTool) - static_cast<int>(kFirstTool) + 1),

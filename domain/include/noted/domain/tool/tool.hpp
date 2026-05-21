@@ -31,15 +31,16 @@ enum class ToolKind : std::uint8_t {
                  // visual placeholder; proper destination-out
                  // semantics land in B.2 once the stroke layer is
                  // split from the page-background layer).
-    select = 2,  // rectangle / lasso selection (B.x)
+    select = 2,  // rectangle selection (marquee drag)
     shape = 3,   // primitive shapes (B.x)
     text = 4,    // text insertion (B.x)
     image = 5,   // image placement (B.x)
+    lasso = 6,   // free-form polygon selection (lasso step 2)
 };
 
 inline constexpr ToolKind kFirstTool = ToolKind::pen;
-inline constexpr ToolKind kLastTool = ToolKind::image;
-inline constexpr std::size_t kToolCount = 6;
+inline constexpr ToolKind kLastTool = ToolKind::lasso;
+inline constexpr std::size_t kToolCount = 7;
 
 struct ToolState {
     ToolKind active{ToolKind::pen};
