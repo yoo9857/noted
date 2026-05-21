@@ -6,6 +6,7 @@ noted_add_module(
         src/command/command.cpp
         src/io/document_json.cpp
         src/layer/layer.cpp
+        src/clipboard/selection_ops.cpp
         src/selection/selection.cpp
         src/shape_detect/shape_detect.cpp
         src/tool/tool.cpp

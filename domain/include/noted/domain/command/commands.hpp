@@ -222,6 +222,55 @@ private:
     bool applied_{false};
 };
 
+// Remove a batch of shapes by index — one undo entry for the whole
+// batch, the natural shape of the Cut / Delete-selection user
+// gesture. Snapshots each removed shape on apply so undo can
+// re-insert all of them at their original indices. Removal order
+// is descending so shifting indices don't invalidate the
+// remaining work; undo inserts ascending so re-insertion lands at
+// the recorded indices.
+class DeleteShapesCommand final : public Command {
+public:
+    explicit DeleteShapesCommand(std::vector<std::size_t> indices);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override {
+        return "Delete shapes";
+    }
+
+private:
+    std::vector<std::size_t> target_indices_;
+    // Pairs of (original_index, shape) sorted ASC by index — fills
+    // on `apply`, drains on `undo`.
+    std::vector<std::pair<std::size_t, noted::domain::tool::ShapePrimitive>> snapshots_;
+    bool applied_{false};
+};
+
+// Append a batch of shapes to the document — one undo entry for
+// the Paste gesture. Records the assigned index of the FIRST
+// pasted shape so the host can select-the-paste afterward.
+class PasteShapesCommand final : public Command {
+public:
+    explicit PasteShapesCommand(std::vector<noted::domain::tool::ShapePrimitive> shapes);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override {
+        return "Paste shapes";
+    }
+
+    [[nodiscard]] auto first_assigned_index() const noexcept -> std::size_t {
+        return first_assigned_index_;
+    }
+    [[nodiscard]] auto count() const noexcept -> std::size_t { return shapes_.size(); }
+
+private:
+    std::vector<noted::domain::tool::ShapePrimitive> shapes_;
+    std::size_t first_assigned_index_{0};
+    bool applied_{false};
+};
+
 // Append a text primitive to the document's texts list. Same shape
 // as `AddShapeCommand`.
 class AddTextCommand final : public Command {
