@@ -126,11 +126,35 @@ struct Stroke {
     DrawMode mode{DrawMode::draw};
 };
 
-// One ribbon vertex. The tessellator emits these in
-// triangle-strip order (alternating left / right of the centerline).
-// Position is in canvas pixels; colour is straight RGBA carried
-// per-vertex so a future variable-colour stroke (rainbow / colour
-// modulation) drops in without a layout change.
+// One ribbon vertex. The tessellator emits these as a TRIANGLE_LIST:
+// 6 vertices per segment (= sample pair) forming a rounded-rectangle
+// (stadium / capsule) quad. Adjacent segments overlap at their shared
+// sample point — both quads contribute a half-disc cap there so the
+// join is naturally rounded without explicit miter / bevel logic.
+// Crucially this means U-turns / zigzags can't break the ribbon: each
+// segment is independent so a sharp direction reversal at sample `i`
+// just overlaps two segment quads at sample `i` rather than producing
+// a degenerate / self-intersecting triangle strip the way the
+// per-sample-strip topology did.
+//
+// `side` + `t` are the segment-local 2D signed-distance coordinates.
+// `K` is the segment's body-to-radius aspect ratio (= L/(2r)) — a
+// per-quad constant that lets the fragment shader reconstruct the
+// capsule SDF from the normalized (side, t):
+//
+//   - `side`: perpendicular signed distance, -1 left edge, +1 right.
+//   - `t`: tangential signed coordinate spanning the quad, -1 at the
+//     start-cap outer rim, +1 at the end-cap outer rim. The body
+//     occupies |t| ≤ K / (K + 1).
+//   - `K`: half-length of the segment body in radius units. Larger K
+//     = longer thin capsule; smaller K = stubby / dot-like.
+//
+// Fragment-side SDF reconstruction:
+//   const float cap = max(0.0, |t|*(K+1) - K);   // 0 in body, >0 in cap
+//   const float dist = length(side, cap);        // 1.0 at capsule edge
+// `smoothstep(1 - aa, 1, dist)` then produces a 1-pixel AA edge that
+// rounds the caps and softens the long sides in a single
+// formulation.
 struct RibbonVertex {
     float x{0.0F};
     float y{0.0F};
@@ -138,6 +162,9 @@ struct RibbonVertex {
     float g{0.0F};
     float b{0.0F};
     float a{1.0F};
+    float side{0.0F};  // -1 left edge, +1 right edge
+    float t{0.0F};     // -1 start-cap rim, +1 end-cap rim
+    float K{0.0F};     // body half-length / radius — capsule aspect
 };
 
 // Build a triangle-strip ribbon from a stroke's centerline + brush

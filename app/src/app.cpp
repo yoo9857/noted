@@ -1088,28 +1088,41 @@ auto App::ensure_canvas_fits_pages() -> noted::Result<void> {
     }
     const auto desired = desired_canvas_extent();
     const auto current = canvas_->extent();
-    if (current.width == desired.width && current.height == desired.height) {
-        return {};  // already correct — the common path, free
+    if (current.width != desired.width || current.height != desired.height) {
+        // Wait for any in-flight frame to finish — the canvas image
+        // is still referenced by the previous frame's command buffer
+        // until the per-frame fence has been waited on. wait_idle is
+        // the sledgehammer; the cost is acceptable because this path
+        // only runs on page-list change or window resize, not per
+        // frame.
+        device_->wait_idle();
+        if (auto r = canvas_->resize(*allocator_, desired); !r) {
+            return std::unexpected(std::move(r).error());
+        }
+        if (auto r = strokes_target_->resize(*allocator_, desired); !r) {
+            return std::unexpected(std::move(r).error());
+        }
+        noted::gpu::DescriptorWriter{canvas_set_}
+            .write_combined_image_sampler(0, canvas_->view(), sampler_->handle())
+            .commit();
+        noted::gpu::DescriptorWriter{strokes_set_}
+            .write_combined_image_sampler(0, strokes_target_->view(), sampler_->handle())
+            .commit();
     }
-    // Wait for any in-flight frame to finish — the canvas image is
-    // still referenced by the previous frame's command buffer until
-    // the per-frame fence has been waited on. wait_idle is the
-    // sledgehammer; the cost is acceptable because this path only
-    // runs on page-list change or window resize, not per frame.
-    device_->wait_idle();
-    if (auto r = canvas_->resize(*allocator_, desired); !r) {
-        return std::unexpected(std::move(r).error());
-    }
-    if (auto r = strokes_target_->resize(*allocator_, desired); !r) {
-        return std::unexpected(std::move(r).error());
-    }
-    noted::gpu::DescriptorWriter{canvas_set_}
-        .write_combined_image_sampler(0, canvas_->view(), sampler_->handle())
-        .commit();
-    noted::gpu::DescriptorWriter{strokes_set_}
-        .write_combined_image_sampler(0, strokes_target_->view(), sampler_->handle())
-        .commit();
+    // Sync the camera + stroke engine's canvas-size knowledge to the
+    // **offscreen target** extent, NOT the window. After ADR 0033's
+    // Slice 2 the offscreen canvas can be taller than the window, so
+    // the previous framebuffer-resize auto-handlers (CameraController
+    // + StrokeEngine listening to FramebufferResized) end up with the
+    // wrong value and would misalign pointer-driven ink against the
+    // rendered ribbon. Re-asserting from the host every frame keeps
+    // App as the single source of truth for canvas extent — the cost
+    // is a handful of double assignments. Window extent stays at the
+    // swapchain extent and is updated in `recreate_swapchain`.
     camera_.set_canvas_extent(desired.width, desired.height);
+    if (stroke_engine_) {
+        stroke_engine_->set_canvas_size(desired);
+    }
     return {};
 }
 

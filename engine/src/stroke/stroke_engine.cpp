@@ -129,7 +129,7 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
         .stride = sizeof(RibbonVertex),
         .rate = VK_VERTEX_INPUT_RATE_VERTEX,
     }}};
-    const std::array<noted::gpu::VertexInputAttribute, 2> vb_attrs{{
+    const std::array<noted::gpu::VertexInputAttribute, 5> vb_attrs{{
         {
             .location = 0,
             .binding = 0,
@@ -141,6 +141,29 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
             .binding = 0,
             .format = VK_FORMAT_R32G32B32A32_SFLOAT,
             .offset = offsetof(RibbonVertex, r),
+        },
+        {
+            // Per-segment SDF coords. See `shaders/polyline.slang` +
+            // `stroke_geometry.hpp` RibbonVertex docs for the
+            // capsule reconstruction.
+            .location = 2,
+            .binding = 0,
+            .format = VK_FORMAT_R32_SFLOAT,
+            .offset = offsetof(RibbonVertex, side),
+        },
+        {
+            .location = 3,
+            .binding = 0,
+            .format = VK_FORMAT_R32_SFLOAT,
+            .offset = offsetof(RibbonVertex, t),
+        },
+        {
+            // Per-segment aspect ratio K = body-half-length / radius.
+            // Constant across all 4 quad vertices.
+            .location = 4,
+            .binding = 0,
+            .format = VK_FORMAT_R32_SFLOAT,
+            .offset = offsetof(RibbonVertex, K),
         },
     }};
 
@@ -182,7 +205,14 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
             .add_stage(VK_SHADER_STAGE_VERTEX_BIT, *info.vs_module, "main")
             .add_stage(VK_SHADER_STAGE_FRAGMENT_BIT, *info.ps_module, "main")
             .vertex_input(vb_bindings, vb_attrs)
-            .topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP)
+            // Per-segment quads — TRIANGLE_LIST is the right topology
+            // because adjacent segments do NOT share vertices (each
+            // quad has its own per-segment K + side/t SDF coords).
+            // Strip topology was the old per-sample model; switching
+            // to per-segment fixes the U-turn / zigzag bug where the
+            // averaged-tangent perpendicular flipped and pinched the
+            // ribbon. See `stroke_geometry.hpp::tessellate_ribbon`.
+            .topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
             .rasterization(VK_POLYGON_MODE_FILL, VK_CULL_MODE_NONE, VK_FRONT_FACE_COUNTER_CLOCKWISE)
             .color_blend_attachment(blend)
             .color_format(info.canvas_format)

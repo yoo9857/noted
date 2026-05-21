@@ -23,20 +23,6 @@ namespace {
     return out;
 }
 
-// Returns (nx, ny) — the unit perpendicular to (dx, dy). Caller is
-// responsible for non-zero input (handled by `coalesce`).
-[[nodiscard]] auto unit_perp(float dx, float dy) noexcept -> std::pair<float, float> {
-    const float len = std::sqrt(dx * dx + dy * dy);
-    if (len <= 0.0F) {
-        // Defensive — `coalesce` should have eliminated this case.
-        return {0.0F, 0.0F};
-    }
-    // Perpendicular in screen space (y-down): (-dy, dx) is the
-    // left-hand normal, which matches the left/right convention the
-    // tessellator uses below (left = sample - normal*w).
-    return {-dy / len, dx / len};
-}
-
 }  // namespace
 
 auto tessellate_ribbon(const Stroke& stroke) -> std::vector<RibbonVertex> {
@@ -46,64 +32,85 @@ auto tessellate_ribbon(const Stroke& stroke) -> std::vector<RibbonVertex> {
     }
 
     std::vector<RibbonVertex> out;
-    out.reserve(samples.size() * 2);
+    // 6 verts per segment (TRIANGLE_LIST: 2 triangles per quad).
+    out.reserve((samples.size() - 1U) * 6U);
 
-    for (std::size_t i = 0; i < samples.size(); ++i) {
-        // Tangent for sample i — average of incoming + outgoing
-        // segment directions for interior samples; the lone adjacent
-        // segment for the endpoints.
-        float dx = 0.0F;
-        float dy = 0.0F;
-        if (i == 0) {
-            dx = samples[1].x - samples[0].x;
-            dy = samples[1].y - samples[0].y;
-        } else if (i + 1 == samples.size()) {
-            dx = samples[i].x - samples[i - 1].x;
-            dy = samples[i].y - samples[i - 1].y;
-        } else {
-            // Average direction vectors. Don't normalize the inputs
-            // first — the unit_perp below normalizes the result, so
-            // weighting longer segments more is the right behaviour
-            // (matches Catmull-Rom-ish tangents).
-            dx = (samples[i + 1].x - samples[i - 1].x) * 0.5F;
-            dy = (samples[i + 1].y - samples[i - 1].y) * 0.5F;
+    for (std::size_t i = 0; i + 1U < samples.size(); ++i) {
+        const float ax = samples[i].x;
+        const float ay = samples[i].y;
+        const float bx = samples[i + 1U].x;
+        const float by = samples[i + 1U].y;
+        const float dx = bx - ax;
+        const float dy = by - ay;
+        const float len = std::sqrt(dx * dx + dy * dy);
+        if (len <= 0.0F) {
+            continue;  // coalesce should already have eliminated this
         }
+        const float tx = dx / len;
+        const float ty = dy / len;
+        // Perpendicular in screen space (y-down): rotate tangent 90°
+        // counterclockwise around (0, 0) → (-ty, tx). "Right" of the
+        // tangent direction.
+        const float nx = -ty;
+        const float ny = tx;
 
-        const auto [nx, ny] = unit_perp(dx, dy);
+        const auto stamp_a = stamp_from_pressure(stroke.style, samples[i].pressure);
+        const auto stamp_b = stamp_from_pressure(stroke.style, samples[i + 1U].pressure);
+        // One constant radius per segment so the (side, t) SDF stays
+        // a uniform capsule. Use the average of the two endpoint
+        // pressures' radii — pressure varies slowly across a single
+        // segment so the loss of taper is invisible. Per-segment
+        // tapering (trapezoidal quad with varying r) is a future
+        // refinement; the bigger UX win is the robust topology this
+        // per-segment scheme already gives.
+        const float r = std::max(0.5F, (stamp_a.radius_px + stamp_b.radius_px) * 0.5F);
 
-        // Reuse the existing pressure curve for half-width + colour.
-        // Half-width = stamp radius (the stamp model was already
-        // pressure-radius-mapped; the ribbon width is the disc
-        // diameter would have been at this sample).
-        const auto stamp = stamp_from_pressure(stroke.style, samples[i].pressure);
-        const float half_w = stamp.radius_px;
+        // Aspect ratio K = body-half-length / radius. Body occupies
+        // |t| ≤ K/(K+1); caps occupy K/(K+1) < |t| ≤ 1.
+        const float K = (len * 0.5F) / r;
 
-        const float cx = samples[i].x;
-        const float cy = samples[i].y;
+        // Quad corners — extended by `r` past each sample along the
+        // tangent direction so the fragment-shader SDF has room to
+        // draw a rounded cap.
+        //   V0 (NW) = A - tangent*r - perp*r
+        //   V1 (NE) = A - tangent*r + perp*r
+        //   V2 (SW) = B + tangent*r - perp*r
+        //   V3 (SE) = B + tangent*r + perp*r
+        const float v0x = ax - tx * r - nx * r;
+        const float v0y = ay - ty * r - ny * r;
+        const float v1x = ax - tx * r + nx * r;
+        const float v1y = ay - ty * r + ny * r;
+        const float v2x = bx + tx * r - nx * r;
+        const float v2y = by + ty * r - ny * r;
+        const float v3x = bx + tx * r + nx * r;
+        const float v3y = by + ty * r + ny * r;
 
-        RibbonVertex left{};
-        left.x = cx - nx * half_w;
-        left.y = cy - ny * half_w;
-        left.r = stamp.r;
-        left.g = stamp.g;
-        left.b = stamp.b;
-        left.a = stamp.a;
+        // Colour at each end matches the endpoint stamp's RGBA (so a
+        // future pressure-driven colour would gradient-interpolate
+        // naturally across the segment); for the current model both
+        // stamps share the brush's RGB and only alpha can vary.
+        const auto vertex = [](float x, float y, float side, float t, float K, const Stamp& s) {
+            RibbonVertex v{};
+            v.x = x;
+            v.y = y;
+            v.r = s.r;
+            v.g = s.g;
+            v.b = s.b;
+            v.a = s.a;
+            v.side = side;
+            v.t = t;
+            v.K = K;
+            return v;
+        };
 
-        RibbonVertex right{};
-        right.x = cx + nx * half_w;
-        right.y = cy + ny * half_w;
-        right.r = stamp.r;
-        right.g = stamp.g;
-        right.b = stamp.b;
-        right.a = stamp.a;
-
-        // Triangle-strip order: alternate left, right, left, right.
-        // Adjacent strip triples form the two triangles spanning
-        // segment (i-1, i): (L_{i-1}, R_{i-1}, L_i) and
-        // (R_{i-1}, L_i, R_i). With the perpendicular sign chosen
-        // in `unit_perp`, this winds CCW in screen space (y-down).
-        out.push_back(left);
-        out.push_back(right);
+        // Triangle 1: V0, V1, V2  (CCW under y-down screen)
+        out.push_back(vertex(v0x, v0y, -1.0F, -1.0F, K, stamp_a));
+        out.push_back(vertex(v1x, v1y, +1.0F, -1.0F, K, stamp_a));
+        out.push_back(vertex(v2x, v2y, -1.0F, +1.0F, K, stamp_b));
+        // Triangle 2: V1, V3, V2  (shares edge V1-V2 with triangle 1)
+        out.push_back(vertex(v1x, v1y, +1.0F, -1.0F, K, stamp_a));
+        out.push_back(vertex(v3x, v3y, +1.0F, +1.0F, K, stamp_b));
+        out.push_back(vertex(v2x, v2y, -1.0F, +1.0F, K, stamp_b));
     }
     return out;
 }

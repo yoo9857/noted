@@ -93,10 +93,14 @@ void CameraController::on_scrolled(double dy) noexcept {
 }
 
 void CameraController::on_framebuffer_resized(unsigned w, unsigned h) noexcept {
-    // The canvas extent matches the window extent today; if a future
-    // PR splits them (e.g. doc-resolution canvas with windowed
-    // downsample) this assignment splits.
-    camera_.set_canvas_extent(w, h);
+    // Window extent tracks the framebuffer 1:1.
+    //
+    // Canvas extent is NO LONGER tied to the framebuffer (ADR 0033
+    // Slice 2). It's driven by `App::ensure_canvas_fits_pages` to
+    // contain the full page stack, which can be taller than the
+    // window. Re-asserting canvas_extent here would race the host's
+    // every-frame sync and misalign pointer ink against the rendered
+    // ribbon, so we deliberately leave it alone.
     camera_.set_window_extent(w, h);
 }
 

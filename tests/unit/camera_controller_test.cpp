@@ -109,15 +109,23 @@ TEST(CameraController, ScrollClampsToConfigMinMax) {
 
 // ---- Framebuffer resize ----------------------------------------------------
 
-TEST(CameraController, FramebufferResizeUpdatesCameraExtents) {
+TEST(CameraController, FramebufferResizeUpdatesWindowExtentOnly) {
+    // After ADR 0033 Slice 2 the canvas extent is host-driven (the
+    // App walks the page stack and sizes the offscreen target to
+    // fit). FramebufferResized only carries the window dimensions
+    // and must NOT overwrite canvas_extent — that would race the
+    // host's every-frame sync. Window extent does track the new
+    // framebuffer size 1:1.
     Camera cam = make_camera_with_extents(100, 100);
     CanvasConfig cfg{};
     CameraController ctrl{CameraController::TestingTag{}, cam, cfg};
     ctrl.inject_framebuffer_resize_(1920, 1080);
     EXPECT_DOUBLE_EQ(cam.window_extent_w(), 1920.0);
     EXPECT_DOUBLE_EQ(cam.window_extent_h(), 1080.0);
-    EXPECT_DOUBLE_EQ(cam.canvas_extent_w(), 1920.0);
-    EXPECT_DOUBLE_EQ(cam.canvas_extent_h(), 1080.0);
+    // canvas_extent stays at the value the host set (100×100 from
+    // make_camera_with_extents in this fixture).
+    EXPECT_DOUBLE_EQ(cam.canvas_extent_w(), 100.0);
+    EXPECT_DOUBLE_EQ(cam.canvas_extent_h(), 100.0);
 }
 
 // ---- Cursor tracking -------------------------------------------------------
