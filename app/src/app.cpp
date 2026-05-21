@@ -888,6 +888,65 @@ void App::on_frame() {
         }
     }
 
+    // Right-side floating colour picker panel — OpenCanvas /
+    // Photoshop-style HSV picker + hex + recent-colours ring. Bound
+    // to the active tool's colour fields where they exist (Pen,
+    // Shape, Text). Eraser / Select / Image have no stroke colour
+    // so the panel is skipped for those tools.
+    {
+        float* active_rgba = nullptr;
+        switch (tools_.active) {
+            case noted::domain::tool::ToolKind::pen:
+                active_rgba = &tools_.pen.r;
+                break;
+            case noted::domain::tool::ToolKind::shape:
+                active_rgba = &tools_.shape.stroke_r;
+                break;
+            case noted::domain::tool::ToolKind::text:
+                active_rgba = &tools_.text.r;
+                break;
+            default:
+                break;
+        }
+        if (active_rgba != nullptr) {
+            constexpr float kColorPanelTopOffset = 80.0F;
+            const auto result = noted::ui::widget::color_picker_panel(
+                active_rgba, palette_colors_, kColorPanelTopOffset);
+
+            // Adds `colour` to the palette: dedup head (don't push
+            // duplicates), prefer filling empty (alpha=0) slots
+            // before evicting populated tail entries.
+            const auto push_to_palette = [this](const std::array<float, 4>& colour) {
+                if (palette_colors_[0] == colour) {
+                    return;
+                }
+                // First, prefer collapsing into an empty slot if one
+                // exists — keeps user-deleted gaps intact rather
+                // than evicting populated entries.
+                std::size_t evict_idx = palette_colors_.size() - 1;
+                for (std::size_t i = 0; i < palette_colors_.size(); ++i) {
+                    if (palette_colors_[i][3] <= 0.0F) {
+                        evict_idx = i;
+                        break;
+                    }
+                }
+                for (std::size_t i = evict_idx; i > 0; --i) {
+                    palette_colors_[i] = palette_colors_[i - 1];
+                }
+                palette_colors_[0] = colour;
+            };
+
+            if (result.committed || result.palette_add_requested) {
+                push_to_palette({active_rgba[0], active_rgba[1], active_rgba[2], active_rgba[3]});
+            }
+            if (result.palette_delete_index >= 0 &&
+                result.palette_delete_index < static_cast<int>(palette_colors_.size())) {
+                palette_colors_[static_cast<std::size_t>(result.palette_delete_index)] = {
+                    0.0F, 0.0F, 0.0F, 0.0F};
+            }
+        }
+    }
+
     draw_widgets();
     refresh_window_title_if_changed();
 
