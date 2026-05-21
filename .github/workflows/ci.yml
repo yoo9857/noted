@@ -14,6 +14,14 @@ env:
   # Latest Vulkan SDK as of 2026-Q1. The version is bumped together with the
   # CMake find_package(Vulkan ...) version in the top-level CMakeLists.
   VULKAN_SDK_VERSION: 1.4.309.0
+  # Qt 6 — required for the v1.0 UI-framework migration (ADR 0034).
+  # Pinned to 6.8 LTS which is the long-term-support line as of 2026-Q1.
+  # Bumping requires updating both the workflow + the find_package
+  # version in the top-level CMakeLists.
+  QT_VERSION: 6.8.1
+  # qtdeclarative (Qt Quick / QML) ships in the base Qt package; only
+  # add-on modules go here. qtshadertools enables QML shader effects.
+  QT_MODULES: 'qtshadertools'
 
 jobs:
   build:
@@ -33,6 +41,13 @@ jobs:
         uses: humbletim/install-vulkan-sdk@v1.2
         with:
           version: ${{ env.VULKAN_SDK_VERSION }}
+          cache: true
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: ${{ env.QT_MODULES }}
           cache: true
 
       - name: Install Linux system deps
@@ -77,6 +92,13 @@ jobs:
           version: ${{ env.VULKAN_SDK_VERSION }}
           cache: true
 
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: ${{ env.QT_MODULES }}
+          cache: true
+
       - name: Install system deps
         run: |
           sudo apt-get update
@@ -116,6 +138,13 @@ jobs:
         uses: humbletim/install-vulkan-sdk@v1.2
         with:
           version: ${{ env.VULKAN_SDK_VERSION }}
+          cache: true
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: ${{ env.QT_MODULES }}
           cache: true
 
       - name: Install system deps
