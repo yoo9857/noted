@@ -25,7 +25,6 @@ struct MenuBarState {
     bool show_layer_panel{true};
     bool show_outline_panel{true};
     bool show_page_strip{true};
-    bool show_tool_palette{true};
     bool show_brush_options{true};
     bool show_selection_overlay{true};
     bool show_shape_overlay{true};

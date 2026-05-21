@@ -21,7 +21,6 @@
 #include "noted/ui/widget/shape_overlay.hpp"
 #include "noted/ui/widget/status_bar.hpp"
 #include "noted/ui/widget/text_overlay.hpp"
-#include "noted/ui/widget/tool_palette.hpp"
 
 #include "input/selection_tool_handler.hpp"
 #include "input/shape_tool_handler.hpp"
@@ -112,14 +111,10 @@ void UiPanels::draw() {
 
     noted::ui::widget::layer_panel(scene_.graph, &menu_state_.show_layer_panel);
 
-    // Tool palette — switching tools swaps the stroke engine's brush
-    // (Pen = default black, Eraser = paper colour). Other tools fall
-    // through to Pen until their behavioural integration lands.
-    auto tool_result =
-        noted::ui::widget::tool_palette(tools_.active, &menu_state_.show_tool_palette);
-    if (tool_result.switch_request && *tool_result.switch_request != tools_.active) {
-        tools_.active = *tool_result.switch_request;
-    }
+    // Tool switching is owned by the 12 o'clock floating toolbar
+    // (`ui::widget::top_toolbar`) wired in App::on_frame after Phase 3
+    // of ADR 0034. The left-rail `tool_palette` widget was retired in
+    // the same PR — no legacy parallel UI surface.
     // Brush options panel — slider / colour-picker writes mutate
     // `tools_.pen` / `tools_.eraser` in place. The "Pick image…"
     // button on the Image-tool section is signalled back via the
