@@ -29,12 +29,15 @@
 //   - Per-image rotation / shear / crop — once a real image is
 //     loaded, these become non-trivial; punted until then.
 //
-// Persistence: App-owned `vector<ImagePrimitive>` for now (matches
-// shapes / texts). Graduates to `Document::images()` with
-// `AddImageCommand` / `RemoveImageCommand` in the persistence
-// consolidation PR that follows B.7.
+// Persistence: `Document::images()` owns the primitive vector; mutation
+// via `Add/RemoveImageCommand` (PR #88). B.7.b.1 extends every primitive
+// with an `AssetId` that resolves into `Document::image_assets()` — the
+// raster bytes themselves arrive in B.7.b.2 (file picker + decode) and
+// land in the `.noted` zip alongside `document.json` in B.7.b.3.
 
 #include <cstdint>
+
+#include "noted/domain/document/asset_id.hpp"
 
 namespace noted::domain::tool {
 
@@ -64,9 +67,8 @@ struct ImageOptions {
     [[nodiscard]] auto operator==(const ImageOptions&) const noexcept -> bool = default;
 };
 
-// One committed image — what `image_overlay` renders + what a future
-// `.noted` writer would persist. Value type; cheap to store in a
-// `std::vector`.
+// One committed image — what `image_overlay` renders + what
+// `.noted` v6 persists. Value type; cheap to store in a `std::vector`.
 struct ImagePrimitive {
     // Top-left anchor in canvas pixels.
     double x{0.0};
@@ -85,6 +87,14 @@ struct ImagePrimitive {
     float b{1.0F};
     float a{1.0F};
 
+    // Handle into `Document::image_assets()`. `invalid_asset_id` (= 0)
+    // means "placeholder, no decoded bitmap yet" — the v0.x render
+    // path falls back to the dashed-border + label drawing. B.7.b.2
+    // populates this field when the file picker successfully decodes
+    // an image; B.7.b.3 round-trips the asset bytes through the
+    // `.noted` zip keyed by this id.
+    noted::domain::AssetId asset_id{noted::domain::invalid_asset_id};
+
     [[nodiscard]] auto is_degenerate() const noexcept -> bool {
         return width_px < 1.0F || height_px < 1.0F;
     }
@@ -93,13 +103,18 @@ struct ImagePrimitive {
 };
 
 // Build an `ImagePrimitive` from a commit position + the snapshotted
-// options. Width/height clamped to a 1 px floor; NaN / negative
-// collapse to 1.
+// options + an optional asset id. Width/height clamped to a 1 px
+// floor; NaN / negative collapse to 1.
+//
+// `asset_id` defaults to `invalid_asset_id` so the placeholder
+// commit path (no file picker yet) keeps working unchanged.
 //
 // Position is the **top-left** anchor — same convention as
 // `TextPrimitive` and matches ImGui's draw-list rect API.
-[[nodiscard]] auto image_primitive_from(double x,
-                                        double y,
-                                        const ImageOptions& opt) noexcept -> ImagePrimitive;
+[[nodiscard]] auto image_primitive_from(
+    double x,
+    double y,
+    const ImageOptions& opt,
+    noted::domain::AssetId asset_id = noted::domain::invalid_asset_id) noexcept -> ImagePrimitive;
 
 }  // namespace noted::domain::tool

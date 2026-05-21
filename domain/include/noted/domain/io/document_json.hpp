@@ -12,34 +12,26 @@
 // Schema summary (see ADR 0025 for the full spec):
 //
 //   {
-//     "version": 3,
+//     "version": 6,
 //     "root": <BlockId>,                 // 0 when document is empty
 //     "blocks": [ ... ],                 // same as prior versions
 //     "pages": { ... },                  // same as v2
-//     "shapes": [                        // v3+; optional (loader treats absent as empty)
-//       {
-//         "k":   <int>,                  // ShapeKind ordinal (rectangle=0, ellipse=1)
-//         "x0":  <float>, "y0": <float>,
-//         "x1":  <float>, "y1": <float>,
-//         "sw":  <float>,                // stroke_width_px
-//         "r":   <float>, "g": <float>, "b": <float>, "a": <float>
-//       },
-//       ...
-//     ],
-//     "texts": [                         // v4+; optional (loader treats absent as empty)
-//       {
-//         "x":   <float>, "y": <float>,
-//         "s":   <string>,               // content (UTF-8)
-//         "fs":  <float>,                // font_size_px (>= 1)
-//         "r":   <float>, "g": <float>, "b": <float>, "a": <float>
-//       },
-//       ...
-//     ],
-//     "images": [                        // v5+; optional (loader treats absent as empty)
+//     "shapes": [ ... ],                 // same as v3
+//     "texts":  [ ... ],                 // same as v4
+//     "images": [                        // v5+; v6 adds the "aid" field
 //       {
 //         "x":   <float>, "y": <float>,
 //         "w":   <float>, "h": <float>,  // dimensions in canvas px (>= 1)
-//         "r":   <float>, "g": <float>, "b": <float>, "a": <float>
+//         "r":   <float>, "g": <float>, "b": <float>, "a": <float>,
+//         "aid": <uint64>                // v6+; AssetId into image_assets, 0 = placeholder
+//       },
+//       ...
+//     ],
+//     "image_assets": [                  // v6+; optional (loader treats absent as empty)
+//       {
+//         "id":  <uint64>,               // monotonically allocated, != 0
+//         "src": <string>,               // original filesystem path (may be empty)
+//         "iw":  <uint32>, "ih": <uint32> // intrinsic decoded dimensions (0 if not decoded)
 //       },
 //       ...
 //     ]
@@ -51,6 +43,10 @@
 //   - v3: adds `shapes`. v1/v2 files load with an empty shape list.
 //   - v4: adds `texts`. v1/v2/v3 files load with an empty text list.
 //   - v5: adds `images`. v1..v4 files load with an empty image list.
+//   - v6: adds `aid` on images + `image_assets` table. v5 files load
+//         with every image's asset_id = invalid_asset_id (= 0) and an
+//         empty `image_assets` registry. Strict referential integrity
+//         on v6+: every non-zero `aid` must resolve in `image_assets`.
 //   Writer always emits the current version.
 //
 // The payload object's keys depend on the block's kind. See ADR 0025
@@ -76,7 +72,7 @@ namespace noted::domain::io {
 
 // On-disk schema version. Writer always emits this; reader accepts
 // this value AND every prior supported version.
-inline constexpr int kDocumentJsonVersion = 5;
+inline constexpr int kDocumentJsonVersion = 6;
 inline constexpr int kDocumentJsonMinReadableVersion = 1;
 
 // Serialize `doc` to JSON. Output is pretty-printed with 2-space

@@ -38,6 +38,8 @@
 #include <variant>
 #include <vector>
 
+#include "noted/domain/document/asset_id.hpp"
+#include "noted/domain/document/image_asset_registry.hpp"
 #include "noted/domain/tool/image_input.hpp"
 #include "noted/domain/tool/shape_drag.hpp"
 #include "noted/domain/tool/text_input.hpp"
@@ -49,12 +51,10 @@ namespace noted::domain {
 using BlockId = std::uint64_t;
 inline constexpr BlockId invalid_block_id = 0;
 
-// Side-store identifiers. The `Document` only stores the ID; the host
-// application (or the LayerGraph store / AssetRegistry) owns the
-// referenced bytes.
-using AssetId = std::uint64_t;
-inline constexpr AssetId invalid_asset_id = 0;
-
+// LayerGraph side-store identifier — separate registry, not covered by
+// this PR (the `LayerGraphId` is dereferenced through the future
+// LayerGraph store, not through the document). Kept here because
+// CanvasPayload + ImagePayload both reference it inline.
 using LayerGraphId = std::uint64_t;
 inline constexpr LayerGraphId invalid_layer_graph_id = 0;
 
@@ -396,6 +396,27 @@ public:
 
     void replace_images(std::vector<noted::domain::tool::ImagePrimitive> images) noexcept;
 
+    // ---- Image assets ----------------------------------------------------
+    //
+    // Side-store mapping `AssetId` → asset metadata. `ImagePrimitive`s
+    // carry an `asset_id` that resolves into this registry. v6 schema
+    // adds a top-level `"image_assets"` array; loader treats absent
+    // (v1..v5) as an empty registry.
+    //
+    // Read-only access via `image_assets()`; mutation routed through
+    // the registry directly — Commands wrapping asset lifecycle land
+    // in B.7.b.2 alongside the file picker that introduces non-empty
+    // assets in practice.
+
+    [[nodiscard]] auto image_assets() const noexcept -> const ImageAssetRegistry& {
+        return image_assets_;
+    }
+
+    [[nodiscard]] auto image_assets_mut() noexcept -> ImageAssetRegistry& { return image_assets_; }
+
+    // Replace the entire registry. **File-format loader path only.**
+    void replace_image_assets(ImageAssetRegistry registry) noexcept;
+
 private:
     // Detach `id` from its parent's children list, leaving the node
     // itself otherwise intact. Returns the (parent, index) it was
@@ -416,6 +437,7 @@ private:
     std::vector<noted::domain::tool::ShapePrimitive> shapes_{};
     std::vector<noted::domain::tool::TextPrimitive> texts_{};
     std::vector<noted::domain::tool::ImagePrimitive> images_{};
+    ImageAssetRegistry image_assets_{};
 };
 
 }  // namespace noted::domain

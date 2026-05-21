@@ -5,8 +5,11 @@
 
 #include <gtest/gtest.h>
 
+#include "noted/domain/document/asset_id.hpp"
+
 namespace {
 
+using noted::domain::invalid_asset_id;
 using noted::domain::tool::image_primitive_from;
 using noted::domain::tool::ImageOptions;
 using noted::domain::tool::ImagePrimitive;
@@ -138,5 +141,28 @@ TEST(ImageOptionsEquality, TintDifferenceCompares) {
     ImageOptions a{};
     ImageOptions b{};
     b.r = 0.0F;
+    EXPECT_NE(a, b);
+}
+
+// ---- asset_id snapshot ----------------------------------------------------
+
+TEST(ImagePrimitiveAssetId, DefaultIsInvalid) {
+    ImagePrimitive p{};
+    EXPECT_EQ(p.asset_id, invalid_asset_id);
+}
+
+TEST(ImagePrimitiveAssetId, FromOptionsWithoutAssetIdDefaultsToInvalid) {
+    const auto p = image_primitive_from(0.0, 0.0, ImageOptions{});
+    EXPECT_EQ(p.asset_id, invalid_asset_id);
+}
+
+TEST(ImagePrimitiveAssetId, FromOptionsSnapshotsAssetId) {
+    const auto p = image_primitive_from(10.0, 20.0, ImageOptions{}, /*asset_id=*/42U);
+    EXPECT_EQ(p.asset_id, 42U);
+}
+
+TEST(ImagePrimitiveEquality, AssetIdDifferenceCompares) {
+    ImagePrimitive a = image_primitive_from(0.0, 0.0, ImageOptions{}, /*asset_id=*/1U);
+    ImagePrimitive b = image_primitive_from(0.0, 0.0, ImageOptions{}, /*asset_id=*/2U);
     EXPECT_NE(a, b);
 }

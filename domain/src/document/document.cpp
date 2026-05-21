@@ -298,8 +298,10 @@ void Document::clear() noexcept {
     shapes_.clear();
     texts_.clear();
     images_.clear();
+    image_assets_.clear();
     // next_id_ is intentionally NOT reset — IDs stay monotonic across
-    // clears so any history / undo references survive the wipe.
+    // clears so any history / undo references survive the wipe. The
+    // same rule applies to the registry's internal `next_id_`.
 }
 
 auto Document::add_page(float w,
@@ -431,6 +433,10 @@ auto Document::insert_image(std::size_t index,
 
 void Document::replace_images(std::vector<noted::domain::tool::ImagePrimitive> images) noexcept {
     images_ = std::move(images);
+}
+
+void Document::replace_image_assets(ImageAssetRegistry registry) noexcept {
+    image_assets_ = std::move(registry);
 }
 
 auto Document::move_to(BlockId id, BlockId new_parent, std::size_t index) -> Result<void> {

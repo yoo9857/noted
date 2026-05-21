@@ -330,14 +330,15 @@ TEST(DocumentJson, EmittedJsonContainsVersionAndKindOrdinal) {
     (void) h;
     const auto text = document_to_json(src);
     // The output should include the wire-stable version + heading ordinal (2).
-    EXPECT_NE(text.find("\"version\": 5"), std::string::npos);
+    EXPECT_NE(text.find("\"version\": 6"), std::string::npos);
     EXPECT_NE(text.find("\"kind\": 0"), std::string::npos);  // group
     EXPECT_NE(text.find("\"kind\": 2"), std::string::npos);  // heading
-    // v2+ pages, v3+ shapes, v4+ texts, v5+ images — writer emits all four.
+    // v2..v6 — writer emits every side-table even when empty.
     EXPECT_NE(text.find("\"pages\""), std::string::npos);
     EXPECT_NE(text.find("\"shapes\""), std::string::npos);
     EXPECT_NE(text.find("\"texts\""), std::string::npos);
     EXPECT_NE(text.find("\"images\""), std::string::npos);
+    EXPECT_NE(text.find("\"image_assets\""), std::string::npos);
 }
 
 // ---- v1 back-compat --------------------------------------------------------
@@ -688,4 +689,131 @@ TEST(DocumentJsonReject, ImageMissingRequiredKey) {
         "images": [{"x": 0, "y": 0, "w": 1}]
     })";
     EXPECT_FALSE(document_from_json(bad));
+}
+
+// ---- v6 image_assets round-trip + back-compat ------------------------------
+
+TEST(DocumentJson, V6ImageAssetRoundTrip) {
+    Document src;
+    const auto id =
+        src.image_assets_mut().allocate(noted::domain::ImageAsset{.id = 0,
+                                                                  .source_path = "C:/img/photo.png",
+                                                                  .intrinsic_w_px = 1920,
+                                                                  .intrinsic_h_px = 1080});
+
+    noted::domain::tool::ImagePrimitive im{};
+    im.x = 7.0;
+    im.y = 9.0;
+    im.width_px = 50.0F;
+    im.height_px = 30.0F;
+    im.r = 1.0F;
+    im.g = 1.0F;
+    im.b = 1.0F;
+    im.a = 1.0F;
+    im.asset_id = id;
+    ASSERT_TRUE(src.add_image(im));
+
+    auto loaded = document_from_json(document_to_json(src));
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->image_assets().size(), 1U);
+    const auto* round = loaded->image_assets().find(id);
+    ASSERT_NE(round, nullptr);
+    EXPECT_EQ(round->source_path, "C:/img/photo.png");
+    EXPECT_EQ(round->intrinsic_w_px, 1920U);
+    EXPECT_EQ(round->intrinsic_h_px, 1080U);
+
+    ASSERT_EQ(loaded->images().size(), 1U);
+    EXPECT_EQ(loaded->images()[0].asset_id, id);
+}
+
+TEST(DocumentJson, V5FileLoadsWithEmptyRegistryAndInvalidAssetIds) {
+    // No "image_assets" key, image item has no "aid" key — both
+    // optional in v5. Loader must populate invalid_asset_id + an
+    // empty registry.
+    const auto v5 = R"({
+        "version": 5, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [],
+        "images": [{"x": 1, "y": 2, "w": 3, "h": 4,
+                    "r": 1, "g": 1, "b": 1, "a": 1}]
+    })";
+    auto loaded = document_from_json(v5);
+    ASSERT_TRUE(loaded);
+    EXPECT_TRUE(loaded->image_assets().empty());
+    ASSERT_EQ(loaded->images().size(), 1U);
+    EXPECT_EQ(loaded->images()[0].asset_id, noted::domain::invalid_asset_id);
+}
+
+TEST(DocumentJsonReject, ImageAssetUnknownKey) {
+    const auto bad = R"({
+        "version": 6, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [], "images": [],
+        "image_assets": [{"id": 1, "src": "x", "iw": 0, "ih": 0, "extra": true}]
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+TEST(DocumentJsonReject, ImageAssetMissingRequiredKey) {
+    const auto bad = R"({
+        "version": 6, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [], "images": [],
+        "image_assets": [{"id": 1, "src": "x"}]
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+TEST(DocumentJsonReject, ImageAssetDuplicateId) {
+    const auto bad = R"({
+        "version": 6, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [], "images": [],
+        "image_assets": [
+            {"id": 1, "src": "a", "iw": 0, "ih": 0},
+            {"id": 1, "src": "b", "iw": 0, "ih": 0}
+        ]
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+TEST(DocumentJsonReject, ImageAssetIdZero) {
+    const auto bad = R"({
+        "version": 6, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [], "images": [],
+        "image_assets": [{"id": 0, "src": "x", "iw": 0, "ih": 0}]
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+TEST(DocumentJsonReject, ImageAidWithoutMatchingAsset) {
+    // image references aid=5 but the registry doesn't contain it.
+    const auto bad = R"({
+        "version": 6, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [],
+        "images": [{"x": 0, "y": 0, "w": 1, "h": 1,
+                    "r": 1, "g": 1, "b": 1, "a": 1, "aid": 5}],
+        "image_assets": []
+    })";
+    auto loaded = document_from_json(bad);
+    EXPECT_FALSE(loaded);
+}
+
+TEST(DocumentJson, ImageAidZeroAcceptedWithEmptyRegistry) {
+    // aid == invalid_asset_id (0) is the placeholder sentinel —
+    // referential integrity does NOT require an entry for it.
+    const auto ok = R"({
+        "version": 6, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [],
+        "images": [{"x": 0, "y": 0, "w": 1, "h": 1,
+                    "r": 1, "g": 1, "b": 1, "a": 1, "aid": 0}],
+        "image_assets": []
+    })";
+    auto loaded = document_from_json(ok);
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->images().size(), 1U);
+    EXPECT_EQ(loaded->images()[0].asset_id, noted::domain::invalid_asset_id);
 }

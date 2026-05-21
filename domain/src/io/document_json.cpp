@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 
 #include "noted/domain/document/document.hpp"
+#include "noted/domain/document/image_asset_registry.hpp"
 
 namespace noted::domain::io {
 
@@ -26,8 +27,8 @@ using json = nlohmann::json;
 // Top-level keys we recognize. Strict parser rejects any other key.
 // `pages` is optional for v1 (back-compat) — its presence is not
 // itself an error at any version.
-constexpr std::array<std::string_view, 7> kTopLevelKeys{
-    "version", "root", "blocks", "pages", "shapes", "texts", "images"};
+constexpr std::array<std::string_view, 8> kTopLevelKeys{
+    "version", "root", "blocks", "pages", "shapes", "texts", "images", "image_assets"};
 
 // Per-pages-object keys.
 constexpr std::array<std::string_view, 2> kPagesKeys{"gap_px", "items"};
@@ -43,8 +44,14 @@ constexpr std::array<std::string_view, 10> kShapeItemKeys{
 // Per-text-item keys. v4 schema.
 constexpr std::array<std::string_view, 8> kTextItemKeys{"x", "y", "s", "fs", "r", "g", "b", "a"};
 
-// Per-image-item keys. v5 schema.
-constexpr std::array<std::string_view, 8> kImageItemKeys{"x", "y", "w", "h", "r", "g", "b", "a"};
+// Per-image-item keys. v5 schema = first 8; v6 adds "aid". `aid` is
+// optional on every version (absent → invalid_asset_id) so v5 files
+// load cleanly into v6 readers without a separate key table.
+constexpr std::array<std::string_view, 9> kImageItemKeys{
+    "x", "y", "w", "h", "r", "g", "b", "a", "aid"};
+
+// Per-image-asset-item keys. v6 schema.
+constexpr std::array<std::string_view, 4> kImageAssetItemKeys{"id", "src", "iw", "ih"};
 
 // Per-block keys we recognize.
 constexpr std::array<std::string_view, 7> kBlockKeys{
@@ -343,6 +350,20 @@ template <typename T>
             {"g", im.g},
             {"b", im.b},
             {"a", im.a},
+            {"aid", im.asset_id},
+        });
+    }
+    return arr;
+}
+
+[[nodiscard]] auto serialize_image_assets(const ImageAssetRegistry& registry) -> json {
+    json arr = json::array();
+    for (const auto& asset : registry.assets()) {
+        arr.push_back({
+            {"id", asset.id},
+            {"src", asset.source_path},
+            {"iw", asset.intrinsic_w_px},
+            {"ih", asset.intrinsic_h_px},
         });
     }
     return arr;
@@ -423,6 +444,7 @@ auto document_to_json(const Document& doc) -> std::string {
     out["shapes"] = serialize_shapes(doc.shapes());
     out["texts"] = serialize_texts(doc.texts());
     out["images"] = serialize_images(doc.images());
+    out["image_assets"] = serialize_image_assets(doc.image_assets());
 
     // 2-space indent — readable diffs at small document scale.
     return out.dump(2);
@@ -820,9 +842,91 @@ auto document_from_json(std::string_view json_text) -> Result<Document> {
             im.g = *g;
             im.b = *b;
             im.a = *a;
+            // v6+: optional `aid` field. Absent (v5 files) ⇒
+            // `invalid_asset_id`, which is the placeholder sentinel.
+            if (item.contains("aid")) {
+                auto aid = require<noted::domain::AssetId>(item, "aid", context);
+                if (!aid) {
+                    return std::unexpected(std::move(aid).error());
+                }
+                im.asset_id = *aid;
+            }
             images.push_back(im);
         }
         doc.replace_images(std::move(images));
+    }
+
+    // Image assets — v6+. Optional at every version; absent ⇒ empty
+    // registry. After the registry is built, enforce referential
+    // integrity: every non-zero `asset_id` on an `ImagePrimitive`
+    // must resolve to an asset in the registry. v5 files never set
+    // a non-zero `aid`, so they pass trivially.
+    if (root_obj.contains("image_assets")) {
+        const auto& assets_arr = root_obj.at("image_assets");
+        if (!assets_arr.is_array()) {
+            return std::unexpected(
+                noted::make_error(noted::ErrorCode::invalid_argument,
+                                  "document_from_json: 'image_assets' is not an array"));
+        }
+        ImageAssetRegistry registry;
+        for (std::size_t i = 0; i < assets_arr.size(); ++i) {
+            const std::string context = "image_assets[" + std::to_string(i) + "]";
+            const auto& item = assets_arr[i];
+            if (!item.is_object()) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": not an object"));
+            }
+            if (auto bad = find_unknown_key(item, kImageAssetItemKeys); !bad.empty()) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": unknown key '" + bad + "'"));
+            }
+            auto id = require<noted::domain::AssetId>(item, "id", context);
+            auto src = require<std::string>(item, "src", context);
+            auto iw = require<std::uint32_t>(item, "iw", context);
+            auto ih = require<std::uint32_t>(item, "ih", context);
+            if (!id) {
+                return std::unexpected(std::move(id).error());
+            }
+            if (!src) {
+                return std::unexpected(std::move(src).error());
+            }
+            if (!iw) {
+                return std::unexpected(std::move(iw).error());
+            }
+            if (!ih) {
+                return std::unexpected(std::move(ih).error());
+            }
+            ImageAsset asset{};
+            asset.id = *id;
+            asset.source_path = std::move(*src);
+            asset.intrinsic_w_px = *iw;
+            asset.intrinsic_h_px = *ih;
+            auto inserted = registry.insert(std::move(asset));
+            if (!inserted) {
+                // Re-wrap the registry-side error with the loader's
+                // context so the user sees which array index was
+                // duplicated / invalid.
+                return std::unexpected(noted::make_error(
+                    noted::ErrorCode::invalid_argument, context + ": " + inserted.error().message));
+            }
+        }
+        doc.replace_image_assets(std::move(registry));
+    }
+
+    // Referential integrity — runs regardless of whether
+    // `image_assets` was present (a v5 file with no registry and
+    // implicit aid=0 everywhere still has to satisfy this check).
+    for (std::size_t i = 0; i < doc.images().size(); ++i) {
+        const auto& im = doc.images()[i];
+        if (im.asset_id == noted::domain::invalid_asset_id) {
+            continue;  // placeholder — no registry lookup required
+        }
+        if (doc.image_assets().find(im.asset_id) == nullptr) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::invalid_state,
+                "document_from_json: images[" + std::to_string(i) + "].aid " +
+                    std::to_string(im.asset_id) + " does not resolve in image_assets"));
+        }
     }
     return doc;
 }
