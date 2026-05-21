@@ -46,6 +46,33 @@ option(NOTED_ENABLE_TRACY        "Enable Tracy profiler instrumentation" OFF)
 # ---- External dependencies ----------------------------------------------
 find_package(Vulkan 1.3 REQUIRED)
 
+# Qt 6 — Phase 0 of the v1.0 UI-framework migration per ADR 0034.
+# This PR adds Qt as a required dependency and links it into `noted_app`,
+# but does NOT yet use any Qt API: Phase 1 (GLFW → QWindow shell swap)
+# is the first phase that introduces Qt-using code. Adding the link
+# now lets every subsequent phase build incrementally without
+# touching CMake.
+#
+# Local dev: install Qt 6.7+ via aqt or the Qt online installer, then
+# point CMAKE_PREFIX_PATH at the kit's lib/cmake/Qt6 directory (e.g.
+# `C:/Qt/6.8.1/msvc2022_64`). See `docs/SETUP.md`.
+#
+# CI: provisioned via `jurplel/install-qt-action` in `.github/
+# workflows/ci.yml`. CMAKE_PREFIX_PATH is set automatically by the
+# action.
+#
+# Qt's CMake integration triggers MOC (meta-object compiler) + RCC
+# (resource compiler) + UIC (UI compiler) automatically when source
+# files contain Q_OBJECT, .qrc, or .ui inputs. Enabling AUTOMOC /
+# AUTORCC / AUTOUIC here once means every Qt-using target downstream
+# picks them up without per-target boilerplate.
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_AUTOUIC ON)
+find_package(Qt6 6.7
+    COMPONENTS Core Gui Quick QuickControls2
+    REQUIRED)
+
 include(FetchContent)
 
 # Every FetchContent_Declare below uses SYSTEM so the dependency's headers

@@ -30,6 +30,14 @@ target_link_libraries(noted_app PRIVATE
     noted::ui
     imgui
     nlohmann_json::nlohmann_json
+    # Qt 6 — Phase 0 of ADR 0034. Linked but not yet used; phase 1
+    # (QGuiApplication + QWindow shell swap) is the first PR with
+    # Qt-using code. Linking up front lets every subsequent phase
+    # build incrementally without touching CMake.
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Quick
+    Qt6::QuickControls2
 )
 
 # Ensure the .spv files are built before noted_app links so they're on disk
