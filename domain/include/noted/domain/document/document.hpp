@@ -45,6 +45,7 @@
 #include "noted/domain/tool/text_input.hpp"
 #include "noted/engine/canvas/page.hpp"
 #include "noted/engine/error/error.hpp"
+#include "noted/engine/stroke/stroke_geometry.hpp"
 
 namespace noted::domain {
 
@@ -417,6 +418,35 @@ public:
     // Replace the entire registry. **File-format loader path only.**
     void replace_image_assets(ImageAssetRegistry registry) noexcept;
 
+    // ---- Strokes ---------------------------------------------------------
+    //
+    // Vector-ink strokes (centerline + brush style + draw mode) live
+    // here as of `.noted` v7 — promoted from the engine's internal
+    // vector so they participate in undo/redo, save/load, and CRDT
+    // replication on the same edge as every other primitive. Same
+    // ownership / mutation contract as shapes / texts / images.
+    //
+    // The StrokeEngine still owns the **in-flight** stroke (the one
+    // being drawn between press and release) — it lives in the
+    // engine's transient `current_stroke_` and never visits the
+    // Document until the user releases. On release, the engine
+    // emits an `AddStrokeCommand` through its `CommandSink` and
+    // the resulting stroke lands in this list.
+
+    [[nodiscard]] auto strokes() const noexcept -> const std::vector<noted::stroke::Stroke>& {
+        return strokes_;
+    }
+
+    [[nodiscard]] auto add_stroke(noted::stroke::Stroke stroke) -> Result<std::size_t>;
+
+    auto remove_stroke(std::size_t index) -> Result<void>;
+
+    [[nodiscard]] auto insert_stroke(std::size_t index,
+                                     noted::stroke::Stroke stroke) -> Result<std::size_t>;
+
+    // Replace the entire strokes list. **File-format loader path only.**
+    void replace_strokes(std::vector<noted::stroke::Stroke> strokes) noexcept;
+
 private:
     // Detach `id` from its parent's children list, leaving the node
     // itself otherwise intact. Returns the (parent, index) it was
@@ -438,6 +468,7 @@ private:
     std::vector<noted::domain::tool::TextPrimitive> texts_{};
     std::vector<noted::domain::tool::ImagePrimitive> images_{};
     ImageAssetRegistry image_assets_{};
+    std::vector<noted::stroke::Stroke> strokes_{};
 };
 
 }  // namespace noted::domain

@@ -34,6 +34,20 @@
 //         "iw":  <uint32>, "ih": <uint32> // intrinsic decoded dimensions (0 if not decoded)
 //       },
 //       ...
+//     ],
+//     "strokes": [                       // v7+; optional (loader treats absent as empty)
+//       {
+//         "mode":    <int>,              // DrawMode ordinal (draw=0, erase=1)
+//         "samples": [x0, y0, p0, x1, y1, p1, ...],  // flat float array (x, y, pressure triples)
+//         "style": {
+//           "min_r": <float>, "max_r": <float>,
+//           "soft":  <float>, "ag":    <float>,
+//           "r":     <float>, "g":     <float>,
+//           "b":     <float>, "a":     <float>,
+//           "stab":  <float>             // input-stabilizer weight
+//         }
+//       },
+//       ...
 //     ]
 //   }
 //
@@ -47,6 +61,10 @@
 //         with every image's asset_id = invalid_asset_id (= 0) and an
 //         empty `image_assets` registry. Strict referential integrity
 //         on v6+: every non-zero `aid` must resolve in `image_assets`.
+//   - v7: adds `strokes`. v1..v6 files load with an empty stroke list.
+//         Sample arrays use a flat float layout (x, y, pressure
+//         triples) for compactness — a 500-sample stroke is ~12 KB
+//         smaller than the equivalent array-of-objects.
 //   Writer always emits the current version.
 //
 // The payload object's keys depend on the block's kind. See ADR 0025
@@ -72,7 +90,7 @@ namespace noted::domain::io {
 
 // On-disk schema version. Writer always emits this; reader accepts
 // this value AND every prior supported version.
-inline constexpr int kDocumentJsonVersion = 6;
+inline constexpr int kDocumentJsonVersion = 7;
 inline constexpr int kDocumentJsonMinReadableVersion = 1;
 
 // Serialize `doc` to JSON. Output is pretty-printed with 2-space

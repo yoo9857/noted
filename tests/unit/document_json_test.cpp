@@ -330,15 +330,16 @@ TEST(DocumentJson, EmittedJsonContainsVersionAndKindOrdinal) {
     (void) h;
     const auto text = document_to_json(src);
     // The output should include the wire-stable version + heading ordinal (2).
-    EXPECT_NE(text.find("\"version\": 6"), std::string::npos);
+    EXPECT_NE(text.find("\"version\": 7"), std::string::npos);
     EXPECT_NE(text.find("\"kind\": 0"), std::string::npos);  // group
     EXPECT_NE(text.find("\"kind\": 2"), std::string::npos);  // heading
-    // v2..v6 — writer emits every side-table even when empty.
+    // v2..v7 — writer emits every side-table even when empty.
     EXPECT_NE(text.find("\"pages\""), std::string::npos);
     EXPECT_NE(text.find("\"shapes\""), std::string::npos);
     EXPECT_NE(text.find("\"texts\""), std::string::npos);
     EXPECT_NE(text.find("\"images\""), std::string::npos);
     EXPECT_NE(text.find("\"image_assets\""), std::string::npos);
+    EXPECT_NE(text.find("\"strokes\""), std::string::npos);
 }
 
 // ---- v1 back-compat --------------------------------------------------------
@@ -816,4 +817,108 @@ TEST(DocumentJson, ImageAidZeroAcceptedWithEmptyRegistry) {
     ASSERT_TRUE(loaded);
     ASSERT_EQ(loaded->images().size(), 1U);
     EXPECT_EQ(loaded->images()[0].asset_id, noted::domain::invalid_asset_id);
+}
+
+// ---- v7 strokes round-trip + back-compat ----------------------------------
+
+TEST(DocumentJson, V7StrokesRoundTrip) {
+    Document src;
+    noted::stroke::Stroke s{};
+    s.samples = {{.x = 10.0F, .y = 20.0F, .pressure = 1.0F},
+                 {.x = 30.0F, .y = 40.0F, .pressure = 0.5F},
+                 {.x = 50.0F, .y = 60.0F, .pressure = 0.8F}};
+    s.style.min_radius_px = 3.0F;
+    s.style.max_radius_px = 12.0F;
+    s.style.softness_ratio = 0.15F;
+    s.style.alpha_gamma = 1.5F;
+    s.style.r = 0.7F;
+    s.style.g = 0.3F;
+    s.style.b = 0.1F;
+    s.style.a = 0.9F;
+    s.style.stabilizer = 0.4F;
+    s.mode = noted::stroke::DrawMode::erase;
+    ASSERT_TRUE(src.add_stroke(s));
+
+    auto loaded = document_from_json(document_to_json(src));
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->strokes().size(), 1U);
+    const auto& g = loaded->strokes()[0];
+    ASSERT_EQ(g.samples.size(), 3U);
+    EXPECT_FLOAT_EQ(g.samples[0].x, 10.0F);
+    EXPECT_FLOAT_EQ(g.samples[1].pressure, 0.5F);
+    EXPECT_FLOAT_EQ(g.samples[2].y, 60.0F);
+    EXPECT_FLOAT_EQ(g.style.min_radius_px, 3.0F);
+    EXPECT_FLOAT_EQ(g.style.max_radius_px, 12.0F);
+    EXPECT_FLOAT_EQ(g.style.softness_ratio, 0.15F);
+    EXPECT_FLOAT_EQ(g.style.alpha_gamma, 1.5F);
+    EXPECT_FLOAT_EQ(g.style.r, 0.7F);
+    EXPECT_FLOAT_EQ(g.style.a, 0.9F);
+    EXPECT_FLOAT_EQ(g.style.stabilizer, 0.4F);
+    EXPECT_EQ(g.mode, noted::stroke::DrawMode::erase);
+}
+
+TEST(DocumentJson, V6FileLoadsWithEmptyStrokes) {
+    const auto v6 = R"({
+        "version": 6, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [], "images": [],
+        "image_assets": []
+    })";
+    auto loaded = document_from_json(v6);
+    ASSERT_TRUE(loaded);
+    EXPECT_TRUE(loaded->strokes().empty());
+}
+
+TEST(DocumentJsonReject, StrokesSamplesLengthNotMultipleOf3) {
+    const auto bad = R"({
+        "version": 7, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [], "images": [], "image_assets": [],
+        "strokes": [{
+            "mode": 0,
+            "samples": [1.0, 2.0],
+            "style": {"min_r": 2, "max_r": 10, "soft": 0.2, "ag": 1.8,
+                      "r": 0, "g": 0, "b": 0, "a": 1, "stab": 0.5}
+        }]
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+TEST(DocumentJsonReject, StrokesModeOutOfRange) {
+    const auto bad = R"({
+        "version": 7, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [], "images": [], "image_assets": [],
+        "strokes": [{
+            "mode": 99,
+            "samples": [0, 0, 1],
+            "style": {"min_r": 2, "max_r": 10, "soft": 0.2, "ag": 1.8,
+                      "r": 0, "g": 0, "b": 0, "a": 1, "stab": 0.5}
+        }]
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+TEST(DocumentJson, V7LoaderClampsCorruptStyle) {
+    // Negative radii / non-positive gamma get clamped at the boundary
+    // so a hostile file can't poison the renderer.
+    const auto bad_style = R"({
+        "version": 7, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [], "images": [], "image_assets": [],
+        "strokes": [{
+            "mode": 0,
+            "samples": [0, 0, 1, 10, 0, 1],
+            "style": {"min_r": -5, "max_r": -1, "soft": 0.2, "ag": -2.0,
+                      "r": 0, "g": 0, "b": 0, "a": 1, "stab": 2.0}
+        }]
+    })";
+    auto loaded = document_from_json(bad_style);
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->strokes().size(), 1U);
+    const auto& s = loaded->strokes()[0];
+    EXPECT_GE(s.style.min_radius_px, 0.5F);
+    EXPECT_GE(s.style.max_radius_px, s.style.min_radius_px);
+    EXPECT_GT(s.style.alpha_gamma, 0.0F);
+    EXPECT_LE(s.style.stabilizer, 0.95F);
 }

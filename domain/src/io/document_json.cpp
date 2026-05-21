@@ -27,8 +27,8 @@ using json = nlohmann::json;
 // Top-level keys we recognize. Strict parser rejects any other key.
 // `pages` is optional for v1 (back-compat) — its presence is not
 // itself an error at any version.
-constexpr std::array<std::string_view, 8> kTopLevelKeys{
-    "version", "root", "blocks", "pages", "shapes", "texts", "images", "image_assets"};
+constexpr std::array<std::string_view, 9> kTopLevelKeys{
+    "version", "root", "blocks", "pages", "shapes", "texts", "images", "image_assets", "strokes"};
 
 // Per-pages-object keys.
 constexpr std::array<std::string_view, 2> kPagesKeys{"gap_px", "items"};
@@ -52,6 +52,13 @@ constexpr std::array<std::string_view, 9> kImageItemKeys{
 
 // Per-image-asset-item keys. v6 schema.
 constexpr std::array<std::string_view, 4> kImageAssetItemKeys{"id", "src", "iw", "ih"};
+
+// Per-stroke-item keys. v7 schema.
+constexpr std::array<std::string_view, 3> kStrokeItemKeys{"mode", "samples", "style"};
+
+// Per-style-object keys (inside a stroke). v7 schema.
+constexpr std::array<std::string_view, 9> kStrokeStyleKeys{
+    "min_r", "max_r", "soft", "ag", "r", "g", "b", "a", "stab"};
 
 // Per-block keys we recognize.
 constexpr std::array<std::string_view, 7> kBlockKeys{
@@ -369,6 +376,44 @@ template <typename T>
     return arr;
 }
 
+[[nodiscard]] auto serialize_stroke_style(const noted::stroke::BrushStyle& s) -> json {
+    return json{
+        {"min_r", s.min_radius_px},
+        {"max_r", s.max_radius_px},
+        {"soft", s.softness_ratio},
+        {"ag", s.alpha_gamma},
+        {"r", s.r},
+        {"g", s.g},
+        {"b", s.b},
+        {"a", s.a},
+        {"stab", s.stabilizer},
+    };
+}
+
+[[nodiscard]] auto serialize_strokes(const std::vector<noted::stroke::Stroke>& strokes) -> json {
+    // Samples are written as a flat float array (x, y, pressure
+    // triples) so a 500-sample stroke costs ~1500 numbers instead of
+    // 500 small objects with three named fields each. The named-key
+    // overhead would be 4-5× larger on disk; the flat layout reads
+    // back just as cleanly via a stride-3 loop.
+    json arr = json::array();
+    for (const auto& stroke : strokes) {
+        json samples = json::array();
+        samples.get_ptr<json::array_t*>()->reserve(stroke.samples.size() * 3U);
+        for (const auto& s : stroke.samples) {
+            samples.push_back(s.x);
+            samples.push_back(s.y);
+            samples.push_back(s.pressure);
+        }
+        arr.push_back({
+            {"mode", static_cast<int>(stroke.mode)},
+            {"samples", std::move(samples)},
+            {"style", serialize_stroke_style(stroke.style)},
+        });
+    }
+    return arr;
+}
+
 [[nodiscard]] auto serialize_texts(const std::vector<noted::domain::tool::TextPrimitive>& texts)
     -> json {
     json arr = json::array();
@@ -445,6 +490,7 @@ auto document_to_json(const Document& doc) -> std::string {
     out["texts"] = serialize_texts(doc.texts());
     out["images"] = serialize_images(doc.images());
     out["image_assets"] = serialize_image_assets(doc.image_assets());
+    out["strokes"] = serialize_strokes(doc.strokes());
 
     // 2-space indent — readable diffs at small document scale.
     return out.dump(2);
@@ -928,6 +974,151 @@ auto document_from_json(std::string_view json_text) -> Result<Document> {
                     std::to_string(im.asset_id) + " does not resolve in image_assets"));
         }
     }
+
+    // Strokes — v7+. Optional at every version. v1..v6 files load
+    // with an empty strokes list. Sample arrays use the flat (x, y,
+    // pressure) triple layout — see the schema doc.
+    if (root_obj.contains("strokes")) {
+        const auto& strokes_arr = root_obj.at("strokes");
+        if (!strokes_arr.is_array()) {
+            return std::unexpected(
+                noted::make_error(noted::ErrorCode::invalid_argument,
+                                  "document_from_json: 'strokes' is not an array"));
+        }
+        std::vector<noted::stroke::Stroke> strokes;
+        strokes.reserve(strokes_arr.size());
+        for (std::size_t i = 0; i < strokes_arr.size(); ++i) {
+            const std::string context = "strokes[" + std::to_string(i) + "]";
+            const auto& item = strokes_arr[i];
+            if (!item.is_object()) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": not an object"));
+            }
+            if (auto bad = find_unknown_key(item, kStrokeItemKeys); !bad.empty()) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": unknown key '" + bad + "'"));
+            }
+
+            auto mode_int = require<int>(item, "mode", context);
+            if (!mode_int) {
+                return std::unexpected(std::move(mode_int).error());
+            }
+            if (*mode_int < 0 || *mode_int > static_cast<int>(noted::stroke::DrawMode::erase)) {
+                return std::unexpected(noted::make_error(
+                    noted::ErrorCode::invalid_argument,
+                    context + ": mode ordinal " + std::to_string(*mode_int) + " out of range"));
+            }
+
+            // Samples — flat float array, length must be a multiple of 3.
+            if (!item.contains("samples")) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": missing 'samples'"));
+            }
+            const auto& samples_arr = item.at("samples");
+            if (!samples_arr.is_array()) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": 'samples' is not an array"));
+            }
+            if (samples_arr.size() % 3U != 0U) {
+                return std::unexpected(noted::make_error(
+                    noted::ErrorCode::invalid_argument,
+                    context + ": 'samples' length " + std::to_string(samples_arr.size()) +
+                        " is not a multiple of 3 (x, y, pressure triples)"));
+            }
+            std::vector<noted::stroke::StrokeSample> samples;
+            samples.reserve(samples_arr.size() / 3U);
+            for (std::size_t j = 0; j + 2U < samples_arr.size(); j += 3U) {
+                noted::stroke::StrokeSample s{};
+                try {
+                    s.x = samples_arr[j].get<float>();
+                    s.y = samples_arr[j + 1U].get<float>();
+                    s.pressure = samples_arr[j + 2U].get<float>();
+                } catch (const json::exception& e) {
+                    return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                             context + ": 'samples'[" +
+                                                                 std::to_string(j) +
+                                                                 "..] non-numeric — " + e.what()));
+                }
+                samples.push_back(s);
+            }
+
+            // Style block.
+            if (!item.contains("style")) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": missing 'style'"));
+            }
+            const auto& style_obj = item.at("style");
+            if (!style_obj.is_object()) {
+                return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                         context + ": 'style' is not an object"));
+            }
+            if (auto bad = find_unknown_key(style_obj, kStrokeStyleKeys); !bad.empty()) {
+                return std::unexpected(
+                    noted::make_error(noted::ErrorCode::invalid_argument,
+                                      context + ".style: unknown key '" + bad + "'"));
+            }
+            auto min_r = require<float>(style_obj, "min_r", context + ".style");
+            auto max_r = require<float>(style_obj, "max_r", context + ".style");
+            auto soft = require<float>(style_obj, "soft", context + ".style");
+            auto ag = require<float>(style_obj, "ag", context + ".style");
+            auto sr = require<float>(style_obj, "r", context + ".style");
+            auto sg = require<float>(style_obj, "g", context + ".style");
+            auto sb = require<float>(style_obj, "b", context + ".style");
+            auto sa = require<float>(style_obj, "a", context + ".style");
+            auto stab = require<float>(style_obj, "stab", context + ".style");
+            if (!min_r) {
+                return std::unexpected(std::move(min_r).error());
+            }
+            if (!max_r) {
+                return std::unexpected(std::move(max_r).error());
+            }
+            if (!soft) {
+                return std::unexpected(std::move(soft).error());
+            }
+            if (!ag) {
+                return std::unexpected(std::move(ag).error());
+            }
+            if (!sr) {
+                return std::unexpected(std::move(sr).error());
+            }
+            if (!sg) {
+                return std::unexpected(std::move(sg).error());
+            }
+            if (!sb) {
+                return std::unexpected(std::move(sb).error());
+            }
+            if (!sa) {
+                return std::unexpected(std::move(sa).error());
+            }
+            if (!stab) {
+                return std::unexpected(std::move(stab).error());
+            }
+            // Clamp degenerate radii / gamma at the data boundary so
+            // a corrupted file can't smuggle a zero / negative width
+            // past the renderer's vertex math.
+            noted::stroke::BrushStyle style{};
+            style.min_radius_px = (std::isnan(*min_r) || *min_r < 0.5F) ? 0.5F : *min_r;
+            style.max_radius_px =
+                (std::isnan(*max_r) || *max_r < style.min_radius_px) ? style.min_radius_px : *max_r;
+            style.softness_ratio = std::isnan(*soft) ? 0.0F : *soft;
+            style.alpha_gamma = (std::isnan(*ag) || *ag <= 0.0F) ? 1.0F : *ag;
+            style.r = *sr;
+            style.g = *sg;
+            style.b = *sb;
+            style.a = *sa;
+            style.stabilizer = (std::isnan(*stab) || *stab < 0.0F) ? 0.0F
+                               : (*stab > 0.95F)                   ? 0.95F
+                                                                   : *stab;
+
+            noted::stroke::Stroke stroke{};
+            stroke.samples = std::move(samples);
+            stroke.style = style;
+            stroke.mode = static_cast<noted::stroke::DrawMode>(*mode_int);
+            strokes.push_back(std::move(stroke));
+        }
+        doc.replace_strokes(std::move(strokes));
+    }
+
     return doc;
 }
 

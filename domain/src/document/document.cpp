@@ -299,6 +299,7 @@ void Document::clear() noexcept {
     texts_.clear();
     images_.clear();
     image_assets_.clear();
+    strokes_.clear();
     // next_id_ is intentionally NOT reset — IDs stay monotonic across
     // clears so any history / undo references survive the wipe. The
     // same rule applies to the registry's internal `next_id_`.
@@ -437,6 +438,38 @@ void Document::replace_images(std::vector<noted::domain::tool::ImagePrimitive> i
 
 void Document::replace_image_assets(ImageAssetRegistry registry) noexcept {
     image_assets_ = std::move(registry);
+}
+
+auto Document::add_stroke(noted::stroke::Stroke stroke) -> Result<std::size_t> {
+    strokes_.push_back(std::move(stroke));
+    return strokes_.size() - 1;
+}
+
+auto Document::remove_stroke(std::size_t index) -> Result<void> {
+    if (index >= strokes_.size()) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument,
+                              "Document::remove_stroke: index " + std::to_string(index) +
+                                  " out of range (size " + std::to_string(strokes_.size()) + ")"));
+    }
+    strokes_.erase(strokes_.begin() + static_cast<std::ptrdiff_t>(index));
+    return {};
+}
+
+auto Document::insert_stroke(std::size_t index,
+                             noted::stroke::Stroke stroke) -> Result<std::size_t> {
+    if (index > strokes_.size()) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument,
+                              "Document::insert_stroke: index " + std::to_string(index) +
+                                  " out of range (size " + std::to_string(strokes_.size()) + ")"));
+    }
+    strokes_.insert(strokes_.begin() + static_cast<std::ptrdiff_t>(index), std::move(stroke));
+    return index;
+}
+
+void Document::replace_strokes(std::vector<noted::stroke::Stroke> strokes) noexcept {
+    strokes_ = std::move(strokes);
 }
 
 auto Document::move_to(BlockId id, BlockId new_parent, std::size_t index) -> Result<void> {
