@@ -161,12 +161,49 @@ auto tessellate_ribbon(const Stroke& stroke,
             velocity_factor = 1.0F - blend * v_norm * 0.7F;  // 0.3 floor at max blend × max v
         }
 
+        // Tilt-aware width dynamic — calligraphy. The pen's tilt
+        // direction defines a chisel axis; segments running PARALLEL
+        // to that axis paint as if the chisel tip is being dragged
+        // along its length (thin), while perpendicular segments
+        // paint as if the broad side is stamped (full width).
+        //
+        // Magnitude: |tilt| in radians. Modest tilts (~15°) produce
+        // a subtle effect; near-flat (~70°) makes the parallel
+        // direction collapse to ~40 % of full width.
+        //
+        // Pure mouse / non-tilt-sensing pens have tilt = 0 → the
+        // entire branch becomes a no-op naturally.
+        float tilt_factor = 1.0F;
+        if (stroke.style.tilt_blend > 0.0F) {
+            constexpr float kDegToRad = 3.14159265F / 180.0F;
+            const float tilt_dx = (samples[i].tilt_x + samples[i + 1U].tilt_x) * 0.5F * kDegToRad;
+            const float tilt_dy = (samples[i].tilt_y + samples[i + 1U].tilt_y) * 0.5F * kDegToRad;
+            const float tilt_mag = std::sqrt(tilt_dx * tilt_dx + tilt_dy * tilt_dy);
+            if (tilt_mag > 0.01F) {
+                // Normalised tilt direction in the canvas plane.
+                const float tilt_nx = tilt_dx / tilt_mag;
+                const float tilt_ny = tilt_dy / tilt_mag;
+                // |dot(segment_tangent, tilt_direction)| ∈ [0, 1].
+                // 1 when parallel (chisel drag), 0 when perpendicular
+                // (broad-side stamp). `tx`/`ty` are the segment unit
+                // tangent computed earlier in this iteration.
+                const float align = std::abs(tx * tilt_nx + ty * tilt_ny);
+                // Tilt magnitude as a normalised influence in [0, 1]:
+                // ~70° tilt (1.22 rad) saturates the effect, near-
+                // vertical (0 rad) means no influence.
+                const float mag_norm = std::min(1.0F, tilt_mag / 1.2F);
+                const float blend = std::min(1.0F, std::max(0.0F, stroke.style.tilt_blend));
+                // 60 % max attenuation on parallel chisel-drag → 0.4
+                // floor at max blend × max tilt × full parallel.
+                tilt_factor = 1.0F - blend * mag_norm * align * 0.6F;
+            }
+        }
+
         // One constant radius per segment so the (side, t) SDF stays
-        // a uniform capsule. Use the velocity-dampened average of
-        // the two endpoint pressures' radii — pressure varies slowly
-        // across a single segment so the loss of taper is invisible.
-        const float r =
-            std::max(0.5F, (stamp_a.radius_px + stamp_b.radius_px) * 0.5F * velocity_factor);
+        // a uniform capsule. Use the velocity- and tilt-dampened
+        // average of the two endpoint pressures' radii.
+        const float r = std::max(
+            0.5F, (stamp_a.radius_px + stamp_b.radius_px) * 0.5F * velocity_factor * tilt_factor);
 
         // Aspect ratio K = body-half-length / radius. Body occupies
         // |t| ≤ K/(K+1); caps occupy K/(K+1) < |t| ≤ 1.

@@ -143,6 +143,10 @@ auto BrushLibrary::with_builtins() -> BrushLibrary {
         p.softness = 0.15F;
         p.angle_deg = 45.0F;
         p.angle_jitter = 0.0F;
+        // The whole point of the Calligraphy preset — strong tilt
+        // sensitivity. A tilted pen reads as a chisel; parallel
+        // strokes go thin, perpendicular go thick.
+        p.tilt_blend = 0.8F;
         p.a = 1.0F;
         p.use_preset_color = false;
         add_with_curve(std::move(p));

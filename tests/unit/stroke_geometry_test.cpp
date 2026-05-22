@@ -302,6 +302,75 @@ TEST(Tessellate, ZeroTimestampSamplesSkipVelocityDampening) {
     EXPECT_TRUE(near_f(max_y - min_y, 8.0F, 0.5F));
 }
 
+TEST(Tessellate, TiltBlendZeroIgnoresTilt) {
+    Stroke s;
+    s.samples = {
+        {.x = 0.0F, .y = 0.0F, .pressure = 1.0F, .t = 0.0F, .tilt_x = 60.0F, .tilt_y = 0.0F},
+        {.x = 100.0F, .y = 0.0F, .pressure = 1.0F, .t = 1.0F, .tilt_x = 60.0F, .tilt_y = 0.0F},
+    };
+    s.style.min_radius_px = 4.0F;
+    s.style.max_radius_px = 4.0F;
+    s.style.tilt_blend = 0.0F;
+
+    const auto verts = tessellate_ribbon(s);
+    ASSERT_EQ(verts.size(), 6U);
+    float min_y = std::numeric_limits<float>::infinity();
+    float max_y = -std::numeric_limits<float>::infinity();
+    for (const auto& v : verts) {
+        min_y = std::min(min_y, v.y);
+        max_y = std::max(max_y, v.y);
+    }
+    // Full pressure radius (4) → ribbon thickness ~8 px ignoring tilt.
+    EXPECT_TRUE(near_f(max_y - min_y, 8.0F, 0.5F));
+}
+
+TEST(Tessellate, TiltParallelToStrokeThins) {
+    // Stroke runs along +x, pen tilt also along +x (60° tilt_x).
+    // With tilt_blend = 1 the segment should attenuate to floor.
+    Stroke s;
+    s.samples = {
+        {.x = 0.0F, .y = 0.0F, .pressure = 1.0F, .t = 0.0F, .tilt_x = 70.0F, .tilt_y = 0.0F},
+        {.x = 100.0F, .y = 0.0F, .pressure = 1.0F, .t = 1.0F, .tilt_x = 70.0F, .tilt_y = 0.0F},
+    };
+    s.style.min_radius_px = 4.0F;
+    s.style.max_radius_px = 4.0F;
+    s.style.tilt_blend = 1.0F;
+
+    const auto verts = tessellate_ribbon(s);
+    ASSERT_EQ(verts.size(), 6U);
+    float min_y = std::numeric_limits<float>::infinity();
+    float max_y = -std::numeric_limits<float>::infinity();
+    for (const auto& v : verts) {
+        min_y = std::min(min_y, v.y);
+        max_y = std::max(max_y, v.y);
+    }
+    // Significantly thinner than 8 px — calligraphy chisel-drag.
+    EXPECT_LT(max_y - min_y, 6.5F);
+}
+
+TEST(Tessellate, TiltPerpendicularToStrokeKeepsFullWidth) {
+    // Stroke +x, tilt +y → perpendicular → broad side of chisel.
+    Stroke s;
+    s.samples = {
+        {.x = 0.0F, .y = 0.0F, .pressure = 1.0F, .t = 0.0F, .tilt_x = 0.0F, .tilt_y = 70.0F},
+        {.x = 100.0F, .y = 0.0F, .pressure = 1.0F, .t = 1.0F, .tilt_x = 0.0F, .tilt_y = 70.0F},
+    };
+    s.style.min_radius_px = 4.0F;
+    s.style.max_radius_px = 4.0F;
+    s.style.tilt_blend = 1.0F;
+
+    const auto verts = tessellate_ribbon(s);
+    ASSERT_EQ(verts.size(), 6U);
+    float min_y = std::numeric_limits<float>::infinity();
+    float max_y = -std::numeric_limits<float>::infinity();
+    for (const auto& v : verts) {
+        min_y = std::min(min_y, v.y);
+        max_y = std::max(max_y, v.y);
+    }
+    // Tilt perpendicular to stroke direction → no thinning.
+    EXPECT_TRUE(near_f(max_y - min_y, 8.0F, 0.5F));
+}
+
 TEST(Tessellate, EveryVertexCarriesBrushColor) {
     Stroke s;
     s.samples = {

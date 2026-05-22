@@ -585,6 +585,8 @@ void StrokeEngine::on_pressed(const noted::hook::PointerPressed& e) noexcept {
     sample.y = static_cast<float>(canvas_y);
     sample.pressure = e.pressure;
     sample.t = 0.0F;  // press is t=0 by definition
+    sample.tilt_x = e.tilt_x;
+    sample.tilt_y = e.tilt_y;
     current_stroke_.samples.push_back(sample);
 }
 
@@ -634,6 +636,12 @@ void StrokeEngine::on_moved(const noted::hook::PointerMoved& e) noexcept {
     // conforming impls, but the cost of the check is nil).
     const double now = monotonic_seconds();
     sample.t = static_cast<float>(std::max(0.0, now - stroke_press_time_));
+    // Raw tilt — no smoothing. Stabilizer applies to position +
+    // pressure where shaky input is visible; tilt readings from
+    // WM_POINTER are already integer-degree values so additional
+    // smoothing would just round more aggressively.
+    sample.tilt_x = e.tilt_x;
+    sample.tilt_y = e.tilt_y;
     current_stroke_.samples.push_back(sample);
 }
 

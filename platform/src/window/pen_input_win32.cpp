@@ -88,6 +88,8 @@ void publish_pen_pressed(const POINTER_PEN_INFO& pi, const RawPenSample& s) {
         .y = m.y,
         .button = map_pen_button(pi),
         .pressure = m.pressure,
+        .tilt_x = m.tilt_x,
+        .tilt_y = m.tilt_y,
     });
 }
 

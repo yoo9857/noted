@@ -55,6 +55,7 @@ auto brush_from_pen(const PenOptions& opt) noexcept -> noted::stroke::BrushStyle
     // Curve is authoritative for the engine's stamp shaping.
     b.pressure_curve = opt.pressure_curve;
     b.velocity_blend = std::clamp(opt.velocity_blend, 0.0F, 1.0F);
+    b.tilt_blend = std::clamp(opt.tilt_blend, 0.0F, 1.0F);
     b.r = opt.r;
     b.g = opt.g;
     b.b = opt.b;
@@ -78,6 +79,7 @@ void apply_preset_to(const BrushPreset& preset, PenOptions& opt) noexcept {
     opt.stabilizer = preset.stabilizer;
     opt.softness = preset.softness;
     opt.velocity_blend = preset.velocity_blend;
+    opt.tilt_blend = preset.tilt_blend;
     if (preset.use_preset_color) {
         // Preset wants its colour applied — e.g. "Soft Pencil" ships
         // graphite-grey, "Calligraphy" ships pure black.

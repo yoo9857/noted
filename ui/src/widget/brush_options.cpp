@@ -86,6 +86,16 @@ void draw_pen(noted::domain::tool::PenOptions& opt) {
             "Velocity → size taper: 0 = pressure only,\n"
             "1 = fast strokes shrink to ~30 % thickness");
     }
+
+    compact_label("Tilt", kLabelW);
+    ImGui::SetNextItemWidth(row_w);
+    ImGui::SliderFloat("##tbl", &opt.tilt_blend, 0.0F, 1.0F, "%.2f");
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Tilt → calligraphy: 0 = ignore tilt,\n"
+            "1 = chisel — parallel strokes thin, perpendicular stay thick.\n"
+            "Requires a tilt-capable pen (Wacom / Surface Pen / etc.)");
+    }
 }
 
 void draw_eraser(noted::domain::tool::EraserOptions& opt) {
