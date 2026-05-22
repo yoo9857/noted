@@ -46,6 +46,13 @@ void draw_pen(noted::domain::tool::PenOptions& opt) {
     compact_label("Stabilize", kLabelW);
     ImGui::SetNextItemWidth(row_w);
     ImGui::SliderFloat("##stab", &opt.stabilizer, 0.0F, 0.95F, "%.2f");
+
+    compact_label("Soft edge", kLabelW);
+    ImGui::SetNextItemWidth(row_w);
+    ImGui::SliderFloat("##soft", &opt.softness, 0.0F, 1.0F, "%.2f");
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Edge feather: 0 = crisp, 1 = soft halo");
+    }
 }
 
 void draw_eraser(noted::domain::tool::EraserOptions& opt) {

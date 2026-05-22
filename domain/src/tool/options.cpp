@@ -46,7 +46,11 @@ auto brush_from_pen(const PenOptions& opt) noexcept -> noted::stroke::BrushStyle
     noted::stroke::BrushStyle b{};
     b.min_radius_px = lo;
     b.max_radius_px = hi;
-    b.softness_ratio = 0.20F;  // engine default; not yet UI-exposed (B.3)
+    // Soft-edge fraction now plumbed end-to-end: presets dial it,
+    // brush_options exposes a slider, the polyline fragment shader
+    // widens its SDF smoothstep band by this fraction. Clamp at the
+    // boundary in case a degenerate value sneaks in.
+    b.softness_ratio = std::clamp(opt.softness, 0.0F, 1.0F);
     b.alpha_gamma = safe_gamma(opt.alpha_gamma);
     b.r = opt.r;
     b.g = opt.g;
@@ -68,6 +72,7 @@ void apply_preset_to(const BrushPreset& preset, PenOptions& opt) noexcept {
     opt.max_radius_px = preset.max_radius_px;
     opt.alpha_gamma = preset.alpha_gamma;
     opt.stabilizer = preset.stabilizer;
+    opt.softness = preset.softness;
     if (preset.use_preset_color) {
         // Preset wants its colour applied — e.g. "Soft Pencil" ships
         // graphite-grey, "Calligraphy" ships pure black.
