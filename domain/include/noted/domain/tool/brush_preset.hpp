@@ -19,6 +19,8 @@
 #include <cstdint>
 #include <string>
 
+#include "noted/engine/stroke/stroke_geometry.hpp"
+
 namespace noted::domain::tool {
 
 // Coarse brush category — drives the picker grid's grouping and the
@@ -49,9 +51,13 @@ struct BrushPreset {
     // ---- Stroke-engine parameters (mirror PenOptions) ----------------
     float min_radius_px{2.0F};
     float max_radius_px{10.0F};
-    // pow(pressure, alpha_gamma). 1.0 = linear pressure-to-alpha;
-    // >1 emphasizes high pressure; <1 emphasizes light touches.
+    // Pressure → alpha gamma scalar (drives the UI's simple
+    // slider). The authoritative shaping curve below is rebuilt
+    // from this via `PressureCurve::from_gamma` when the preset
+    // ships with the default curve, OR a hand-tuned curve overrides
+    // the gamma derivation for a more bespoke pen feel.
     float alpha_gamma{1.8F};
+    noted::stroke::PressureCurve pressure_curve{noted::stroke::PressureCurve::from_gamma(1.8F)};
     // RGBA. Applied to every stamp's color when `use_preset_color`
     // is true; otherwise the active Color panel's value wins.
     float r{0.0F};

@@ -1,5 +1,7 @@
 #include "noted/ui/widget/brush_options.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <string>
 
@@ -8,6 +10,7 @@
 #include "noted/domain/document/image_asset_registry.hpp"
 #include "noted/domain/tool/brush_library.hpp"
 #include "noted/ui/widget/brush_library_panel.hpp"
+#include "noted/ui/widget/pressure_curve_editor.hpp"
 
 namespace noted::ui::widget {
 
@@ -37,7 +40,28 @@ void draw_pen(noted::domain::tool::PenOptions& opt) {
 
     compact_label("Pressure", kLabelW);
     ImGui::SetNextItemWidth(row_w);
-    ImGui::SliderFloat("##ag", &opt.alpha_gamma, 0.2F, 4.0F, "%.2f", ImGuiSliderFlags_Logarithmic);
+    if (ImGui::SliderFloat(
+            "##ag", &opt.alpha_gamma, 0.2F, 4.0F, "%.2f", ImGuiSliderFlags_Logarithmic)) {
+        // Slider drives the curve via from_gamma so both knobs stay
+        // in lockstep — until the user drags a handle on the curve
+        // editor, at which point the slider falls out of sync (we
+        // don't fight the user back to the gamma shape).
+        opt.pressure_curve = noted::stroke::PressureCurve::from_gamma(opt.alpha_gamma);
+    }
+    // Direct curve editor — sub-section, slightly indented to read
+    // as "advanced control" rather than a primary slider.
+    ImGui::Indent(kLabelW);
+    if (pressure_curve_editor(opt.pressure_curve, 132.0F)) {
+        // Curve handle moved — keep the slider showing a sane
+        // approximation by sampling the curve at midpoint.
+        const float mid = opt.pressure_curve.evaluate(0.5F);
+        // For mid = 0.5^gamma → gamma = log(mid) / log(0.5)
+        if (mid > 0.001F && mid < 0.999F) {
+            const float g = std::log(mid) / std::log(0.5F);
+            opt.alpha_gamma = std::clamp(g, 0.2F, 4.0F);
+        }
+    }
+    ImGui::Unindent(kLabelW);
 
     compact_label("Opacity", kLabelW);
     ImGui::SetNextItemWidth(row_w);

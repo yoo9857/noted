@@ -63,11 +63,12 @@ auto stamp_from_pressure(const BrushStyle& style, float pressure) noexcept -> St
     const float hi = std::max(lo, style.max_radius_px);
     const float r = lo + (hi - lo) * p;
 
-    // Gamma curve on alpha. The shader's smoothstep already gives a soft
-    // edge, so the gamma's job is purely "light touch → low ink".
-    // alpha_gamma <= 0 is treated as 1 (linear) to keep the call safe.
-    const float gamma = (style.alpha_gamma > 0.0F) ? style.alpha_gamma : 1.0F;
-    const float a = clamp01(style.a * std::pow(p, gamma));
+    // Pressure → alpha shaping via the user's editable curve. The
+    // legacy `alpha_gamma` scalar is no longer authoritative; the UI
+    // pressure slider rewrites `pressure_curve` via `from_gamma` so
+    // both paths land at the same place.
+    const float shaped = clamp01(style.pressure_curve.evaluate(p));
+    const float a = clamp01(style.a * shaped);
 
     // Softness in pixels: a fraction of the current radius, with a 1 px
     // floor so tiny stamps still anti-alias on the disk edge.

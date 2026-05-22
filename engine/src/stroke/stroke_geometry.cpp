@@ -196,4 +196,55 @@ auto tessellate_ribbon(const Stroke& stroke,
     return out;
 }
 
+auto PressureCurve::evaluate(float x) const noexcept -> float {
+    const float t = (x < 0.0F) ? 0.0F : (x > 1.0F ? 1.0F : x);
+    const float u = 1.0F - t;
+    const float u2 = u * u;
+    const float u3 = u2 * u;
+    const float t2 = t * t;
+    const float t3 = t2 * t;
+    // Cubic bezier Y, with P0=(0,0), P1=(_, h1_y), P2=(_, h2_y),
+    // P3=(1,1). x → t directly; well-behaved monotonic shaping for
+    // handles in the unit square. Default handles (1/3, 2/3) lie on
+    // the diagonal so y == x for the linear case.
+    return u3 * 0.0F + 3.0F * u2 * t * h1_y + 3.0F * u * t2 * h2_y + t3 * 1.0F;
+}
+
+auto PressureCurve::from_gamma(float gamma) noexcept -> PressureCurve {
+    // Closed-form cubic bezier solving for handle y's so that the
+    // curve PASSES THROUGH (1/3, (1/3)^g) and (2/3, (2/3)^g).
+    //
+    // Solve for h1_y, h2_y from:
+    //   y(1/3) = (4/9)*h1 + (2/9)*h2 + 1/27   = (1/3)^g
+    //   y(2/3) = (2/9)*h1 + (4/9)*h2 + 8/27   = (2/3)^g
+    //
+    // Reducing the 2×2 system:
+    //   h1 = 3*a1 - (3/2)*a2
+    //   h2 = 3*a2 - (3/2)*a1
+    // where a1 = (1/3)^g - 1/27 and a2 = (2/3)^g - 8/27.
+    PressureCurve c{};
+    const float g = (gamma > 0.0F) ? gamma : 1.0F;
+    const float third = 1.0F / 3.0F;
+    const float twothird = 2.0F / 3.0F;
+    const float a1 = std::pow(third, g) - (1.0F / 27.0F);
+    const float a2 = std::pow(twothird, g) - (8.0F / 27.0F);
+    c.h1_x = third;
+    c.h2_x = twothird;
+    c.h1_y = 3.0F * a1 - 1.5F * a2;
+    c.h2_y = 3.0F * a2 - 1.5F * a1;
+    // Clamp to [0,1] so degenerate gammas don't drag handles outside
+    // the unit square (renderer assumes y ∈ [0,1]).
+    if (c.h1_y < 0.0F) {
+        c.h1_y = 0.0F;
+    } else if (c.h1_y > 1.0F) {
+        c.h1_y = 1.0F;
+    }
+    if (c.h2_y < 0.0F) {
+        c.h2_y = 0.0F;
+    } else if (c.h2_y > 1.0F) {
+        c.h2_y = 1.0F;
+    }
+    return c;
+}
+
 }  // namespace noted::stroke

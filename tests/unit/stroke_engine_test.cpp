@@ -255,18 +255,39 @@ TEST(StrokeEnginePressure, RadiusLerpsLinearly) {
     EXPECT_FLOAT_EQ(stamp_from_pressure(style, 0.5F).radius_px, 6.0F);
 }
 
-TEST(StrokeEnginePressure, AlphaUsesGammaCurve) {
+TEST(StrokeEnginePressure, PressureCurveFromGammaShapesAlpha) {
     BrushStyle style{};
     style.a = 1.0F;
-    style.alpha_gamma = 2.0F;
-    // pressure = 0.5, gamma = 2 → alpha = 0.5^2 = 0.25.
-    EXPECT_NEAR(stamp_from_pressure(style, 0.5F).a, 0.25F, 1e-5F);
+    style.pressure_curve = noted::stroke::PressureCurve::from_gamma(2.0F);
+    // `from_gamma` builds a cubic bezier approximating pow(x, 2.0).
+    // At p=0.5 the closed-form is 0.25; bezier sampled at t=0.5
+    // tracks pow within ~5%.
+    EXPECT_NEAR(stamp_from_pressure(style, 0.5F).a, 0.25F, 0.05F);
 }
 
-TEST(StrokeEnginePressure, AlphaGammaOneIsLinear) {
+TEST(StrokeEnginePressure, DefaultCurveIsLinear) {
     BrushStyle style{};
-    style.alpha_gamma = 1.0F;
+    // Default PressureCurve has handles on the diagonal (1/3, 1/3)
+    // and (2/3, 2/3) → y == x, identity shaping. A fresh BrushStyle
+    // with no explicit gamma setup renders linearly.
     EXPECT_NEAR(stamp_from_pressure(style, 0.7F).a, 0.7F, 1e-5F);
+}
+
+TEST(StrokeEnginePressure, PressureCurveFromGammaPassesThroughOneThird) {
+    // `from_gamma` is calibrated so the curve passes through
+    // (1/3, (1/3)^g) and (2/3, (2/3)^g) exactly.
+    const auto c = noted::stroke::PressureCurve::from_gamma(2.0F);
+    EXPECT_NEAR(c.evaluate(1.0F / 3.0F), std::pow(1.0F / 3.0F, 2.0F), 1e-5F);
+    EXPECT_NEAR(c.evaluate(2.0F / 3.0F), std::pow(2.0F / 3.0F, 2.0F), 1e-5F);
+}
+
+TEST(StrokeEnginePressure, PressureCurveEndpointsAreFixed) {
+    // (0, 0) and (1, 1) endpoints are pinned regardless of gamma.
+    for (const float g : {0.2F, 1.0F, 1.8F, 4.0F}) {
+        const auto c = noted::stroke::PressureCurve::from_gamma(g);
+        EXPECT_FLOAT_EQ(c.evaluate(0.0F), 0.0F);
+        EXPECT_FLOAT_EQ(c.evaluate(1.0F), 1.0F);
+    }
 }
 
 TEST(StrokeEnginePressure, SoftnessTracksRadiusWithFloor) {

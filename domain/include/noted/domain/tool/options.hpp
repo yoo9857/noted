@@ -60,10 +60,15 @@ struct PenOptions {
     float min_radius_px{2.0F};
     float max_radius_px{10.0F};
 
-    // pow(pressure, alpha_gamma). 1.0 = linear. >1 emphasises high
-    // pressure (light touches barely show). <1 emphasises light
-    // touches. Default 1.8 matches the engine default.
+    // Pressure → alpha shape. The `alpha_gamma` scalar drives the
+    // simple slider in the UI; whenever the slider moves the
+    // `pressure_curve` below is rebuilt via
+    // `PressureCurve::from_gamma`. The user can ALSO drag the
+    // curve editor's handles directly, which writes the curve
+    // without touching `alpha_gamma` — both knobs end up at the
+    // same destination so `brush_from_pen` only forwards the curve.
     float alpha_gamma{1.8F};
+    noted::stroke::PressureCurve pressure_curve{noted::stroke::PressureCurve::from_gamma(1.8F)};
 
     // Straight-alpha colour. Alpha is per-stroke; the pressure curve
     // multiplies it further per-sample (see `stamp_from_pressure`).
