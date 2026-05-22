@@ -40,17 +40,19 @@ struct PolylinePush {
 PolylinePush u_view;
 
 struct VIn {
-    float2 pos  : POSITION;   // canvas pixels, top-left origin
-    float4 col  : COLOR;      // straight-alpha RGBA
-    float  side : TEXCOORD0;  // -1 left edge, +1 right edge
-    float  t    : TEXCOORD1;  // -1 start-cap rim, +1 end-cap rim
-    float  K    : TEXCOORD2;  // body-half-length / radius
+    float2 pos       : POSITION;   // canvas pixels, top-left origin
+    float4 col       : COLOR;      // straight-alpha RGBA
+    float  side      : TEXCOORD0;  // -1 left edge, +1 right edge
+    float  t         : TEXCOORD1;  // -1 start-cap rim, +1 end-cap rim
+    float  K         : TEXCOORD2;  // body-half-length / radius
+    float  softness  : TEXCOORD3;  // [0, 1] edge feather fraction
 };
 
 struct VOut {
-    float4 pos  : SV_Position;
-    float4 col  : TEXCOORD0;
-    float3 sdf  : TEXCOORD1;  // (side, t, K) interpolated across the quad
+    float4 pos       : SV_Position;
+    float4 col       : TEXCOORD0;
+    float3 sdf       : TEXCOORD1;  // (side, t, K) interpolated across the quad
+    float  softness  : TEXCOORD2;
 };
 
 [shader("vertex")]
@@ -60,6 +62,7 @@ VOut vs_polyline(VIn input) {
     o.pos = float4(input.pos / u_view.canvas_size * 2.0 - 1.0, 0.0, 1.0);
     o.col = input.col;
     o.sdf = float3(input.side, input.t, input.K);
+    o.softness = input.softness;
     return o;
 }
 
@@ -79,18 +82,21 @@ float4 ps_polyline(VOut input) : SV_Target {
     const float cap = max(0.0, abs(input.sdf.y) * (K + 1.0) - K);
     const float dist = length(float2(input.sdf.x, cap));
 
-    // 1-pixel AA band from screen-space derivatives of the distance
-    // field. Cap on `aa_band` guards against two failure modes:
-    //   1. Thin strokes — fwidth(dist) grows as the ribbon shrinks,
-    //      which without a cap would fade the entire body to grey.
-    //   2. Zoom-out — fwidth scales with 1/zoom; at extreme zoom
-    //      the band would again eat all body opacity.
-    // Clamping to 0.35 keeps the inner ~65% of the capsule solid
-    // regardless of zoom / thickness. Thin / zoomed-out strokes
-    // lose AA softness rather than body — missing body reads as a
-    // bug, missing AA reads as a thin line.
+    // Hard-edge AA band from screen-space derivatives — narrow
+    // gradient (~1 pixel) at the capsule rim. Caps guard against
+    // thin strokes / zoom-out eating all body opacity.
     const float aa_band = min(fwidth(dist), 0.35);
-    const float edge = smoothstep(1.0 - aa_band, 1.0, dist);
+
+    // Soft brush feather, driven by per-vertex `softness` (0..1).
+    // The feather widens the smoothstep band, fading the outer
+    // `softness * 0.85` of the capsule from solid to transparent.
+    // 0.85 cap keeps even fully-soft brushes from going invisible
+    // at the centre. When softness=0 we get the hard-edge AA path
+    // (max picks the wider band, so the larger of "aa" and
+    // "feather" wins).
+    const float feather = clamp(input.softness, 0.0, 1.0) * 0.85;
+    const float band = max(aa_band, feather);
+    const float edge = smoothstep(1.0 - band, 1.0, dist);
     float4 col = input.col;
     col.a *= 1.0 - edge;
     return col;

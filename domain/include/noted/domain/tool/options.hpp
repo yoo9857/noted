@@ -78,6 +78,14 @@ struct PenOptions {
     // `BrushStyle::stabilizer` by `brush_from_pen`.
     float stabilizer{0.5F};
 
+    // Soft edge as a fraction of the ribbon radius. 0 = crisp
+    // capsule edge (current Hard Brush feel); 1 = full feather
+    // (Soft Brush / Airbrush). The polyline fragment shader widens
+    // the SDF smoothstep band by this fraction. Mirrored into
+    // `BrushStyle::softness_ratio` by `brush_from_pen` so the
+    // engine-facing data and the UI-facing data stay in lockstep.
+    float softness{0.20F};
+
     [[nodiscard]] auto operator==(const PenOptions&) const noexcept -> bool = default;
 };
 

@@ -1364,6 +1364,21 @@ void App::draw_widgets() {
     // responsible for ordering these — that contract sits in
     // `UiPanels`, where the comments explaining each step live.
     ui_panels_->draw();
+
+    // Brush slider-drift detection. The library card highlight is
+    // honest only while the live PenOptions match the snapshot
+    // captured at the last preset apply — once the user touches a
+    // slider / colour picker the highlight should fade so a glance
+    // at the panel can't lie about what's currently brushing.
+    //
+    // Exact equality is fine: ImGui sliders commit precise values,
+    // and a tiny user wiggle that round-trips to the original byte
+    // pattern is genuinely "still on the preset" by any practical
+    // definition.
+    if (active_brush_preset_ != noted::domain::tool::invalid_brush_preset_id &&
+        !(tools_.pen == pen_at_last_apply_)) {
+        active_brush_preset_ = noted::domain::tool::invalid_brush_preset_id;
+    }
 }
 
 void App::refresh_window_title_if_changed() {

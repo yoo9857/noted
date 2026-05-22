@@ -186,9 +186,12 @@ struct RibbonVertex {
     float g{0.0F};
     float b{0.0F};
     float a{1.0F};
-    float side{0.0F};  // -1 left edge, +1 right edge
-    float t{0.0F};     // -1 start-cap rim, +1 end-cap rim
-    float K{0.0F};     // body half-length / radius — capsule aspect
+    float side{0.0F};      // -1 left edge, +1 right edge
+    float t{0.0F};         // -1 start-cap rim, +1 end-cap rim
+    float K{0.0F};         // body half-length / radius — capsule aspect
+    float softness{0.2F};  // [0, 1] — fraction of radius the fragment shader
+                           // feathers at the edge. 0 = crisp / Hard Brush,
+                           // 1 = full feather / Airbrush.
 };
 
 // Build a TRIANGLE_LIST of per-segment capsule quads from a stroke's

@@ -167,7 +167,9 @@ auto tessellate_ribbon(const Stroke& stroke,
         // future pressure-driven colour would gradient-interpolate
         // naturally across the segment); for the current model both
         // stamps share the brush's RGB and only alpha can vary.
-        const auto vertex = [](float x, float y, float side, float t, float K, const Stamp& s) {
+        const float softness = stroke.style.softness_ratio;
+        const auto vertex = [softness](
+                                float x, float y, float side, float t, float K, const Stamp& s) {
             RibbonVertex v{};
             v.x = x;
             v.y = y;
@@ -178,6 +180,7 @@ auto tessellate_ribbon(const Stroke& stroke,
             v.side = side;
             v.t = t;
             v.K = K;
+            v.softness = softness;
             return v;
         };
 

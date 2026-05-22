@@ -129,7 +129,7 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
         .stride = sizeof(RibbonVertex),
         .rate = VK_VERTEX_INPUT_RATE_VERTEX,
     }}};
-    const std::array<noted::gpu::VertexInputAttribute, 5> vb_attrs{{
+    const std::array<noted::gpu::VertexInputAttribute, 6> vb_attrs{{
         {
             .location = 0,
             .binding = 0,
@@ -164,6 +164,18 @@ auto StrokeEngine::create(const StrokeEngineCreateInfo& info)
             .binding = 0,
             .format = VK_FORMAT_R32_SFLOAT,
             .offset = offsetof(RibbonVertex, K),
+        },
+        {
+            // Per-vertex soft-edge fraction (0..1). The fragment
+            // shader widens its SDF smoothstep band by this value so
+            // a Soft Brush actually FEATHERS at the edge while a Hard
+            // Brush stays crisp. Constant across the quad — same
+            // value populated for every vertex by `tessellate_ribbon`
+            // from `BrushStyle::softness_ratio`.
+            .location = 5,
+            .binding = 0,
+            .format = VK_FORMAT_R32_SFLOAT,
+            .offset = offsetof(RibbonVertex, softness),
         },
     }};
 
