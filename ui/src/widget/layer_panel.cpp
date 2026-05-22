@@ -2,8 +2,9 @@
 
 #include <array>
 #include <cstring>
-#include <iostream>
+#include <stdexcept>
 #include <string>
+#include <utility>
 
 #include <imgui.h>
 
@@ -107,7 +108,7 @@ struct RenameEdit {
 
 }  // namespace
 
-auto layer_panel(noted::domain::Document& doc, bool* open) -> LayerPanelAction {
+auto layer_panel(const noted::domain::Document& doc, bool* open) -> LayerPanelAction {
     LayerPanelAction action{};
     if (open != nullptr && !*open) {
         return action;
@@ -214,9 +215,9 @@ auto layer_panel(noted::domain::Document& doc, bool* open) -> LayerPanelAction {
         // Row 1: visibility eye + lock + name (clickable for active).
         const char* eye_glyph = layer.visible ? "o" : "-";
         if (ImGui::SmallButton(eye_glyph)) {
-            if (auto r = doc.set_layer_visible(layer.id, !layer.visible); !r) {
-                std::cerr << r.error().format() << '\n';
-            }
+            action.kind = LayerPanelAction::Kind::set_visible;
+            action.target_id = layer.id;
+            action.bool_value = !layer.visible;
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("%s", layer.visible ? "Hide" : "Show");
@@ -224,9 +225,9 @@ auto layer_panel(noted::domain::Document& doc, bool* open) -> LayerPanelAction {
         ImGui::SameLine();
         const char* lock_glyph = layer.locked ? "[L]" : "[ ]";
         if (ImGui::SmallButton(lock_glyph)) {
-            if (auto r = doc.set_layer_locked(layer.id, !layer.locked); !r) {
-                std::cerr << r.error().format() << '\n';
-            }
+            action.kind = LayerPanelAction::Kind::set_locked;
+            action.target_id = layer.id;
+            action.bool_value = !layer.locked;
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("%s", layer.locked ? "Unlock layer" : "Lock layer (refuse paint)");
@@ -243,10 +244,10 @@ auto layer_panel(noted::domain::Document& doc, bool* open) -> LayerPanelAction {
             const bool blurred = ImGui::IsItemDeactivated();
             if (committed || blurred) {
                 std::string trimmed{renaming.buf.data()};
-                if (!trimmed.empty()) {
-                    if (auto r = doc.set_layer_name(layer.id, std::move(trimmed)); !r) {
-                        std::cerr << r.error().format() << '\n';
-                    }
+                if (!trimmed.empty() && trimmed != layer.name) {
+                    action.kind = LayerPanelAction::Kind::set_name;
+                    action.target_id = layer.id;
+                    action.string_value = std::move(trimmed);
                 }
                 renaming.target = noted::invalid_layer_id;
                 renaming.buf[0] = '\0';
@@ -265,9 +266,8 @@ auto layer_panel(noted::domain::Document& doc, bool* open) -> LayerPanelAction {
                     std::strncpy(renaming.buf.data(), layer.name.c_str(), renaming.buf.size() - 1U);
                     renaming.buf[renaming.buf.size() - 1U] = '\0';
                 } else if (!is_active) {
-                    if (auto r = doc.set_active_layer(layer.id); !r) {
-                        std::cerr << r.error().format() << '\n';
-                    }
+                    action.kind = LayerPanelAction::Kind::set_active;
+                    action.target_id = layer.id;
                 }
             }
         }
@@ -278,8 +278,10 @@ auto layer_panel(noted::domain::Document& doc, bool* open) -> LayerPanelAction {
             for (const auto mode : kAllBlendModes) {
                 const bool selected = (layer.blend == mode);
                 if (ImGui::Selectable(blend_label(mode), selected)) {
-                    if (auto r = doc.set_layer_blend(layer.id, mode); !r) {
-                        std::cerr << r.error().format() << '\n';
+                    if (mode != layer.blend) {
+                        action.kind = LayerPanelAction::Kind::set_blend;
+                        action.target_id = layer.id;
+                        action.blend_value = mode;
                     }
                 }
                 if (selected) {
@@ -297,9 +299,13 @@ auto layer_panel(noted::domain::Document& doc, bool* open) -> LayerPanelAction {
         float opacity = layer.opacity;
         ImGui::SetNextItemWidth(-FLT_MIN);
         if (ImGui::SliderFloat("##op", &opacity, 0.0F, 1.0F, "%.2f")) {
-            if (auto r = doc.set_layer_opacity(layer.id, opacity); !r) {
-                std::cerr << r.error().format() << '\n';
-            }
+            // Emit one action per frame the slider moved. The UndoStack
+            // coalesces successive same-target opacity commands into a
+            // single history entry via `Command::try_merge`, so a 60-Hz
+            // drag produces ONE undo step, not 60.
+            action.kind = LayerPanelAction::Kind::set_opacity;
+            action.target_id = layer.id;
+            action.float_value = opacity;
         }
 
         ImGui::EndChild();

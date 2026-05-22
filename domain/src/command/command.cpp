@@ -956,6 +956,267 @@ auto RemoveCanvasLayerCommand::undo(Document& doc) -> Result<void> {
 }
 
 // ============================================================================
+// MoveCanvasLayerCommand
+// ============================================================================
+
+MoveCanvasLayerCommand::MoveCanvasLayerCommand(std::size_t from_index, std::size_t to_index)
+    : from_index_(from_index), to_index_(to_index) {}
+
+auto MoveCanvasLayerCommand::apply(Document& doc) -> Result<void> {
+    const auto stack_size = doc.canvas_layers().size();
+    if (from_index_ >= stack_size || to_index_ >= stack_size) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_argument,
+            "MoveCanvasLayerCommand::apply: index out of range (size " +
+                std::to_string(stack_size) + ", from " + std::to_string(from_index_) + ", to " +
+                std::to_string(to_index_) + ")"));
+    }
+    if (from_index_ == to_index_) {
+        // No-op move. Still mark applied so undo (also a no-op) is
+        // consistent with the post-apply state.
+        applied_ = true;
+        return {};
+    }
+    if (auto r = doc.move_canvas_layer(from_index_, to_index_); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = true;
+    return {};
+}
+
+auto MoveCanvasLayerCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_state,
+                              "MoveCanvasLayerCommand::undo: command was not applied"));
+    }
+    if (from_index_ == to_index_) {
+        applied_ = false;
+        return {};
+    }
+    // Inverse: move the layer back. After `move(from, to)`, the
+    // layer that was at `from` now lives at `to`. Move it back via
+    // `move(to, from)`.
+    if (auto r = doc.move_canvas_layer(to_index_, from_index_); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
+// SetLayerVisibleCommand
+// ============================================================================
+
+SetLayerVisibleCommand::SetLayerVisibleCommand(noted::LayerId target, bool new_value)
+    : target_(target), new_value_(new_value) {}
+
+auto SetLayerVisibleCommand::apply(Document& doc) -> Result<void> {
+    const auto* layer = doc.canvas_layers().find(target_);
+    if (layer == nullptr) {
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                 "SetLayerVisibleCommand::apply: id " +
+                                                     std::to_string(target_) +
+                                                     " not in canvas layer stack"));
+    }
+    old_value_ = layer->visible;
+    if (auto r = doc.set_layer_visible(target_, new_value_); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = true;
+    return {};
+}
+
+auto SetLayerVisibleCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_state,
+                              "SetLayerVisibleCommand::undo: command was not applied"));
+    }
+    if (auto r = doc.set_layer_visible(target_, old_value_); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
+// SetLayerLockedCommand
+// ============================================================================
+
+SetLayerLockedCommand::SetLayerLockedCommand(noted::LayerId target, bool new_value)
+    : target_(target), new_value_(new_value) {}
+
+auto SetLayerLockedCommand::apply(Document& doc) -> Result<void> {
+    const auto* layer = doc.canvas_layers().find(target_);
+    if (layer == nullptr) {
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                 "SetLayerLockedCommand::apply: id " +
+                                                     std::to_string(target_) +
+                                                     " not in canvas layer stack"));
+    }
+    old_value_ = layer->locked;
+    if (auto r = doc.set_layer_locked(target_, new_value_); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = true;
+    return {};
+}
+
+auto SetLayerLockedCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_state,
+                              "SetLayerLockedCommand::undo: command was not applied"));
+    }
+    if (auto r = doc.set_layer_locked(target_, old_value_); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
+// SetLayerNameCommand
+// ============================================================================
+
+SetLayerNameCommand::SetLayerNameCommand(noted::LayerId target, std::string new_name)
+    : target_(target), new_name_(std::move(new_name)) {}
+
+auto SetLayerNameCommand::apply(Document& doc) -> Result<void> {
+    const auto* layer = doc.canvas_layers().find(target_);
+    if (layer == nullptr) {
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                 "SetLayerNameCommand::apply: id " +
+                                                     std::to_string(target_) +
+                                                     " not in canvas layer stack"));
+    }
+    old_name_ = layer->name;
+    if (auto r = doc.set_layer_name(target_, new_name_); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = true;
+    return {};
+}
+
+auto SetLayerNameCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_state, "SetLayerNameCommand::undo: command was not applied"));
+    }
+    if (auto r = doc.set_layer_name(target_, old_name_); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+auto SetLayerNameCommand::try_merge(const Command& newer) noexcept -> bool {
+    // Only coalesce successive renames on the same layer. Keystroke
+    // runs in `ImGui::InputText` produce a flurry of commits if the
+    // host pipes every text-change through here; one history entry
+    // covers the whole gesture.
+    const auto* other = dynamic_cast<const SetLayerNameCommand*>(&newer);
+    if (other == nullptr || other->target_ != target_) {
+        return false;
+    }
+    new_name_ = other->new_name_;
+    return true;
+}
+
+// ============================================================================
+// SetLayerOpacityCommand
+// ============================================================================
+
+SetLayerOpacityCommand::SetLayerOpacityCommand(noted::LayerId target, float new_value)
+    : target_(target), new_value_(new_value) {}
+
+auto SetLayerOpacityCommand::apply(Document& doc) -> Result<void> {
+    const auto* layer = doc.canvas_layers().find(target_);
+    if (layer == nullptr) {
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                 "SetLayerOpacityCommand::apply: id " +
+                                                     std::to_string(target_) +
+                                                     " not in canvas layer stack"));
+    }
+    old_value_ = layer->opacity;
+    // Document::set_layer_opacity → CanvasLayerStack::set_opacity
+    // clamps to [0, 1] internally; we store the clamped value as
+    // `new_value_` so a future redo replays exactly what apply
+    // produced (not the unclamped caller-supplied value).
+    if (auto r = doc.set_layer_opacity(target_, new_value_); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    if (const auto* l = doc.canvas_layers().find(target_); l != nullptr) {
+        new_value_ = l->opacity;
+    }
+    applied_ = true;
+    return {};
+}
+
+auto SetLayerOpacityCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_state,
+                              "SetLayerOpacityCommand::undo: command was not applied"));
+    }
+    if (auto r = doc.set_layer_opacity(target_, old_value_); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+auto SetLayerOpacityCommand::try_merge(const Command& newer) noexcept -> bool {
+    // Same-target opacity sliders coalesce. We DON'T touch
+    // `old_value_` (the pre-drag opacity) so a single undo rewinds
+    // the entire drag.
+    const auto* other = dynamic_cast<const SetLayerOpacityCommand*>(&newer);
+    if (other == nullptr || other->target_ != target_) {
+        return false;
+    }
+    new_value_ = other->new_value_;
+    return true;
+}
+
+// ============================================================================
+// SetLayerBlendCommand
+// ============================================================================
+
+SetLayerBlendCommand::SetLayerBlendCommand(noted::LayerId target,
+                                           noted::domain::BlendMode new_value)
+    : target_(target), new_value_(new_value) {}
+
+auto SetLayerBlendCommand::apply(Document& doc) -> Result<void> {
+    const auto* layer = doc.canvas_layers().find(target_);
+    if (layer == nullptr) {
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                 "SetLayerBlendCommand::apply: id " +
+                                                     std::to_string(target_) +
+                                                     " not in canvas layer stack"));
+    }
+    old_value_ = layer->blend;
+    if (auto r = doc.set_layer_blend(target_, new_value_); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = true;
+    return {};
+}
+
+auto SetLayerBlendCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_state,
+                              "SetLayerBlendCommand::undo: command was not applied"));
+    }
+    if (auto r = doc.set_layer_blend(target_, old_value_); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
 // UndoStack
 // ============================================================================
 
@@ -968,8 +1229,23 @@ auto UndoStack::execute(std::unique_ptr<Command> cmd, Document& doc) -> Result<v
     if (!r) {
         return std::unexpected(std::move(r).error());
     }
-    undo_stack_.push_back(std::move(cmd));
+    // Always clear redo BEFORE the merge check — a new edit (even one
+    // that ends up coalesced into the prior entry) invalidates any
+    // outstanding redo path. Otherwise a slider drag right after an
+    // undo could "redo" a stale state.
     redo_stack_.clear();
+    // Coalescing: ask the current top of stack whether it can absorb
+    // the new command. Only the immediate top is consulted, so a
+    // brief pause that lets some other command settle in between will
+    // correctly break a drag into two undo entries.
+    if (!undo_stack_.empty() && undo_stack_.back()->try_merge(*cmd)) {
+        // Absorbed — destroy the newer command (already applied; its
+        // "after" value has been folded into the existing top). Stack
+        // size unchanged, dirty proxy preserved (the original push
+        // already moved undo_size off saved_undo_size).
+        return {};
+    }
+    undo_stack_.push_back(std::move(cmd));
     // Trim oldest entries beyond the depth bound. erase-front is O(N)
     // but N is bounded by max_depth_; for a 200-deep stack this is
     // cheaper than the linked-list alternative we'd otherwise reach for.

@@ -452,6 +452,139 @@ private:
     bool applied_{false};
 };
 
+// Reorder: move the canvas layer currently at `from_index` to
+// `to_index` (`to_index` is the post-removal target — `move(2, 0)`
+// lifts the third layer to the bottom). Snapshots `from_index` on
+// apply so `undo` is a precise inverse via the stack's `move()`
+// op. Active layer is preserved across the move (the id stays the
+// same, only its index changes).
+class MoveCanvasLayerCommand final : public Command {
+public:
+    MoveCanvasLayerCommand(std::size_t from_index, std::size_t to_index);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override { return "Move layer"; }
+
+private:
+    std::size_t from_index_;
+    std::size_t to_index_;
+    bool applied_{false};
+};
+
+// Toggle a canvas layer's visibility. Captures the layer id (stable
+// across the document's lifetime) + the prior state so undo restores
+// exactly. No coalescing — every click is a discrete user intent
+// and reads as a separate history entry.
+class SetLayerVisibleCommand final : public Command {
+public:
+    SetLayerVisibleCommand(noted::LayerId target, bool new_value);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override {
+        return "Toggle layer visibility";
+    }
+
+private:
+    noted::LayerId target_;
+    bool new_value_;
+    bool old_value_{false};
+    bool applied_{false};
+};
+
+// Toggle a canvas layer's lock state. Same atomicity story as
+// `SetLayerVisibleCommand`. Note: the input-gate side check
+// (`stroke_engine_.set_active` per-frame in ui_panels) reads the
+// post-apply state, so a locked layer immediately refuses paint.
+class SetLayerLockedCommand final : public Command {
+public:
+    SetLayerLockedCommand(noted::LayerId target, bool new_value);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override {
+        return "Toggle layer lock";
+    }
+
+private:
+    noted::LayerId target_;
+    bool new_value_;
+    bool old_value_{false};
+    bool applied_{false};
+};
+
+// Rename a canvas layer. Coalesces with the previous
+// `SetLayerNameCommand` IF it targets the same layer — so a
+// keystroke run through `ImGui::InputText` reads as ONE entry in
+// the undo menu, not one-per-character. The "before" name on the
+// coalesced entry stays at the pre-edit value so undo rewinds the
+// entire rename gesture in one step.
+class SetLayerNameCommand final : public Command {
+public:
+    SetLayerNameCommand(noted::LayerId target, std::string new_name);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override {
+        return "Rename layer";
+    }
+    [[nodiscard]] auto try_merge(const Command& newer) noexcept -> bool override;
+
+    [[nodiscard]] auto target() const noexcept -> noted::LayerId { return target_; }
+
+private:
+    noted::LayerId target_;
+    std::string new_name_;
+    std::string old_name_;
+    bool applied_{false};
+};
+
+// Set a canvas layer's opacity. Coalesces with the previous
+// `SetLayerOpacityCommand` on the SAME layer id — a 60-Hz slider
+// drag produces one undo entry, not 60. The receiver's "before"
+// opacity stays anchored at the pre-drag value; only the "after"
+// is updated each merge so a single Ctrl+Z rewinds the entire
+// drag.
+class SetLayerOpacityCommand final : public Command {
+public:
+    SetLayerOpacityCommand(noted::LayerId target, float new_value);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override {
+        return "Set layer opacity";
+    }
+    [[nodiscard]] auto try_merge(const Command& newer) noexcept -> bool override;
+
+    [[nodiscard]] auto target() const noexcept -> noted::LayerId { return target_; }
+
+private:
+    noted::LayerId target_;
+    float new_value_;
+    float old_value_{0.0F};
+    bool applied_{false};
+};
+
+// Change a canvas layer's blend mode. Discrete (dropdown selection
+// is one-shot), no coalescing.
+class SetLayerBlendCommand final : public Command {
+public:
+    SetLayerBlendCommand(noted::LayerId target, noted::domain::BlendMode new_value);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override {
+        return "Set layer blend";
+    }
+
+private:
+    noted::LayerId target_;
+    noted::domain::BlendMode new_value_;
+    noted::domain::BlendMode old_value_{noted::domain::BlendMode::normal};
+    bool applied_{false};
+};
+
 // Rename a block.
 class SetNameCommand final : public Command {
 public:

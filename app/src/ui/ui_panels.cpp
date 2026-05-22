@@ -128,30 +128,37 @@ void UiPanels::draw() {
     // four bg/red/glow/warm rows are debug fixtures, not a user-
     // facing concept.
     //
-    // Structural actions (add / remove) flow through `session_.execute`
-    // so Ctrl+Z restores deleted layers. Visibility / opacity / rename
-    // stay direct inside the widget — making them undoable would spam
-    // the history (Photoshop draws the same line on its Layers panel).
+    // Every layer-panel intent flows through `session_.execute` so
+    // Ctrl+Z works AND the document's dirty proxy (undo-size delta)
+    // fires on layer-only edits — the worst v0.x bug was visibility /
+    // lock / opacity / blend / rename / reorder all bypassing the
+    // UndoStack, silently masking dirty state and dropping changes
+    // on close. High-frequency edits (opacity slider drag, rename
+    // keystrokes) coalesce in `Command::try_merge` so a 60-Hz drag
+    // is one history entry.
+    //
+    // Active-layer change is the ONE exception that stays direct:
+    // Photoshop / Procreate also treat row-selection as transient,
+    // not a history entry. We DO mark the doc dirty for it via the
+    // session's manual touch.
     {
         const auto la =
             noted::ui::widget::layer_panel(session_.document(), &menu_state_.show_layer_panel);
         using K = noted::ui::widget::LayerPanelAction::Kind;
+        const auto exec = [&](std::unique_ptr<noted::domain::Command> cmd) {
+            if (auto r = session_.execute(std::move(cmd)); !r) {
+                std::cerr << r.error().format() << '\n';
+            }
+        };
         switch (la.kind) {
             case K::none:
                 break;
-            case K::add: {
-                auto cmd =
-                    std::make_unique<noted::domain::AddCanvasLayerCommand>(std::move(la.add_name));
-                if (auto r = session_.execute(std::move(cmd)); !r) {
-                    std::cerr << r.error().format() << '\n';
-                }
+            case K::add:
+                exec(
+                    std::make_unique<noted::domain::AddCanvasLayerCommand>(std::move(la.add_name)));
                 break;
-            }
             case K::remove: {
-                auto cmd = std::make_unique<noted::domain::RemoveCanvasLayerCommand>(la.index);
-                if (auto r = session_.execute(std::move(cmd)); !r) {
-                    std::cerr << r.error().format() << '\n';
-                }
+                exec(std::make_unique<noted::domain::RemoveCanvasLayerCommand>(la.index));
                 // UX assist after the command: if the removed layer
                 // was active, promote the new top of stack so paint
                 // continues immediately. Not part of the command
@@ -163,31 +170,51 @@ void UiPanels::draw() {
                 }
                 break;
             }
-            case K::duplicate: {
-                auto cmd = std::make_unique<noted::domain::DuplicateCanvasLayerCommand>(la.index);
-                if (auto r = session_.execute(std::move(cmd)); !r) {
-                    std::cerr << r.error().format() << '\n';
-                }
+            case K::duplicate:
+                exec(std::make_unique<noted::domain::DuplicateCanvasLayerCommand>(la.index));
                 break;
-            }
             case K::move_up:
             case K::move_down: {
-                // Reorder is direct (not yet command-wrapped). Goes
-                // through `move_canvas_layer` which is a stack-level
-                // mutation — undoing it cleanly requires its own
-                // command (lands in a follow-up alongside lock /
-                // rename / opacity undo coalescing).
                 const auto stack_size = session_.document().canvas_layers().size();
                 if (stack_size >= 2 && la.index < stack_size) {
                     const std::size_t target = (la.kind == K::move_up)
                                                    ? std::min(la.index + 1U, stack_size - 1U)
                                                    : (la.index == 0U ? 0U : la.index - 1U);
-                    if (auto r = session_.document().move_canvas_layer(la.index, target); !r) {
-                        std::cerr << r.error().format() << '\n';
+                    if (target != la.index) {
+                        exec(std::make_unique<noted::domain::MoveCanvasLayerCommand>(la.index,
+                                                                                     target));
                     }
                 }
                 break;
             }
+            case K::set_visible:
+                exec(std::make_unique<noted::domain::SetLayerVisibleCommand>(la.target_id,
+                                                                             la.bool_value));
+                break;
+            case K::set_locked:
+                exec(std::make_unique<noted::domain::SetLayerLockedCommand>(la.target_id,
+                                                                            la.bool_value));
+                break;
+            case K::set_name:
+                exec(std::make_unique<noted::domain::SetLayerNameCommand>(
+                    la.target_id, std::move(la.string_value)));
+                break;
+            case K::set_opacity:
+                exec(std::make_unique<noted::domain::SetLayerOpacityCommand>(la.target_id,
+                                                                             la.float_value));
+                break;
+            case K::set_blend:
+                exec(std::make_unique<noted::domain::SetLayerBlendCommand>(la.target_id,
+                                                                           la.blend_value));
+                break;
+            case K::set_active:
+                // Direct (transient) — matches Photoshop's row-
+                // selection convention. Failure (e.g. id removed
+                // between frames) is benign; log + continue.
+                if (auto r = session_.document().set_active_layer(la.target_id); !r) {
+                    std::cerr << r.error().format() << '\n';
+                }
+                break;
         }
     }
 

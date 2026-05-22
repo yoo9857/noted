@@ -1,15 +1,24 @@
 #include <gtest/gtest.h>
 
 #include "noted/domain/command/commands.hpp"
+#include "noted/domain/command/undo_stack.hpp"
 #include "noted/domain/document/document.hpp"
 
 namespace {
 
 using noted::domain::AddCanvasLayerCommand;
 using noted::domain::AddStrokeCommand;
+using noted::domain::BlendMode;
 using noted::domain::Document;
 using noted::domain::DuplicateCanvasLayerCommand;
+using noted::domain::MoveCanvasLayerCommand;
 using noted::domain::RemoveCanvasLayerCommand;
+using noted::domain::SetLayerBlendCommand;
+using noted::domain::SetLayerLockedCommand;
+using noted::domain::SetLayerNameCommand;
+using noted::domain::SetLayerOpacityCommand;
+using noted::domain::SetLayerVisibleCommand;
+using noted::domain::UndoStack;
 using noted::stroke::DrawMode;
 using noted::stroke::Stroke;
 using noted::stroke::StrokeSample;
@@ -319,6 +328,197 @@ TEST(DocumentCanvasLayers, MoveCanvasLayerRotatesStack) {
     EXPECT_EQ(doc.canvas_layers().layers()[0].id, b);
     EXPECT_EQ(doc.canvas_layers().layers()[1].id, c);
     EXPECT_EQ(doc.canvas_layers().layers()[2].id, a);
+}
+
+// ---- v1 of layer mutation commands (Move / SetVisible / SetLocked /
+//      SetName / SetOpacity / SetBlend + UndoStack coalescing).
+//
+// Goal of these tests: lock in the user-facing contract that every
+// row mutation in the Layers panel is undoable AND that the
+// document's dirty proxy (undo-size delta) fires correctly. Before
+// this layer landed, visibility / lock / opacity / blend / rename /
+// reorder all bypassed the UndoStack — silently masking dirty state
+// and dropping changes on close.
+
+TEST(DocumentCanvasLayers, MoveCanvasLayerCommandRoundTripsUndoRedo) {
+    Document doc;
+    auto a = *doc.add_canvas_layer("A");
+    auto b = *doc.add_canvas_layer("B");
+    auto c = *doc.add_canvas_layer("C");
+    UndoStack stack;
+    auto cmd = std::make_unique<MoveCanvasLayerCommand>(0U, 2U);
+    ASSERT_TRUE(stack.execute(std::move(cmd), doc));
+    EXPECT_EQ(doc.canvas_layers().layers()[2].id, a);
+    ASSERT_TRUE(stack.undo(doc));
+    EXPECT_EQ(doc.canvas_layers().layers()[0].id, a);
+    EXPECT_EQ(doc.canvas_layers().layers()[1].id, b);
+    EXPECT_EQ(doc.canvas_layers().layers()[2].id, c);
+    ASSERT_TRUE(stack.redo(doc));
+    EXPECT_EQ(doc.canvas_layers().layers()[2].id, a);
+}
+
+TEST(DocumentCanvasLayers, MoveCanvasLayerCommandRejectsOutOfRange) {
+    Document doc;
+    (void) *doc.add_canvas_layer("A");
+    MoveCanvasLayerCommand cmd{0U, 5U};
+    EXPECT_FALSE(cmd.apply(doc));
+}
+
+TEST(DocumentCanvasLayers, MoveCanvasLayerCommandNoOpSelfMoveIsCleanUndo) {
+    Document doc;
+    auto a = *doc.add_canvas_layer("A");
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<MoveCanvasLayerCommand>(0U, 0U), doc));
+    EXPECT_EQ(doc.canvas_layers().layers()[0].id, a);
+    ASSERT_TRUE(stack.undo(doc));
+    EXPECT_EQ(doc.canvas_layers().layers()[0].id, a);
+}
+
+TEST(DocumentCanvasLayers, SetLayerVisibleCommandUndoRestoresPrior) {
+    Document doc;
+    auto id = *doc.add_canvas_layer("L");
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerVisibleCommand>(id, false), doc));
+    EXPECT_FALSE(doc.canvas_layers().find(id)->visible);
+    ASSERT_TRUE(stack.undo(doc));
+    EXPECT_TRUE(doc.canvas_layers().find(id)->visible);
+}
+
+TEST(DocumentCanvasLayers, SetLayerLockedCommandUndoRestoresPrior) {
+    Document doc;
+    auto id = *doc.add_canvas_layer("L");
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerLockedCommand>(id, true), doc));
+    EXPECT_TRUE(doc.canvas_layers().find(id)->locked);
+    ASSERT_TRUE(stack.undo(doc));
+    EXPECT_FALSE(doc.canvas_layers().find(id)->locked);
+}
+
+TEST(DocumentCanvasLayers, SetLayerNameCommandUndoRestoresPrior) {
+    Document doc;
+    auto id = *doc.add_canvas_layer("Original");
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerNameCommand>(id, "Renamed"), doc));
+    EXPECT_EQ(doc.canvas_layers().find(id)->name, "Renamed");
+    ASSERT_TRUE(stack.undo(doc));
+    EXPECT_EQ(doc.canvas_layers().find(id)->name, "Original");
+}
+
+TEST(DocumentCanvasLayers, SetLayerNameCommandCoalescesSuccessiveSameTarget) {
+    // Rename keystroke run on the same layer collapses to one undo
+    // entry. The "before" name on the merged entry stays anchored at
+    // the original — a single undo rewinds the entire rename gesture.
+    Document doc;
+    auto id = *doc.add_canvas_layer("Original");
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerNameCommand>(id, "Re"), doc));
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerNameCommand>(id, "Rena"), doc));
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerNameCommand>(id, "Renamed"), doc));
+    EXPECT_EQ(stack.undo_size(), 1U);
+    EXPECT_EQ(doc.canvas_layers().find(id)->name, "Renamed");
+    ASSERT_TRUE(stack.undo(doc));
+    EXPECT_EQ(doc.canvas_layers().find(id)->name, "Original");
+    EXPECT_EQ(stack.undo_size(), 0U);
+}
+
+TEST(DocumentCanvasLayers, SetLayerNameCommandDoesNotCoalesceAcrossLayers) {
+    Document doc;
+    auto a = *doc.add_canvas_layer("A0");
+    auto b = *doc.add_canvas_layer("B0");
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerNameCommand>(a, "A1"), doc));
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerNameCommand>(b, "B1"), doc));
+    EXPECT_EQ(stack.undo_size(), 2U);
+}
+
+TEST(DocumentCanvasLayers, SetLayerOpacityCommandUndoRestoresPrior) {
+    Document doc;
+    auto id = *doc.add_canvas_layer("L");
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerOpacityCommand>(id, 0.25F), doc));
+    EXPECT_FLOAT_EQ(doc.canvas_layers().find(id)->opacity, 0.25F);
+    ASSERT_TRUE(stack.undo(doc));
+    EXPECT_FLOAT_EQ(doc.canvas_layers().find(id)->opacity, 1.0F);
+}
+
+TEST(DocumentCanvasLayers, SetLayerOpacityCommandCoalescesSliderDrag) {
+    // 60-Hz drag simulation: push 30 distinct opacity values for the
+    // same layer. UndoStack must fold them into ONE entry whose
+    // "after" is the last value and "before" is the pre-drag value.
+    Document doc;
+    auto id = *doc.add_canvas_layer("L");
+    UndoStack stack;
+    for (int i = 0; i < 30; ++i) {
+        const float v = 1.0F - (static_cast<float>(i) * 0.01F);
+        ASSERT_TRUE(stack.execute(std::make_unique<SetLayerOpacityCommand>(id, v), doc));
+    }
+    EXPECT_EQ(stack.undo_size(), 1U);
+    EXPECT_FLOAT_EQ(doc.canvas_layers().find(id)->opacity, 1.0F - 29.0F * 0.01F);
+    ASSERT_TRUE(stack.undo(doc));
+    EXPECT_FLOAT_EQ(doc.canvas_layers().find(id)->opacity, 1.0F);
+}
+
+TEST(DocumentCanvasLayers, SetLayerOpacityCommandDoesNotCoalesceAcrossLayers) {
+    Document doc;
+    auto a = *doc.add_canvas_layer("A");
+    auto b = *doc.add_canvas_layer("B");
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerOpacityCommand>(a, 0.5F), doc));
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerOpacityCommand>(b, 0.5F), doc));
+    EXPECT_EQ(stack.undo_size(), 2U);
+}
+
+TEST(DocumentCanvasLayers, SetLayerOpacityCommandCoalesceDoesNotBridgeOtherCommand) {
+    // Drag opacity → unrelated rename → drag opacity again. The
+    // second drag must NOT absorb into the first (the intervening
+    // rename broke the chain at the top of stack).
+    Document doc;
+    auto id = *doc.add_canvas_layer("Name1");
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerOpacityCommand>(id, 0.7F), doc));
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerNameCommand>(id, "Name2"), doc));
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerOpacityCommand>(id, 0.3F), doc));
+    EXPECT_EQ(stack.undo_size(), 3U);
+}
+
+TEST(DocumentCanvasLayers, SetLayerBlendCommandUndoRestoresPrior) {
+    Document doc;
+    auto id = *doc.add_canvas_layer("L");
+    UndoStack stack;
+    ASSERT_TRUE(
+        stack.execute(std::make_unique<SetLayerBlendCommand>(id, BlendMode::multiply), doc));
+    EXPECT_EQ(doc.canvas_layers().find(id)->blend, BlendMode::multiply);
+    ASSERT_TRUE(stack.undo(doc));
+    EXPECT_EQ(doc.canvas_layers().find(id)->blend, BlendMode::normal);
+}
+
+TEST(DocumentCanvasLayers, SetLayerFieldCommandsAllRejectUnknownId) {
+    Document doc;
+    constexpr noted::LayerId kBogus = 99999;
+    SetLayerVisibleCommand vis{kBogus, false};
+    SetLayerLockedCommand lock{kBogus, true};
+    SetLayerNameCommand name{kBogus, "x"};
+    SetLayerOpacityCommand op{kBogus, 0.5F};
+    SetLayerBlendCommand blend{kBogus, BlendMode::multiply};
+    EXPECT_FALSE(vis.apply(doc));
+    EXPECT_FALSE(lock.apply(doc));
+    EXPECT_FALSE(name.apply(doc));
+    EXPECT_FALSE(op.apply(doc));
+    EXPECT_FALSE(blend.apply(doc));
+}
+
+TEST(DocumentCanvasLayers, FieldCommandClearsRedoStackEvenOnCoalesce) {
+    // A new edit invalidates any outstanding redo path, regardless of
+    // whether it ended up coalesced into the prior entry. Otherwise a
+    // slider tweak right after an undo could "redo" a stale state.
+    Document doc;
+    auto id = *doc.add_canvas_layer("L");
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerOpacityCommand>(id, 0.5F), doc));
+    ASSERT_TRUE(stack.undo(doc));
+    EXPECT_EQ(stack.redo_size(), 1U);
+    ASSERT_TRUE(stack.execute(std::make_unique<SetLayerOpacityCommand>(id, 0.6F), doc));
+    EXPECT_EQ(stack.redo_size(), 0U);
 }
 
 }  // namespace
