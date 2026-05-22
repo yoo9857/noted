@@ -1,6 +1,7 @@
 #include "noted/engine/stroke/stroke_geometry.hpp"
 
 #include <cmath>
+#include <limits>
 #include <unordered_set>
 
 #include <gtest/gtest.h>
@@ -227,6 +228,79 @@ TEST(Tessellate, RightAngleTurnEmitsTwoIndependentSegments) {
 }
 
 // ---- Colour propagation ---------------------------------------------------
+
+TEST(Tessellate, VelocityBlendZeroLeavesRadiusUntouched) {
+    Stroke s;
+    s.samples = {
+        {.x = 0.0F, .y = 0.0F, .pressure = 1.0F, .t = 0.0F},
+        {.x = 1500.0F, .y = 0.0F, .pressure = 1.0F, .t = 1.0F},  // 1500 px/s
+    };
+    s.style.min_radius_px = 4.0F;
+    s.style.max_radius_px = 4.0F;
+    s.style.velocity_blend = 0.0F;  // velocity ignored
+
+    const auto verts = tessellate_ribbon(s);
+    ASSERT_EQ(verts.size(), 6U);
+    // With velocity_blend = 0, the segment radius equals the
+    // pressure-mapped radius (4 px). The capsule occupies y ∈
+    // [-4, 4] perpendicular to the stroke; verify the y extent.
+    float min_y = std::numeric_limits<float>::infinity();
+    float max_y = -std::numeric_limits<float>::infinity();
+    for (const auto& v : verts) {
+        min_y = std::min(min_y, v.y);
+        max_y = std::max(max_y, v.y);
+    }
+    EXPECT_TRUE(near_f(max_y - min_y, 8.0F, 0.5F));
+}
+
+TEST(Tessellate, VelocityBlendFullShrinksFastStroke) {
+    Stroke s;
+    s.samples = {
+        {.x = 0.0F, .y = 0.0F, .pressure = 1.0F, .t = 0.0F},
+        {.x = 1500.0F, .y = 0.0F, .pressure = 1.0F, .t = 1.0F},  // exactly reference velocity
+    };
+    s.style.min_radius_px = 4.0F;
+    s.style.max_radius_px = 4.0F;
+    s.style.velocity_blend = 1.0F;
+
+    const auto verts = tessellate_ribbon(s);
+    ASSERT_EQ(verts.size(), 6U);
+    // With blend=1 and v == reference velocity, dampening factor
+    // is 1 - 1*1*0.7 = 0.3. Expected ribbon thickness ≈ 8 * 0.3
+    // = 2.4 px ± rounding. The tessellator's 0.5 px floor on
+    // radius keeps it from collapsing.
+    float min_y = std::numeric_limits<float>::infinity();
+    float max_y = -std::numeric_limits<float>::infinity();
+    for (const auto& v : verts) {
+        min_y = std::min(min_y, v.y);
+        max_y = std::max(max_y, v.y);
+    }
+    EXPECT_LT(max_y - min_y, 5.0F);  // significantly thinner than 8 px
+}
+
+TEST(Tessellate, ZeroTimestampSamplesSkipVelocityDampening) {
+    Stroke s;
+    s.samples = {
+        {.x = 0.0F, .y = 0.0F, .pressure = 1.0F, .t = 0.0F},
+        {.x = 100.0F, .y = 0.0F, .pressure = 1.0F, .t = 0.0F},  // dt = 0
+    };
+    s.style.min_radius_px = 4.0F;
+    s.style.max_radius_px = 4.0F;
+    s.style.velocity_blend = 1.0F;  // would normally dampen
+
+    const auto verts = tessellate_ribbon(s);
+    ASSERT_EQ(verts.size(), 6U);
+    // dt == 0 → tessellator skips the velocity branch; ribbon
+    // renders at full pressure radius even with blend=1. This is
+    // the legacy-stroke path (loaded files with no per-sample t).
+    float min_y = std::numeric_limits<float>::infinity();
+    float max_y = -std::numeric_limits<float>::infinity();
+    for (const auto& v : verts) {
+        min_y = std::min(min_y, v.y);
+        max_y = std::max(max_y, v.y);
+    }
+    EXPECT_TRUE(near_f(max_y - min_y, 8.0F, 0.5F));
+}
 
 TEST(Tessellate, EveryVertexCarriesBrushColor) {
     Stroke s;

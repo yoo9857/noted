@@ -137,6 +137,14 @@ struct BrushStyle {
     // input without the visible "stroke trailing the cursor" lag
     // that >0.8 produces.
     float stabilizer{0.5F};
+    // Velocity-aware size dynamics. 0 = pressure-only sizing (the
+    // pre-velocity behaviour); 1 = full velocity damping — a fast
+    // stroke at `kVelocityReferencePxPerSec` collapses to 30 % of
+    // the pressure-driven radius. Values in between scale linearly.
+    // Real pens behave somewhere around 0.3..0.6 — fast strokes
+    // visibly thin while slow strokes keep full thickness, which is
+    // what Procreate's "speed taper" emulates.
+    float velocity_blend{0.0F};
 };
 
 // Per-sample brush evaluation (legacy name "Stamp" — historically
@@ -174,6 +182,15 @@ struct StrokeSample {
     // per-sample ribbon width via `stamp_from_pressure`. A mouse
     // (no pressure sensor) supplies 1.0F.
     float pressure{1.0F};
+    // Seconds since the stroke started (press time = 0). Used by
+    // the tessellator to compute per-segment velocity for the
+    // velocity-aware radius dynamics — fast strokes get thinner,
+    // slow strokes keep their full pressure-mapped thickness.
+    // Defaults to 0 so legacy strokes (loaded from `.noted` files
+    // saved before this field shipped) collapse to "all samples
+    // simultaneous → velocity = 0 → no damping," which reproduces
+    // the pre-velocity rendering bit-for-bit.
+    float t{0.0F};
 };
 
 // One vector ink stroke. The brush style is captured **at stroke
