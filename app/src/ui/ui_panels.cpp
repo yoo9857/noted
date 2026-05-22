@@ -201,45 +201,41 @@ void UiPanels::draw() {
     // result struct because dialog reach + Document mutation cannot
     // live in the ui layer.
     {
-        // Brush library grid renders ABOVE the slider section,
-        // inside the same "Brush options" ImGui window. The widget
-        // emits intents (apply / save / remove); the host callbacks
-        // own the actual library mutation + disk persistence.
-        if (menu_state_.show_brush_options &&
-            ImGui::Begin("Brush options", &menu_state_.show_brush_options)) {
-            const auto active_id = active_brush_preset_ != nullptr
-                                       ? *active_brush_preset_
-                                       : noted::domain::tool::invalid_brush_preset_id;
-            const auto la =
-                noted::ui::widget::brush_library_panel(brush_library_, tools_.pen, active_id);
-            using K = noted::ui::widget::BrushLibraryAction::Kind;
-            switch (la.kind) {
-                case K::none:
-                    break;
-                case K::apply:
-                    if (on_apply_preset_) {
-                        on_apply_preset_(la.preset_id);
-                    }
-                    break;
-                case K::save_current:
-                    if (on_save_preset_) {
-                        on_save_preset_(std::move(la.save_name));
-                    }
-                    break;
-                case K::remove:
-                    if (on_remove_preset_) {
-                        on_remove_preset_(la.preset_id);
-                    }
-                    break;
-            }
-            ImGui::Separator();
-            ImGui::End();
-        }
-
-        const auto bo_result = noted::ui::widget::brush_options(
-            tools_, session_.document().image_assets(), &menu_state_.show_brush_options);
+        // Single Begin/End for "Brush options". brush_options() now
+        // folds the library picker grid in above its slider section,
+        // so the two share one window scope. Calling Begin twice on
+        // the same window in a frame splits it into two stacked
+        // floaters — the "UI scattered everywhere" bug.
+        const auto active_id = active_brush_preset_ != nullptr
+                                   ? *active_brush_preset_
+                                   : noted::domain::tool::invalid_brush_preset_id;
+        const auto bo_result = noted::ui::widget::brush_options(tools_,
+                                                                session_.document().image_assets(),
+                                                                &brush_library_,
+                                                                active_id,
+                                                                &menu_state_.show_brush_options);
         if (bo_result.pick_image_requested && on_pick_image_) {
             on_pick_image_();
+        }
+        using L = noted::ui::widget::BrushOptionsResult::LibraryAction;
+        switch (bo_result.library_action) {
+            case L::none:
+                break;
+            case L::apply:
+                if (on_apply_preset_) {
+                    on_apply_preset_(bo_result.library_preset_id);
+                }
+                break;
+            case L::save_current:
+                if (on_save_preset_) {
+                    on_save_preset_(bo_result.library_save_name);
+                }
+                break;
+            case L::remove:
+                if (on_remove_preset_) {
+                    on_remove_preset_(bo_result.library_preset_id);
+                }
+                break;
         }
     }
     // Per-frame push of the active tool's brush + mode into the

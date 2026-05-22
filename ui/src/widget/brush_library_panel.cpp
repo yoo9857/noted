@@ -131,12 +131,18 @@ auto brush_library_panel(const noted::domain::tool::BrushLibrary& library,
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const auto presets = library.presets();
+    // Capture the grid origin ONCE before the loop. Reading the
+    // cursor every iteration meant each `InvisibleButton` advanced
+    // the cursor (no SameLine), so the origin drifted downward
+    // every card — producing the "buttons scattered everywhere"
+    // bug. Pixel-deterministic placement from a fixed origin is
+    // the same pattern the palette grid uses.
+    const ImVec2 grid_origin = ImGui::GetCursorScreenPos();
     for (std::size_t i = 0; i < presets.size(); ++i) {
         const auto& preset = presets[i];
         const bool is_active = (preset.id == active_preset_id);
         const int col = static_cast<int>(i) % cols;
         const int row = static_cast<int>(i) / cols;
-        const ImVec2 grid_origin = ImGui::GetCursorScreenPos();
         const ImVec2 card_min(grid_origin.x + col * (kCardW + kCardGap),
                               grid_origin.y + row * (kCardH + kCardGap));
         const ImVec2 card_max(card_min.x + kCardW, card_min.y + kCardH);
@@ -203,9 +209,13 @@ auto brush_library_panel(const noted::domain::tool::BrushLibrary& library,
     }
 
     // Advance the cursor past the grid so the brush-options sliders
-    // land below the cards rather than overlapping them.
+    // land below the cards rather than overlapping them. Reset to
+    // the grid origin first because the loop's last
+    // InvisibleButton left the cursor somewhere inside the grid;
+    // letting Dummy add to that leaks vertical space.
     const int total_rows = (static_cast<int>(presets.size()) + cols - 1) / std::max(1, cols);
     const float grid_h = total_rows * kCardH + std::max(0, total_rows - 1) * kCardGap;
+    ImGui::SetCursorScreenPos(grid_origin);
     ImGui::Dummy(ImVec2(0.0F, grid_h));
 
     return action;

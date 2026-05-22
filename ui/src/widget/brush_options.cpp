@@ -6,6 +6,8 @@
 #include <imgui.h>
 
 #include "noted/domain/document/image_asset_registry.hpp"
+#include "noted/domain/tool/brush_library.hpp"
+#include "noted/ui/widget/brush_library_panel.hpp"
 
 namespace noted::ui::widget {
 
@@ -171,13 +173,13 @@ void draw_shape(noted::domain::tool::ShapeOptions& opt) {
 
 auto brush_options(noted::domain::tool::ToolState& tools,
                    const noted::domain::ImageAssetRegistry& image_assets,
+                   const noted::domain::tool::BrushLibrary* library,
+                   noted::domain::tool::BrushPresetId active_preset_id,
                    bool* open) -> BrushOptionsResult {
     BrushOptionsResult result{};
     if (open != nullptr && !*open) {
         return result;
     }
-    // Tight spacing matches the color picker — both panels live in the
-    // same left column and consistent vertical rhythm reads cleaner.
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.0F, 4.0F));
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0F, 2.0F));
     if (!ImGui::Begin("Brush options", open)) {
@@ -185,7 +187,37 @@ auto brush_options(noted::domain::tool::ToolState& tools,
         ImGui::PopStyleVar(2);
         return result;
     }
+
     using noted::domain::tool::ToolKind;
+
+    // Brush library grid — rendered ABOVE the slider section ONLY
+    // when the Pen tool is active (presets are pen-shaped). Drawn
+    // inside this Begin/End scope so the two sections share one
+    // ImGui window instance — calling Begin twice in a frame on the
+    // same window splits it into two stacked floaters, which was
+    // the "Brush options UI is scattered everywhere" bug.
+    if (library != nullptr && tools.active == ToolKind::pen) {
+        const auto la = brush_library_panel(*library, tools.pen, active_preset_id);
+        using K = BrushLibraryAction::Kind;
+        switch (la.kind) {
+            case K::none:
+                break;
+            case K::apply:
+                result.library_action = BrushOptionsResult::LibraryAction::apply;
+                result.library_preset_id = la.preset_id;
+                break;
+            case K::save_current:
+                result.library_action = BrushOptionsResult::LibraryAction::save_current;
+                result.library_save_name = std::move(la.save_name);
+                break;
+            case K::remove:
+                result.library_action = BrushOptionsResult::LibraryAction::remove;
+                result.library_preset_id = la.preset_id;
+                break;
+        }
+        ImGui::Separator();
+    }
+
     switch (tools.active) {
         case ToolKind::pen:
             draw_pen(tools.pen);

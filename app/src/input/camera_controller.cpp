@@ -2,12 +2,31 @@
 
 #include <cmath>
 
+#include <imgui.h>
+
 #include "noted/engine/canvas/camera.hpp"
 #include "noted/engine/hook/registry.hpp"
 
 #include "config/app_config.hpp"
 
 namespace noted::app::input {
+
+namespace {
+
+// True when ImGui currently wants the mouse — i.e. the cursor is
+// over a panel or an active widget like a slider drag. Used by the
+// camera handlers to short-circuit BEFORE applying pan / zoom so a
+// scroll wheel inside the Color / Brush panel can't bleed into a
+// canvas zoom. Safe to call before any ImGui::Begin in the frame —
+// GetIO() reads cached flags set during the previous EndFrame.
+[[nodiscard]] auto imgui_wants_mouse() noexcept -> bool {
+    if (ImGui::GetCurrentContext() == nullptr) {
+        return false;  // headless build / test harness
+    }
+    return ImGui::GetIO().WantCaptureMouse;
+}
+
+}  // namespace
 
 CameraController::CameraController(noted::canvas::Camera& camera,
                                    const noted::app::config::CanvasConfig& cfg) noexcept
@@ -59,6 +78,12 @@ auto CameraController::create(noted::hook::Registry& registry,
 }
 
 void CameraController::on_pressed_middle(double x, double y) noexcept {
+    // If a panel has the mouse (e.g. mid-drag on a slider), ignore
+    // the middle-button press so we don't start a pan that races
+    // the widget interaction.
+    if (imgui_wants_mouse()) {
+        return;
+    }
     panning_ = true;
     pan_last_x_ = x;
     pan_last_y_ = y;
@@ -81,6 +106,14 @@ void CameraController::on_moved(double x, double y) noexcept {
 }
 
 void CameraController::on_scrolled(double dy) noexcept {
+    // Skip canvas zoom when the wheel is rolling inside an ImGui
+    // panel — Color picker / Brush options / etc. ImGui already
+    // consumed the event for their own scroll bars, so applying it
+    // to the canvas as well produced the "panel scroll also moves
+    // the page" bug.
+    if (imgui_wants_mouse()) {
+        return;
+    }
     // `cfg_` is a live reference (not a snapshot) — a future
     // Preferences UI can flip zoom_step / zoom_min / zoom_max
     // without restart and the next scroll event picks up the new

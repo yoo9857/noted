@@ -53,7 +53,7 @@ struct WorkspaceState {
 //     a window between nodes does NOT.
 //   - Bumps are sequential — never reuse a retired version number,
 //     since old install bases may carry it on disk.
-inline constexpr int kDockLayoutVersion = 7;
+inline constexpr int kDockLayoutVersion = 8;
 
 // Render the full-viewport DockSpace and (on first frame or after
 // `state.needs_layout_build` is set) the programmatic default
