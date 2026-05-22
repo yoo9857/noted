@@ -105,11 +105,86 @@ auto UiPanels::create(Deps deps) -> std::unique_ptr<UiPanels> {
 }
 
 void UiPanels::draw() {
+    // The workspace dockspace is set up in `App::on_frame` BEFORE any
+    // panel's Begin() — moving the call into App made it run before
+    // App's own Colour / Navigator panels too. Don't repeat it here:
+    // the second DockSpace call on the same id is a no-op but the
+    // owning host window would shadow the original.
+
     prompt_.draw(
         [this]() -> bool { return save_for_dirty_prompt_(); },
         [this](noted::app::DirtyPrompt::PendingAction a) { execute_pending_dirty_action_(a); });
 
-    noted::ui::widget::layer_panel(scene_.graph, &menu_state_.show_layer_panel);
+    // Canvas layer stack — strokes the user has drawn pin onto entries
+    // here; the panel surfaces visibility + active selection + add /
+    // remove. The demo `LayerGraph` in `scene_` stays the compositor's
+    // backdrop, but it's no longer surfaced in the product UI — those
+    // four bg/red/glow/warm rows are debug fixtures, not a user-
+    // facing concept.
+    //
+    // Structural actions (add / remove) flow through `session_.execute`
+    // so Ctrl+Z restores deleted layers. Visibility / opacity / rename
+    // stay direct inside the widget — making them undoable would spam
+    // the history (Photoshop draws the same line on its Layers panel).
+    {
+        const auto la =
+            noted::ui::widget::layer_panel(session_.document(), &menu_state_.show_layer_panel);
+        using K = noted::ui::widget::LayerPanelAction::Kind;
+        switch (la.kind) {
+            case K::none:
+                break;
+            case K::add: {
+                auto cmd =
+                    std::make_unique<noted::domain::AddCanvasLayerCommand>(std::move(la.add_name));
+                if (auto r = session_.execute(std::move(cmd)); !r) {
+                    std::cerr << r.error().format() << '\n';
+                }
+                break;
+            }
+            case K::remove: {
+                auto cmd = std::make_unique<noted::domain::RemoveCanvasLayerCommand>(la.index);
+                if (auto r = session_.execute(std::move(cmd)); !r) {
+                    std::cerr << r.error().format() << '\n';
+                }
+                // UX assist after the command: if the removed layer
+                // was active, promote the new top of stack so paint
+                // continues immediately. Not part of the command
+                // (undo path restores the exact prior active id).
+                if (session_.document().active_layer() == noted::invalid_layer_id &&
+                    !session_.document().canvas_layers().empty()) {
+                    const auto top = session_.document().canvas_layers().layers().back().id;
+                    (void) session_.document().set_active_layer(top);
+                }
+                break;
+            }
+            case K::duplicate: {
+                auto cmd =
+                    std::make_unique<noted::domain::DuplicateCanvasLayerCommand>(la.index);
+                if (auto r = session_.execute(std::move(cmd)); !r) {
+                    std::cerr << r.error().format() << '\n';
+                }
+                break;
+            }
+            case K::move_up:
+            case K::move_down: {
+                // Reorder is direct (not yet command-wrapped). Goes
+                // through `move_canvas_layer` which is a stack-level
+                // mutation — undoing it cleanly requires its own
+                // command (lands in a follow-up alongside lock /
+                // rename / opacity undo coalescing).
+                const auto stack_size = session_.document().canvas_layers().size();
+                if (stack_size >= 2 && la.index < stack_size) {
+                    const std::size_t target = (la.kind == K::move_up)
+                                                   ? std::min(la.index + 1U, stack_size - 1U)
+                                                   : (la.index == 0U ? 0U : la.index - 1U);
+                    if (auto r = session_.document().move_canvas_layer(la.index, target); !r) {
+                        std::cerr << r.error().format() << '\n';
+                    }
+                }
+                break;
+            }
+        }
+    }
 
     // Tool switching is owned by the 12 o'clock floating toolbar
     // (`ui::widget::top_toolbar`) wired in App::on_frame after Phase 3
@@ -142,7 +217,21 @@ void UiPanels::draw() {
     // path on the floor (any in-flight stroke is committed first).
     // Switching back re-enables it. set_active is idempotent so
     // calling every frame costs only a bool compare.
-    stroke_engine_.set_active(is_stroke_tool(tools_.active));
+    //
+    // Also gate on the active canvas layer being PAINTABLE — i.e.
+    // both visible AND unlocked. Drawing onto a hidden layer would
+    // commit a stroke that vanishes immediately; drawing onto a
+    // locked layer matches Photoshop's "cannot paint on a locked
+    // layer" guard. Refusing the input outright (rather than
+    // silently dropping samples) means the cursor / tool palette
+    // reflects the state — the user sees the tool is unavailable.
+    const auto& cl = session_.document().canvas_layers();
+    const auto active_id = session_.document().active_layer();
+    const auto* active_layer_ptr = cl.find(active_id);
+    const bool active_layer_paintable =
+        (active_id == noted::invalid_layer_id) ||
+        (active_layer_ptr != nullptr && active_layer_ptr->visible && !active_layer_ptr->locked);
+    stroke_engine_.set_active(is_stroke_tool(tools_.active) && active_layer_paintable);
     // Tool input router: sync the active handler with the user's
     // current tool. The router's `set_active` is idempotent on a
     // no-op switch (matching kind), and triggers `on_deactivated`

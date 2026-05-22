@@ -12,7 +12,7 @@
 // Schema summary (see ADR 0025 for the full spec):
 //
 //   {
-//     "version": 6,
+//     "version": 8,
 //     "root": <BlockId>,                 // 0 when document is empty
 //     "blocks": [ ... ],                 // same as prior versions
 //     "pages": { ... },                  // same as v2
@@ -38,6 +38,7 @@
 //     "strokes": [                       // v7+; optional (loader treats absent as empty)
 //       {
 //         "mode":    <int>,              // DrawMode ordinal (draw=0, erase=1)
+//         "lid":     <uint64>,           // v8+; LayerId, 0 = unassigned
 //         "samples": [x0, y0, p0, x1, y1, p1, ...],  // flat float array (x, y, pressure triples)
 //         "style": {
 //           "min_r": <float>, "max_r": <float>,
@@ -48,7 +49,19 @@
 //         }
 //       },
 //       ...
-//     ]
+//     ],
+//     "canvas_layers": {                 // v8+; optional (absent ⇒ legacy migration)
+//       "active": <uint64>,              // currently-active LayerId, 0 = none
+//       "items": [                       // bottom-up z-order
+//         {
+//           "id":      <uint64>,         // monotonically allocated, != 0
+//           "name":    <string>,
+//           "visible": <bool>,
+//           "opacity": <float>           // [0, 1]
+//         },
+//         ...
+//       ]
+//     }
 //   }
 //
 // Versions:
@@ -65,6 +78,13 @@
 //         Sample arrays use a flat float layout (x, y, pressure
 //         triples) for compactness — a 500-sample stroke is ~12 KB
 //         smaller than the equivalent array-of-objects.
+//   - v8: adds `canvas_layers` + per-stroke `lid` (LayerId). v7 files
+//         with any strokes are migrated on load: a default "Layer 1"
+//         is created and every imported stroke is pinned to its id,
+//         so v7 round-trip semantics stay intact under v8 readers.
+//         Strokes whose `lid` doesn't resolve in `canvas_layers` are
+//         loaded as-is (renderer treats them as hidden — see
+//         `CanvasLayerStack::is_visible` contract).
 //   Writer always emits the current version.
 //
 // The payload object's keys depend on the block's kind. See ADR 0025
@@ -90,7 +110,7 @@ namespace noted::domain::io {
 
 // On-disk schema version. Writer always emits this; reader accepts
 // this value AND every prior supported version.
-inline constexpr int kDocumentJsonVersion = 7;
+inline constexpr int kDocumentJsonVersion = 8;
 inline constexpr int kDocumentJsonMinReadableVersion = 1;
 
 // Serialize `doc` to JSON. Output is pretty-printed with 2-space

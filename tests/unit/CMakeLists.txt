@@ -23,6 +23,9 @@ add_executable(noted_unit_tests
     document_texts_test.cpp
     document_images_test.cpp
     document_strokes_test.cpp
+    canvas_layer_stack_test.cpp
+    document_canvas_layers_test.cpp
+    document_canvas_layers_json_test.cpp
     image_asset_registry_test.cpp
     shape_detect_test.cpp
     shape_recognizer_test.cpp

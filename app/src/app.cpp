@@ -567,6 +567,15 @@ auto App::init_page_renderer() -> noted::Result<void> {
     for (const auto bg : kDemoBackgrounds) {
         (void) session_.document().add_page(page_w, page_h, bg, origin_x);
     }
+    // Seed a default canvas layer so the Layers panel is populated on
+    // first launch — without it the user sees an empty placeholder
+    // until their first stroke, which reads as "the panel isn't
+    // working". Same direct-write rationale as the page seed above:
+    // not a user edit, so the undo stack stays clean and the dirty
+    // marker stays off until the user actually changes something.
+    if (session_.document().canvas_layers().empty()) {
+        (void) session_.document().add_canvas_layer("Layer 1");
+    }
     return {};
 }
 
@@ -855,6 +864,16 @@ void App::on_frame() {
     last_frame_time = now;
     imgui_host_->begin_frame(static_cast<float>(fb_w), static_cast<float>(fb_h), dt);
 
+    // Workspace dockspace — must run BEFORE any `ImGui::Begin` so
+    // every panel (the App-level Colour / Navigator pair AND the
+    // UiPanels-driven Layers / Brush / Outline / Pages) lands in
+    // its assigned dock node on first launch. Moving this into
+    // `UiPanels::draw()` was a bug — UiPanels runs AFTER the
+    // App-level panels each frame, so Colour / Navigator's Begin
+    // happened with no dockspace and they floated at their
+    // SetNextWindowPos seed instead of docking right.
+    noted::ui::widget::workspace_begin(workspace_state_);
+
     // Mac-style window chrome — drawn FIRST so it sits at the top
     // of the Z-band. Wires the traffic-light buttons into
     // platform::Window's verbs (minimize / toggle_maximize /
@@ -959,7 +978,12 @@ void App::on_frame() {
                 palette_colors_[0] = colour;
             };
 
-            if (result.committed || result.palette_add_requested) {
+            // Palette adds ONLY on explicit user request ('+' button) —
+            // never on a committed colour change. The old `committed`
+            // path auto-spammed the palette every time the user
+            // released a slider or pressed Enter on the hex input,
+            // which was confusing and overwrote curated entries.
+            if (result.palette_add_requested) {
                 push_to_palette({active_rgba[0], active_rgba[1], active_rgba[2], active_rgba[3]});
             }
             if (result.palette_delete_index >= 0 &&

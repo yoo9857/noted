@@ -26,6 +26,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "noted/engine/canvas/layer_id.hpp"
+
 namespace noted::stroke {
 
 // How a stroke's pixels combine with whatever is already in the
@@ -138,6 +140,14 @@ struct Stroke {
     // the engine's live `mode_` so tool toggling never rewrites a
     // committed stroke's behaviour.
     DrawMode mode{DrawMode::draw};
+    // Layer membership — which canvas layer this stroke belongs to.
+    // `noted::invalid_layer_id` (0) means "unassigned"; the owning
+    // `Document::add_stroke` will stamp the active canvas layer onto
+    // unassigned strokes at insertion time so persisted strokes
+    // always carry a concrete id. Stable across the `.noted` save /
+    // load cycle (schema v8+) — see `domain::CanvasLayerStack` for
+    // the layer-stack data model and ADR 0025 for the JSON contract.
+    LayerId layer_id{invalid_layer_id};
 };
 
 // One ribbon vertex. The tessellator emits these as a TRIANGLE_LIST:

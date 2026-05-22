@@ -330,16 +330,17 @@ TEST(DocumentJson, EmittedJsonContainsVersionAndKindOrdinal) {
     (void) h;
     const auto text = document_to_json(src);
     // The output should include the wire-stable version + heading ordinal (2).
-    EXPECT_NE(text.find("\"version\": 7"), std::string::npos);
+    EXPECT_NE(text.find("\"version\": 8"), std::string::npos);
     EXPECT_NE(text.find("\"kind\": 0"), std::string::npos);  // group
     EXPECT_NE(text.find("\"kind\": 2"), std::string::npos);  // heading
-    // v2..v7 — writer emits every side-table even when empty.
+    // v2..v8 — writer emits every side-table even when empty.
     EXPECT_NE(text.find("\"pages\""), std::string::npos);
     EXPECT_NE(text.find("\"shapes\""), std::string::npos);
     EXPECT_NE(text.find("\"texts\""), std::string::npos);
     EXPECT_NE(text.find("\"images\""), std::string::npos);
     EXPECT_NE(text.find("\"image_assets\""), std::string::npos);
     EXPECT_NE(text.find("\"strokes\""), std::string::npos);
+    EXPECT_NE(text.find("\"canvas_layers\""), std::string::npos);
 }
 
 // ---- v1 back-compat --------------------------------------------------------

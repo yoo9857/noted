@@ -26,9 +26,19 @@ using json = nlohmann::json;
 
 // Top-level keys we recognize. Strict parser rejects any other key.
 // `pages` is optional for v1 (back-compat) — its presence is not
-// itself an error at any version.
-constexpr std::array<std::string_view, 9> kTopLevelKeys{
-    "version", "root", "blocks", "pages", "shapes", "texts", "images", "image_assets", "strokes"};
+// itself an error at any version. `canvas_layers` is v8+; older
+// readers reject the key but v8 readers default it to empty when
+// absent and migrate v7 strokes into a freshly-created Layer 1.
+constexpr std::array<std::string_view, 10> kTopLevelKeys{"version",
+                                                         "root",
+                                                         "blocks",
+                                                         "pages",
+                                                         "shapes",
+                                                         "texts",
+                                                         "images",
+                                                         "image_assets",
+                                                         "strokes",
+                                                         "canvas_layers"};
 
 // Per-pages-object keys.
 constexpr std::array<std::string_view, 2> kPagesKeys{"gap_px", "items"};
@@ -53,8 +63,24 @@ constexpr std::array<std::string_view, 9> kImageItemKeys{
 // Per-image-asset-item keys. v6 schema.
 constexpr std::array<std::string_view, 4> kImageAssetItemKeys{"id", "src", "iw", "ih"};
 
-// Per-stroke-item keys. v7 schema.
-constexpr std::array<std::string_view, 3> kStrokeItemKeys{"mode", "samples", "style"};
+// Per-stroke-item keys. v7 schema = first 3; v8 adds "lid".
+// "lid" is optional on every version (absent → invalid_layer_id,
+// then migrated on load — see canvas_layers handling).
+constexpr std::array<std::string_view, 4> kStrokeItemKeys{"mode", "samples", "style", "lid"};
+
+// Per-canvas-layers-object keys. v8 schema.
+constexpr std::array<std::string_view, 2> kCanvasLayersKeys{"active", "items"};
+
+// Per-canvas-layer-item keys. v8 schema base = first 4. `locked` +
+// `blend` are additive optional fields; older files load unchanged
+// (defaults: locked=false, blend=BlendMode::normal). Writer always
+// emits the full set for new files.
+constexpr std::array<std::string_view, 6> kCanvasLayerItemKeys{"id",
+                                                               "name",
+                                                               "visible",
+                                                               "opacity",
+                                                               "locked",
+                                                               "blend"};
 
 // Per-style-object keys (inside a stroke). v7 schema.
 constexpr std::array<std::string_view, 9> kStrokeStyleKeys{
@@ -407,11 +433,31 @@ template <typename T>
         }
         arr.push_back({
             {"mode", static_cast<int>(stroke.mode)},
+            {"lid", static_cast<std::uint64_t>(stroke.layer_id)},
             {"samples", std::move(samples)},
             {"style", serialize_stroke_style(stroke.style)},
         });
     }
     return arr;
+}
+
+[[nodiscard]] auto serialize_canvas_layers(const CanvasLayerStack& stack,
+                                           noted::LayerId active) -> json {
+    json items = json::array();
+    for (const auto& layer : stack.layers()) {
+        items.push_back({
+            {"id", static_cast<std::uint64_t>(layer.id)},
+            {"name", layer.name},
+            {"visible", layer.visible},
+            {"opacity", layer.opacity},
+            {"locked", layer.locked},
+            {"blend", static_cast<int>(layer.blend)},
+        });
+    }
+    return json{
+        {"active", static_cast<std::uint64_t>(active)},
+        {"items", std::move(items)},
+    };
 }
 
 [[nodiscard]] auto serialize_texts(const std::vector<noted::domain::tool::TextPrimitive>& texts)
@@ -491,6 +537,7 @@ auto document_to_json(const Document& doc) -> std::string {
     out["images"] = serialize_images(doc.images());
     out["image_assets"] = serialize_image_assets(doc.image_assets());
     out["strokes"] = serialize_strokes(doc.strokes());
+    out["canvas_layers"] = serialize_canvas_layers(doc.canvas_layers(), doc.active_layer());
 
     // 2-space indent — readable diffs at small document scale.
     return out.dump(2);
@@ -1110,14 +1157,175 @@ auto document_from_json(std::string_view json_text) -> Result<Document> {
                                : (*stab > 0.95F)                   ? 0.95F
                                                                    : *stab;
 
+            // `lid` is v8+ but optional on every version. Absent →
+            // invalid_layer_id (= 0); the migration block below either
+            // (a) creates a Layer 1 and rewrites it for v7 strokes, or
+            // (b) leaves it unassigned so the renderer treats it as
+            // hidden (clean failure mode for hand-crafted files).
+            noted::LayerId lid = noted::invalid_layer_id;
+            if (item.contains("lid")) {
+                try {
+                    lid = item.at("lid").get<noted::LayerId>();
+                } catch (const json::exception& e) {
+                    return std::unexpected(
+                        noted::make_error(noted::ErrorCode::invalid_argument,
+                                          context + ": 'lid' non-integral — " + e.what()));
+                }
+            }
+
             noted::stroke::Stroke stroke{};
             stroke.samples = std::move(samples);
             stroke.style = style;
             stroke.mode = static_cast<noted::stroke::DrawMode>(*mode_int);
+            stroke.layer_id = lid;
             strokes.push_back(std::move(stroke));
         }
         doc.replace_strokes(std::move(strokes));
     }
+
+    // Canvas layers — v8+. Optional at every version. v7 files with
+    // any strokes get a default "Layer 1" lazily materialised below
+    // and every stroke is pinned to its id, keeping v7 round-trip
+    // semantics intact for v8 readers.
+    CanvasLayerStack layer_stack;
+    noted::LayerId active_layer = noted::invalid_layer_id;
+
+    if (root_obj.contains("canvas_layers")) {
+        const auto& cl_obj = root_obj.at("canvas_layers");
+        if (!cl_obj.is_object()) {
+            return std::unexpected(
+                noted::make_error(noted::ErrorCode::invalid_argument,
+                                  "document_from_json: 'canvas_layers' is not an object"));
+        }
+        if (auto bad = find_unknown_key(cl_obj, kCanvasLayersKeys); !bad.empty()) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::invalid_argument,
+                std::string{"document_from_json: 'canvas_layers' unknown key '"} + bad + "'"));
+        }
+
+        if (cl_obj.contains("active")) {
+            try {
+                active_layer = cl_obj.at("active").get<noted::LayerId>();
+            } catch (const json::exception& e) {
+                return std::unexpected(noted::make_error(
+                    noted::ErrorCode::invalid_argument,
+                    std::string{"document_from_json: 'canvas_layers.active' non-integral — "} +
+                        e.what()));
+            }
+        }
+
+        std::vector<CanvasLayer> items;
+        if (cl_obj.contains("items")) {
+            const auto& items_arr = cl_obj.at("items");
+            if (!items_arr.is_array()) {
+                return std::unexpected(
+                    noted::make_error(noted::ErrorCode::invalid_argument,
+                                      "document_from_json: 'canvas_layers.items' is not an array"));
+            }
+            items.reserve(items_arr.size());
+            std::unordered_set<noted::LayerId> seen_ids;
+            for (std::size_t i = 0; i < items_arr.size(); ++i) {
+                const std::string ctx = "canvas_layers.items[" + std::to_string(i) + "]";
+                const auto& it = items_arr[i];
+                if (!it.is_object()) {
+                    return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                             ctx + ": not an object"));
+                }
+                if (auto bad = find_unknown_key(it, kCanvasLayerItemKeys); !bad.empty()) {
+                    return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                             ctx + ": unknown key '" + bad + "'"));
+                }
+                auto id_v = require<noted::LayerId>(it, "id", ctx);
+                if (!id_v) {
+                    return std::unexpected(std::move(id_v).error());
+                }
+                if (*id_v == noted::invalid_layer_id) {
+                    return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                             ctx + ": id 0 is reserved"));
+                }
+                if (!seen_ids.insert(*id_v).second) {
+                    return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                             ctx + ": duplicate id"));
+                }
+                auto name_v = require<std::string>(it, "name", ctx);
+                auto visible_v = require<bool>(it, "visible", ctx);
+                auto opacity_v = require<float>(it, "opacity", ctx);
+                if (!name_v) {
+                    return std::unexpected(std::move(name_v).error());
+                }
+                if (!visible_v) {
+                    return std::unexpected(std::move(visible_v).error());
+                }
+                if (!opacity_v) {
+                    return std::unexpected(std::move(opacity_v).error());
+                }
+                CanvasLayer layer{};
+                layer.id = *id_v;
+                layer.name = std::move(*name_v);
+                layer.visible = *visible_v;
+                layer.opacity = *opacity_v;  // CanvasLayerStack::replace clamps to [0,1]
+                // Optional additive fields — older v8 files predate
+                // these and load with defaults (unlocked, normal
+                // blend), staying forward-compatible.
+                if (it.contains("locked")) {
+                    try {
+                        layer.locked = it.at("locked").get<bool>();
+                    } catch (const json::exception& e) {
+                        return std::unexpected(noted::make_error(
+                            noted::ErrorCode::invalid_argument,
+                            ctx + ": 'locked' non-boolean — " + e.what()));
+                    }
+                }
+                if (it.contains("blend")) {
+                    int blend_ord = 0;
+                    try {
+                        blend_ord = it.at("blend").get<int>();
+                    } catch (const json::exception& e) {
+                        return std::unexpected(noted::make_error(
+                            noted::ErrorCode::invalid_argument,
+                            ctx + ": 'blend' non-integral — " + e.what()));
+                    }
+                    if (blend_ord < 0 ||
+                        blend_ord > static_cast<int>(noted::domain::BlendMode::luminosity)) {
+                        return std::unexpected(noted::make_error(
+                            noted::ErrorCode::invalid_argument,
+                            ctx + ": 'blend' ordinal " + std::to_string(blend_ord) +
+                                " out of range"));
+                    }
+                    layer.blend = static_cast<noted::domain::BlendMode>(blend_ord);
+                }
+                items.push_back(std::move(layer));
+            }
+        }
+        layer_stack.replace(std::move(items));
+    }
+
+    // v7 → v8 migration: if the file has strokes but no canvas_layers
+    // block (legacy v7 or hand-written v8 omitting layers), spin up a
+    // default "Layer 1" and pin every stroke to it. Idempotent for v8
+    // files that already serialized a stack — they enter this branch
+    // with the stack already populated and skip the synth step.
+    if (!doc.strokes().empty() && layer_stack.empty()) {
+        auto new_id = layer_stack.add_layer("Layer 1");
+        if (!new_id) {
+            return std::unexpected(std::move(new_id).error());
+        }
+        active_layer = *new_id;
+        // Rewrite stroke layer_ids in place. replace_strokes is the
+        // loader bypass; doing it again here is cheap (one pass) and
+        // keeps the stamp policy uniform regardless of input version.
+        auto migrated = doc.strokes();
+        for (auto& s : migrated) {
+            s.layer_id = *new_id;
+        }
+        doc.replace_strokes(std::move(migrated));
+    } else if (layer_stack.empty()) {
+        // No strokes and no stack → leave both empty; the next user
+        // action (a stroke landing on the canvas) lazy-creates Layer 1
+        // via Document::add_stroke's auto-stamp path.
+    }
+
+    doc.replace_canvas_layers(std::move(layer_stack), active_layer);
 
     return doc;
 }

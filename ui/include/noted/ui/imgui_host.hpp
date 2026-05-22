@@ -38,6 +38,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <string>
 
 #include <vulkan/vulkan.h>
 
@@ -133,6 +134,15 @@ private:
     bool vulkan_init_{false};
     bool initialized_{false};
     std::unique_ptr<ImGuiInputBridge> input_bridge_{};
+
+    // ImGui caches `io.IniFilename` as a raw `const char*` (no copy),
+    // so the backing storage must outlive every frame. Holding it
+    // here as a std::string member ties it to the host's lifetime,
+    // which is exactly the ImGui context's lifetime. Without this
+    // anchor ImGui falls back to "imgui.ini" relative to CWD, which
+    // varies by launch method (`Start-Process` vs double-click vs
+    // shell) and produces "panels mysteriously not docked" bugs.
+    std::string ini_path_storage_{};
 };
 
 }  // namespace noted::ui

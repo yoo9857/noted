@@ -173,11 +173,42 @@ void RenderPasses::record_strokes_pass(VkCommandBuffer cb, VkExtent2D ext) {
         scissor.offset = {fx, fy};
         scissor.extent = {static_cast<std::uint32_t>(fr - fx), static_cast<std::uint32_t>(fb - fy)};
         vkCmdSetScissor(cb, /*firstScissor=*/0, /*scissorCount=*/1, &scissor);
-        // Committed strokes live on `Document::strokes()` as of P.S.4;
-        // pass them by const-ref-span into the engine each frame so
-        // undo/redo on the host side reflects instantly without any
-        // cache sync.
-        stroke_engine_.record(cb, ext, session_.document().strokes());
+        // Assemble strokes in bottom-up layer z-order. Walking layers
+        // first and filtering strokes per layer means:
+        //   - the topmost layer's strokes draw LAST (Photoshop-style),
+        //   - hidden layers contribute no pointers (strokes vanish
+        //     immediately on visibility toggle without a render-side
+        //     branch),
+        //   - orphan strokes whose layer was deleted simply aren't
+        //     pushed (no `is_visible` predicate inside the engine).
+        //
+        // The pointer buffer is a member so we don't heap-allocate per
+        // frame. Stable through the call because the document is
+        // single-threaded and never mutates mid-record.
+        const auto& doc = session_.document();
+        const auto& layers = doc.canvas_layers();
+        const auto& strokes = doc.strokes();
+        stroke_render_order_.clear();
+        stroke_render_order_.reserve(strokes.size());
+        for (const auto& layer : layers.layers()) {
+            if (!layer.visible) {
+                continue;
+            }
+            for (const auto& stroke : strokes) {
+                if (stroke.layer_id == layer.id) {
+                    stroke_render_order_.push_back(&stroke);
+                }
+            }
+        }
+        // Per-layer opacity multiplier. Returns 1.0 for unknown ids
+        // (defensive — caller already filtered orphans out of the
+        // span). Clamping is done domain-side; the engine trusts the
+        // value.
+        stroke_engine_.record(
+            cb, ext, stroke_render_order_, [&layers](noted::LayerId id) noexcept -> float {
+                const auto* l = layers.find(id);
+                return (l != nullptr) ? l->opacity : 1.0F;
+            });
     }
 }
 
