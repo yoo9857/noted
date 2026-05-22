@@ -22,34 +22,54 @@
 // the App-side glue runs the picker and updates `tools.image` +
 // `Document::image_assets()` in response.
 
+#include <cstdint>
+#include <string>
+
 #include "noted/domain/document/image_asset_registry.hpp"
+#include "noted/domain/tool/brush_preset.hpp"
 #include "noted/domain/tool/tool.hpp"
+
+namespace noted::domain::tool {
+class BrushLibrary;
+}  // namespace noted::domain::tool
 
 namespace noted::ui::widget {
 
 // Per-frame outcome of `brush_options`. The widget never mutates
 // state that lives outside `ToolState`; anything App-level (file
-// dialogs, Document mutations) is signalled here.
+// dialogs, Document mutations, library mutations + disk writes) is
+// signalled here.
 struct BrushOptionsResult {
-    // User clicked "Pick image…" this frame. App glue should invoke
-    // `platform::io::pick_image_open()` + `image_io::load_rgba8` +
-    // `Document::image_assets_mut().allocate(...)` and write the
-    // resulting AssetId + intrinsic dimensions back onto
-    // `tools.image`.
     bool pick_image_requested{false};
+
+    // Brush-library intents — at most ONE per frame. The brush
+    // picker grid is folded INTO the brush_options window scope
+    // (single ImGui::Begin per frame) so all results coalesce here.
+    enum class LibraryAction : std::uint8_t {
+        none = 0,
+        apply = 1,
+        save_current = 2,
+        remove = 3,
+    };
+    LibraryAction library_action{LibraryAction::none};
+    noted::domain::tool::BrushPresetId library_preset_id{
+        noted::domain::tool::invalid_brush_preset_id};
+    std::string library_save_name;  // populated on save_current
 };
 
-// Render the brush options inside an ImGui::Begin / End scope managed
-// by this function. `open` controls visibility — pass
-// `&state.show_brush_options` from MenuBarState. `tools` is mutated
-// in place when the user drags a slider / picks a colour.
+// Render the brush options inside a SINGLE ImGui::Begin / End scope
+// managed by this function. `open` controls visibility — pass
+// `&state.show_brush_options`. The Pen / Eraser / etc. slider
+// section is preceded by the brush-library picker grid when
+// `library` is non-null AND the active tool is the Pen — Eraser /
+// Shape / etc. don't share the Pen's preset space.
 //
 // `image_assets` lets the Image-tool section render the source
-// filename for the currently-picked asset (`tools.image.pending_asset_id`).
-// Pass the document's read-only registry; an empty registry renders
-// the "(no image picked)" placeholder.
+// filename for the currently-picked asset.
 [[nodiscard]] auto brush_options(noted::domain::tool::ToolState& tools,
                                  const noted::domain::ImageAssetRegistry& image_assets,
+                                 const noted::domain::tool::BrushLibrary* library,
+                                 noted::domain::tool::BrushPresetId active_preset_id,
                                  bool* open) -> BrushOptionsResult;
 
 }  // namespace noted::ui::widget
