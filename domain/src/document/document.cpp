@@ -585,10 +585,10 @@ auto Document::set_layer_blend(noted::LayerId id, BlendMode mode) -> Result<void
 auto Document::duplicate_canvas_layer(std::size_t source_index,
                                       std::string new_name) -> Result<noted::LayerId> {
     if (source_index >= canvas_layers_.size()) {
-        return std::unexpected(
-            noted::make_error(noted::ErrorCode::invalid_argument,
-                              "Document::duplicate_canvas_layer: source index " +
-                                  std::to_string(source_index) + " out of range"));
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                 "Document::duplicate_canvas_layer: source index " +
+                                                     std::to_string(source_index) +
+                                                     " out of range"));
     }
     // Snapshot fields BEFORE the add_layer mutation because the stack
     // may reallocate its vector. add_layer appends at the TOP of the

@@ -93,8 +93,7 @@ auto CanvasLayerStack::set_locked(noted::LayerId id, bool v) -> Result<void> {
     return {};
 }
 
-auto CanvasLayerStack::set_blend(noted::LayerId id,
-                                 noted::domain::BlendMode mode) -> Result<void> {
+auto CanvasLayerStack::set_blend(noted::LayerId id, noted::domain::BlendMode mode) -> Result<void> {
     const auto idx = index_of_(id);
     if (idx == layers_.size()) {
         return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,

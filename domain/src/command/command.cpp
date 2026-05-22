@@ -889,10 +889,10 @@ auto DuplicateCanvasLayerCommand::undo(Document& doc) -> Result<void> {
         }
     }
     if (idx == layers.size()) {
-        return std::unexpected(noted::make_error(
-            noted::ErrorCode::invalid_state,
-            "DuplicateCanvasLayerCommand::undo: layer id " + std::to_string(assigned_id_) +
-                " not found — stack mutated externally?"));
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_state,
+                                                 "DuplicateCanvasLayerCommand::undo: layer id " +
+                                                     std::to_string(assigned_id_) +
+                                                     " not found — stack mutated externally?"));
     }
     auto removed = doc.remove_canvas_layer(idx);
     if (!removed) {

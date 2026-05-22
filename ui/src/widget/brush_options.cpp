@@ -35,8 +35,7 @@ void draw_pen(noted::domain::tool::PenOptions& opt) {
 
     compact_label("Pressure", kLabelW);
     ImGui::SetNextItemWidth(row_w);
-    ImGui::SliderFloat(
-        "##ag", &opt.alpha_gamma, 0.2F, 4.0F, "%.2f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("##ag", &opt.alpha_gamma, 0.2F, 4.0F, "%.2f", ImGuiSliderFlags_Logarithmic);
 
     compact_label("Opacity", kLabelW);
     ImGui::SetNextItemWidth(row_w);
@@ -63,8 +62,7 @@ void draw_eraser(noted::domain::tool::EraserOptions& opt) {
 
     compact_label("Pressure", kLabelW);
     ImGui::SetNextItemWidth(row_w);
-    ImGui::SliderFloat(
-        "##ag", &opt.alpha_gamma, 0.2F, 4.0F, "%.2f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SliderFloat("##ag", &opt.alpha_gamma, 0.2F, 4.0F, "%.2f", ImGuiSliderFlags_Logarithmic);
 }
 
 void draw_placeholder(const char* tool_name) {
@@ -125,12 +123,9 @@ void draw_text(noted::domain::tool::TextOptions& opt) {
     if (opt.pending_asset_id != noted::domain::invalid_asset_id) {
         if (const auto* asset = image_assets.find(opt.pending_asset_id); asset != nullptr) {
             std::filesystem::path p{asset->source_path};
-            std::string label =
-                p.filename().empty() ? asset->source_path : p.filename().string();
-            ImGui::TextDisabled("%s · %u×%u",
-                                label.c_str(),
-                                asset->intrinsic_w_px,
-                                asset->intrinsic_h_px);
+            std::string label = p.filename().empty() ? asset->source_path : p.filename().string();
+            ImGui::TextDisabled(
+                "%s · %u×%u", label.c_str(), asset->intrinsic_w_px, asset->intrinsic_h_px);
         } else {
             opt.pending_asset_id = noted::domain::invalid_asset_id;
             ImGui::TextDisabled("(no image)");

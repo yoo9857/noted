@@ -75,12 +75,8 @@ constexpr std::array<std::string_view, 2> kCanvasLayersKeys{"active", "items"};
 // `blend` are additive optional fields; older files load unchanged
 // (defaults: locked=false, blend=BlendMode::normal). Writer always
 // emits the full set for new files.
-constexpr std::array<std::string_view, 6> kCanvasLayerItemKeys{"id",
-                                                               "name",
-                                                               "visible",
-                                                               "opacity",
-                                                               "locked",
-                                                               "blend"};
+constexpr std::array<std::string_view, 6> kCanvasLayerItemKeys{
+    "id", "name", "visible", "opacity", "locked", "blend"};
 
 // Per-style-object keys (inside a stroke). v7 schema.
 constexpr std::array<std::string_view, 9> kStrokeStyleKeys{
@@ -1271,9 +1267,9 @@ auto document_from_json(std::string_view json_text) -> Result<Document> {
                     try {
                         layer.locked = it.at("locked").get<bool>();
                     } catch (const json::exception& e) {
-                        return std::unexpected(noted::make_error(
-                            noted::ErrorCode::invalid_argument,
-                            ctx + ": 'locked' non-boolean — " + e.what()));
+                        return std::unexpected(
+                            noted::make_error(noted::ErrorCode::invalid_argument,
+                                              ctx + ": 'locked' non-boolean — " + e.what()));
                     }
                 }
                 if (it.contains("blend")) {
@@ -1281,16 +1277,16 @@ auto document_from_json(std::string_view json_text) -> Result<Document> {
                     try {
                         blend_ord = it.at("blend").get<int>();
                     } catch (const json::exception& e) {
-                        return std::unexpected(noted::make_error(
-                            noted::ErrorCode::invalid_argument,
-                            ctx + ": 'blend' non-integral — " + e.what()));
+                        return std::unexpected(
+                            noted::make_error(noted::ErrorCode::invalid_argument,
+                                              ctx + ": 'blend' non-integral — " + e.what()));
                     }
                     if (blend_ord < 0 ||
                         blend_ord > static_cast<int>(noted::domain::BlendMode::luminosity)) {
-                        return std::unexpected(noted::make_error(
-                            noted::ErrorCode::invalid_argument,
-                            ctx + ": 'blend' ordinal " + std::to_string(blend_ord) +
-                                " out of range"));
+                        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                                 ctx + ": 'blend' ordinal " +
+                                                                     std::to_string(blend_ord) +
+                                                                     " out of range"));
                     }
                     layer.blend = static_cast<noted::domain::BlendMode>(blend_ord);
                 }

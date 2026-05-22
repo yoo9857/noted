@@ -58,11 +58,8 @@ struct BlobInteraction {
 // Round "paint blob" swatch. A real palette has actual blobs of paint
 // you scoop with a brush; circles + a soft top-left highlight read
 // that way far better than rounded squares.
-[[nodiscard]] auto draw_paint_blob(const ImVec4& col,
-                                   bool empty,
-                                   float size,
-                                   int unique_id,
-                                   bool erase_armed) -> BlobInteraction {
+[[nodiscard]] auto draw_paint_blob(
+    const ImVec4& col, bool empty, float size, int unique_id, bool erase_armed) -> BlobInteraction {
     BlobInteraction r{};
     ImGui::PushID(unique_id);
 
@@ -118,9 +115,8 @@ struct BlobInteraction {
             // Hover ring — red when armed for erase, otherwise the
             // standard white glow. Bright red is the universal "this
             // click will destroy" affordance.
-            const ImU32 ring_col = erase_armed
-                                       ? IM_COL32(0xFF, 0x55, 0x55, 0xE0)
-                                       : IM_COL32(0xFF, 0xFF, 0xFF, 0xC0);
+            const ImU32 ring_col =
+                erase_armed ? IM_COL32(0xFF, 0x55, 0x55, 0xE0) : IM_COL32(0xFF, 0xFF, 0xFF, 0xC0);
             dl->AddCircle(centre, radius + 2.5F, ring_col, kSegments, 2.2F);
             if (erase_armed) {
                 // Small `x` glyph centred on the blob — unambiguous
@@ -232,8 +228,7 @@ auto color_picker_panel(float* rgba,
     constexpr ImGuiColorEditFlags kPickerFlags =
         ImGuiColorEditFlags_NoSidePreview | ImGuiColorEditFlags_NoLabel |
         ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_PickerHueWheel |
-        ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_Float |
-        ImGuiColorEditFlags_NoTooltip;
+        ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_Float | ImGuiColorEditFlags_NoTooltip;
 
     const float wheel_size = std::clamp(avail_w, kMinWheelSize, kMaxWheelSize);
     if (avail_w > wheel_size) {
@@ -328,13 +323,12 @@ auto color_picker_panel(float* rgba,
     ImGui::SameLine(0.0F, 2.0F);
     const float hex_input_w = std::max(40.0F, half_w - kLabelW);
     ImGui::SetNextItemWidth(hex_input_w);
-    if (ImGui::InputText("##hex",
-                         hex_buf,
-                         sizeof(hex_buf),
-                         ImGuiInputTextFlags_CharsHexadecimal |
-                             ImGuiInputTextFlags_EnterReturnsTrue |
-                             ImGuiInputTextFlags_CharsUppercase |
-                             ImGuiInputTextFlags_AutoSelectAll)) {
+    if (ImGui::InputText(
+            "##hex",
+            hex_buf,
+            sizeof(hex_buf),
+            ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_EnterReturnsTrue |
+                ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_AutoSelectAll)) {
         unsigned int v = 0;
         if (std::sscanf(hex_buf, "%x", &v) == 1) {
             rgba[0] = static_cast<float>((v >> 16) & 0xFF) / 255.0F;
@@ -398,10 +392,9 @@ auto color_picker_panel(float* rgba,
         display.erase_armed = !display.erase_armed;
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(
-            display.erase_armed
-                ? "Cancel — click again to leave erase mode without removing"
-                : "Arm erase — the next palette well you click will be cleared");
+        ImGui::SetTooltip(display.erase_armed
+                              ? "Cancel — click again to leave erase mode without removing"
+                              : "Arm erase — the next palette well you click will be cleared");
     }
     if (display.erase_armed) {
         ImGui::PopStyleColor(4);
@@ -426,10 +419,9 @@ auto color_picker_panel(float* rgba,
     const float tray_inner_w = ImGui::GetContentRegionAvail().x - 2.0F * tray_pad.x;
     // Compute height ahead of the layout so we can paint the wood
     // first (cleaner than transparent overlap).
-    const int row_count = (static_cast<int>(palette_colors.size()) + kBlobsPerRow - 1) /
-                          kBlobsPerRow;
-    const float tray_inner_h =
-        row_count * kBlobSize + std::max(0, row_count - 1) * kBlobGap;
+    const int row_count =
+        (static_cast<int>(palette_colors.size()) + kBlobsPerRow - 1) / kBlobsPerRow;
+    const float tray_inner_h = row_count * kBlobSize + std::max(0, row_count - 1) * kBlobGap;
     const ImVec2 tray_max(tray_min.x + tray_inner_w + 2.0F * tray_pad.x,
                           tray_min.y + tray_inner_h + 2.0F * tray_pad.y);
     draw_palette_background(tray_min, tray_max);
@@ -444,9 +436,9 @@ auto color_picker_panel(float* rgba,
     const float grid_w = kBlobsPerRow * kBlobSize + (kBlobsPerRow - 1) * kBlobGap;
     const float centre_offset = std::max(0.0F, (tray_inner_w - grid_w) * 0.5F);
     const ImVec2 grid_origin(tray_min.x + tray_pad.x + centre_offset, tray_min.y + tray_pad.y);
-    const int total_rows = static_cast<int>(
-        (palette_colors.size() + static_cast<std::size_t>(kBlobsPerRow) - 1U) /
-        static_cast<std::size_t>(kBlobsPerRow));
+    const int total_rows =
+        static_cast<int>((palette_colors.size() + static_cast<std::size_t>(kBlobsPerRow) - 1U) /
+                         static_cast<std::size_t>(kBlobsPerRow));
 
     for (std::size_t i = 0; i < palette_colors.size(); ++i) {
         const int row = static_cast<int>(i) / kBlobsPerRow;
@@ -483,11 +475,10 @@ auto color_picker_panel(float* rgba,
                                   static_cast<int>(c[1] * 255.0F + 0.5F) & 0xFF,
                                   static_cast<int>(c[2] * 255.0F + 0.5F) & 0xFF);
             } else {
-                ImGui::SetTooltip(
-                    "#%02X%02X%02X · Click to use · Right-click to remove",
-                    static_cast<int>(c[0] * 255.0F + 0.5F) & 0xFF,
-                    static_cast<int>(c[1] * 255.0F + 0.5F) & 0xFF,
-                    static_cast<int>(c[2] * 255.0F + 0.5F) & 0xFF);
+                ImGui::SetTooltip("#%02X%02X%02X · Click to use · Right-click to remove",
+                                  static_cast<int>(c[0] * 255.0F + 0.5F) & 0xFF,
+                                  static_cast<int>(c[1] * 255.0F + 0.5F) & 0xFF,
+                                  static_cast<int>(c[2] * 255.0F + 0.5F) & 0xFF);
             }
         } else if (ImGui::IsItemHovered() && empty) {
             ImGui::SetTooltip("Empty slot — use '+ Add' to dollop paint here");
@@ -496,8 +487,7 @@ auto color_picker_panel(float* rgba,
 
     // Advance the cursor past the grid so subsequent panel content
     // (if any) lands below the tray rather than overlapping it.
-    const float grid_h =
-        total_rows * kBlobSize + std::max(0, total_rows - 1) * kBlobGap;
+    const float grid_h = total_rows * kBlobSize + std::max(0, total_rows - 1) * kBlobGap;
     ImGui::SetCursorScreenPos(ImVec2(tray_min.x, tray_min.y + grid_h + 2.0F * tray_pad.y));
 
     ImGui::End();

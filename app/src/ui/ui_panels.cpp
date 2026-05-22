@@ -158,8 +158,7 @@ void UiPanels::draw() {
                 break;
             }
             case K::duplicate: {
-                auto cmd =
-                    std::make_unique<noted::domain::DuplicateCanvasLayerCommand>(la.index);
+                auto cmd = std::make_unique<noted::domain::DuplicateCanvasLayerCommand>(la.index);
                 if (auto r = session_.execute(std::move(cmd)); !r) {
                     std::cerr << r.error().format() << '\n';
                 }

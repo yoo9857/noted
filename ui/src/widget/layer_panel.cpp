@@ -77,14 +77,22 @@ namespace {
 }
 
 constexpr std::array<noted::domain::BlendMode, 16> kAllBlendModes{
-    noted::domain::BlendMode::normal,       noted::domain::BlendMode::multiply,
-    noted::domain::BlendMode::screen,       noted::domain::BlendMode::overlay,
-    noted::domain::BlendMode::soft_light,   noted::domain::BlendMode::hard_light,
-    noted::domain::BlendMode::color_dodge,  noted::domain::BlendMode::color_burn,
-    noted::domain::BlendMode::linear_dodge, noted::domain::BlendMode::linear_burn,
-    noted::domain::BlendMode::difference,   noted::domain::BlendMode::exclusion,
-    noted::domain::BlendMode::hue,          noted::domain::BlendMode::saturation,
-    noted::domain::BlendMode::color,        noted::domain::BlendMode::luminosity,
+    noted::domain::BlendMode::normal,
+    noted::domain::BlendMode::multiply,
+    noted::domain::BlendMode::screen,
+    noted::domain::BlendMode::overlay,
+    noted::domain::BlendMode::soft_light,
+    noted::domain::BlendMode::hard_light,
+    noted::domain::BlendMode::color_dodge,
+    noted::domain::BlendMode::color_burn,
+    noted::domain::BlendMode::linear_dodge,
+    noted::domain::BlendMode::linear_burn,
+    noted::domain::BlendMode::difference,
+    noted::domain::BlendMode::exclusion,
+    noted::domain::BlendMode::hue,
+    noted::domain::BlendMode::saturation,
+    noted::domain::BlendMode::color,
+    noted::domain::BlendMode::luminosity,
 };
 
 struct RenameEdit {
@@ -124,7 +132,8 @@ auto layer_panel(noted::domain::Document& doc, bool* open) -> LayerPanelAction {
             }
         }
     }
-    const bool can_move_up = have_active && active_idx != stack.size() && active_idx < stack.size() - 1U;
+    const bool can_move_up =
+        have_active && active_idx != stack.size() && active_idx < stack.size() - 1U;
     const bool can_move_down = have_active && active_idx != stack.size() && active_idx > 0;
     const bool can_remove = stack.size() > 1U && have_active;
     const bool can_duplicate = have_active && active_idx != stack.size();
@@ -226,12 +235,11 @@ auto layer_panel(noted::domain::Document& doc, bool* open) -> LayerPanelAction {
 
         if (renaming.target == layer.id) {
             ImGui::SetNextItemWidth(-FLT_MIN);
-            const bool committed =
-                ImGui::InputText("##rename",
-                                 renaming.buf.data(),
-                                 renaming.buf.size(),
-                                 ImGuiInputTextFlags_EnterReturnsTrue |
-                                     ImGuiInputTextFlags_AutoSelectAll);
+            const bool committed = ImGui::InputText(
+                "##rename",
+                renaming.buf.data(),
+                renaming.buf.size(),
+                ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
             const bool blurred = ImGui::IsItemDeactivated();
             if (committed || blurred) {
                 std::string trimmed{renaming.buf.data()};
@@ -248,17 +256,13 @@ auto layer_panel(noted::domain::Document& doc, bool* open) -> LayerPanelAction {
                 renaming.buf[0] = '\0';
             }
         } else {
-            const auto label = layer.name.empty()
-                                   ? ("(layer " + std::to_string(layer.id) + ")")
-                                   : layer.name;
-            if (ImGui::Selectable(label.c_str(),
-                                  is_active,
-                                  ImGuiSelectableFlags_AllowDoubleClick)) {
+            const auto label =
+                layer.name.empty() ? ("(layer " + std::to_string(layer.id) + ")") : layer.name;
+            if (ImGui::Selectable(
+                    label.c_str(), is_active, ImGuiSelectableFlags_AllowDoubleClick)) {
                 if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                     renaming.target = layer.id;
-                    std::strncpy(renaming.buf.data(),
-                                 layer.name.c_str(),
-                                 renaming.buf.size() - 1U);
+                    std::strncpy(renaming.buf.data(), layer.name.c_str(), renaming.buf.size() - 1U);
                     renaming.buf[renaming.buf.size() - 1U] = '\0';
                 } else if (!is_active) {
                     if (auto r = doc.set_active_layer(layer.id); !r) {

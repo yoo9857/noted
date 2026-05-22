@@ -7,8 +7,8 @@ namespace {
 
 using noted::domain::AddCanvasLayerCommand;
 using noted::domain::AddStrokeCommand;
-using noted::domain::DuplicateCanvasLayerCommand;
 using noted::domain::Document;
+using noted::domain::DuplicateCanvasLayerCommand;
 using noted::domain::RemoveCanvasLayerCommand;
 using noted::stroke::DrawMode;
 using noted::stroke::Stroke;
