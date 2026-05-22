@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <span>
@@ -18,6 +19,7 @@
 #include "noted/compositor/layer_payload.hpp"
 #include "noted/domain/command/commands.hpp"
 #include "noted/domain/document/document.hpp"
+#include "noted/domain/io/brush_library_json.hpp"
 #include "noted/engine/harness/harness.hpp"
 #include "noted/engine/hook/registry.hpp"
 #include "noted/engine/profile.hpp"
@@ -110,6 +112,12 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
     if (auto r = app->init_renderer_and_imgui(); !r) {
         return std::unexpected(std::move(r).error());
     }
+    // Brush library: seed factory presets, then layer the user-added
+    // presets from disk on top. Failures load best-effort — a
+    // corrupt or missing `brushes.json` should never block the app,
+    // just degrade to factory-only.
+    app->brush_library_ = noted::domain::tool::BrushLibrary::with_builtins();
+    app->load_user_brush_library();
 
     // Build the render passes + UI panels coordinators AFTER all
     // GPU resources are alive. The `Deps` structs snapshot non-
@@ -217,6 +225,63 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
         .debug_overlay_state = raw->debug_overlay_state_,
         .outline_rename = raw->outline_rename_,
         .tools = raw->tools_,
+        .brush_library = raw->brush_library_,
+        .active_brush_preset = &raw->active_brush_preset_,
+        .on_apply_preset =
+            [raw](noted::domain::tool::BrushPresetId id) {
+                if (const auto* p = raw->brush_library_.find(id); p != nullptr) {
+                    noted::domain::tool::apply_preset_to(*p, raw->tools_.pen);
+                    raw->active_brush_preset_ = id;
+                    raw->pen_at_last_apply_ = raw->tools_.pen;
+                }
+            },
+        .on_save_preset =
+            [raw](std::string suggested_name) {
+                noted::domain::tool::BrushPreset p{};
+                // Build a uniqueness-safe default name by appending
+                // "(N)" if the suggested name collides.
+                std::string name =
+                    suggested_name.empty() ? std::string{"My brush"} : std::move(suggested_name);
+                int suffix = 1;
+                std::string candidate = name;
+                while (raw->brush_library_.find_by_name(candidate) != nullptr) {
+                    ++suffix;
+                    candidate = name + " (" + std::to_string(suffix) + ")";
+                }
+                p.name = candidate;
+                p.kind = noted::domain::tool::BrushKind::pen;
+                p.min_radius_px = raw->tools_.pen.min_radius_px;
+                p.max_radius_px = raw->tools_.pen.max_radius_px;
+                p.alpha_gamma = raw->tools_.pen.alpha_gamma;
+                p.r = raw->tools_.pen.r;
+                p.g = raw->tools_.pen.g;
+                p.b = raw->tools_.pen.b;
+                p.a = raw->tools_.pen.a;
+                p.stabilizer = raw->tools_.pen.stabilizer;
+                p.use_preset_color = true;
+                auto id = raw->brush_library_.add(std::move(p));
+                if (id) {
+                    raw->active_brush_preset_ = *id;
+                    raw->pen_at_last_apply_ = raw->tools_.pen;
+                    raw->save_user_brush_library();
+                } else {
+                    std::cerr << id.error().format() << '\n';
+                }
+            },
+        .on_remove_preset =
+            [raw](noted::domain::tool::BrushPresetId id) {
+                if (raw->brush_library_.is_builtin(id)) {
+                    return;  // factory presets can't be removed
+                }
+                if (auto r = raw->brush_library_.remove(id); !r) {
+                    std::cerr << r.error().format() << '\n';
+                    return;
+                }
+                if (raw->active_brush_preset_ == id) {
+                    raw->active_brush_preset_ = noted::domain::tool::invalid_brush_preset_id;
+                }
+                raw->save_user_brush_library();
+            },
         .selection = raw->selection_,
         .shapes = raw->session_.document().shapes(),
         .texts = raw->session_.document().texts(),
@@ -642,6 +707,46 @@ auto App::init_stroke_engine() -> noted::Result<void> {
         shape_recognizer_.on_stroke_added(raw_cmd->assigned_index(), monotonic_seconds());
     });
     return {};
+}
+
+void App::load_user_brush_library() noexcept {
+    const auto exe_dir = noted::platform::fs::executable_dir();
+    if (exe_dir.empty()) {
+        return;
+    }
+    const auto path = exe_dir / "brushes.json";
+    std::error_code ec;
+    if (!std::filesystem::exists(path, ec) || ec) {
+        return;  // no user library yet — factory-only, fine
+    }
+    std::ifstream in{path, std::ios::binary};
+    if (!in) {
+        std::cerr << "[brushes] could not open " << path.string() << '\n';
+        return;
+    }
+    std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (auto r = noted::domain::io::brush_library_user_from_json(contents, brush_library_); !r) {
+        std::cerr << "[brushes] " << r.error().format() << " — falling back to factory-only\n";
+    }
+}
+
+void App::save_user_brush_library() noexcept {
+    const auto exe_dir = noted::platform::fs::executable_dir();
+    if (exe_dir.empty()) {
+        return;
+    }
+    const auto path = exe_dir / "brushes.json";
+    const auto text = noted::domain::io::brush_library_user_to_json(brush_library_);
+    try {
+        std::ofstream out{path, std::ios::trunc | std::ios::binary};
+        if (!out) {
+            std::cerr << "[brushes] could not open " << path.string() << " for write\n";
+            return;
+        }
+        out << text;
+    } catch (const std::exception& e) {
+        std::cerr << "[brushes] save failed: " << e.what() << '\n';
+    }
 }
 
 auto App::init_renderer_and_imgui() -> noted::Result<void> {

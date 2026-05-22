@@ -5,6 +5,7 @@ noted_add_module(
         src/document/image_asset_registry.cpp
         src/command/command.cpp
         src/io/document_json.cpp
+        src/io/brush_library_json.cpp
         src/layer/layer.cpp
         src/layer/canvas_layer_stack.cpp
         src/clipboard/selection_ops.cpp
@@ -12,6 +13,7 @@ noted_add_module(
         src/shape_detect/shape_detect.cpp
         src/tool/tool.cpp
         src/tool/options.cpp
+        src/tool/brush_library.cpp
         src/tool/selection_drag.cpp
         src/tool/shape_drag.cpp
         src/tool/text_input.cpp

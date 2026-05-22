@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "noted/domain/tool/brush_preset.hpp"
+
 namespace noted::domain::tool {
 
 namespace {
@@ -56,6 +58,30 @@ auto brush_from_pen(const PenOptions& opt) noexcept -> noted::stroke::BrushStyle
                    : (opt.stabilizer > 0.95F) ? 0.95F
                                               : opt.stabilizer;
     return b;
+}
+
+void apply_preset_to(const BrushPreset& preset, PenOptions& opt) noexcept {
+    // Stroke-shape fields always overwrite — the preset's whole point
+    // is to define how the brush feels, so the user's previous
+    // min/max/pressure/stabilizer get replaced.
+    opt.min_radius_px = preset.min_radius_px;
+    opt.max_radius_px = preset.max_radius_px;
+    opt.alpha_gamma = preset.alpha_gamma;
+    opt.stabilizer = preset.stabilizer;
+    if (preset.use_preset_color) {
+        // Preset wants its colour applied — e.g. "Soft Pencil" ships
+        // graphite-grey, "Calligraphy" ships pure black.
+        opt.r = preset.r;
+        opt.g = preset.g;
+        opt.b = preset.b;
+        opt.a = preset.a;
+    } else {
+        // Preset's `r/g/b` are ignored; the artist's current Colour
+        // picker selection survives. Alpha is still taken from the
+        // preset (different brushes deposit different opacity even
+        // with the same hue — Marker is partial, Ink Pen is solid).
+        opt.a = preset.a;
+    }
 }
 
 auto brush_from_eraser(const EraserOptions& opt) noexcept -> noted::stroke::BrushStyle {

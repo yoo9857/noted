@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "noted/domain/selection/selection.hpp"
+#include "noted/domain/tool/brush_library.hpp"
 #include "noted/domain/tool/shape_drag.hpp"
 #include "noted/domain/tool/tool.hpp"
 #include "noted/engine/engine.hpp"
@@ -107,6 +108,17 @@ public:
 
         // ---- mutable tool + selection + shapes state -------------------
         noted::domain::tool::ToolState& tools;
+        // Brush library + active-preset id are owned by App. UiPanels
+        // surfaces the library in the brush-options panel and routes
+        // user actions (apply / save / remove) back via callbacks.
+        noted::domain::tool::BrushLibrary& brush_library;
+        noted::domain::tool::BrushPresetId* active_brush_preset{nullptr};
+        // Apply / save / remove callbacks installed by App. The panel
+        // emits intents; App owns the library mutation + disk
+        // persistence so the UI layer stays free of platform I/O.
+        std::function<void(noted::domain::tool::BrushPresetId)> on_apply_preset;
+        std::function<void(std::string)> on_save_preset;
+        std::function<void(noted::domain::tool::BrushPresetId)> on_remove_preset;
         noted::domain::Selection& selection;
         // Shapes / texts live on `Document` (persistence
         // consolidation PRs). Images still live on App until B.7.b's
@@ -170,6 +182,11 @@ private:
     noted::ui::widget::OutlineRenameState& outline_rename_;
 
     noted::domain::tool::ToolState& tools_;
+    noted::domain::tool::BrushLibrary& brush_library_;
+    noted::domain::tool::BrushPresetId* active_brush_preset_;
+    std::function<void(noted::domain::tool::BrushPresetId)> on_apply_preset_;
+    std::function<void(std::string)> on_save_preset_;
+    std::function<void(noted::domain::tool::BrushPresetId)> on_remove_preset_;
     noted::domain::Selection& selection_;
     const std::vector<noted::domain::tool::ShapePrimitive>& shapes_;
     const std::vector<noted::domain::tool::TextPrimitive>& texts_;

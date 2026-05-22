@@ -14,6 +14,7 @@ noted_add_module(
         src/widget/page_strip.cpp
         src/widget/top_toolbar.cpp
         src/widget/brush_options.cpp
+        src/widget/brush_library_panel.cpp
         src/widget/selection_overlay.cpp
         src/widget/shape_overlay.cpp
         src/widget/text_overlay.cpp

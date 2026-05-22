@@ -34,6 +34,7 @@
 #include "noted/domain/clipboard/clipboard.hpp"
 #include "noted/domain/clipboard/selection_ops.hpp"
 #include "noted/domain/selection/selection.hpp"
+#include "noted/domain/tool/brush_library.hpp"
 #include "noted/domain/tool/tool.hpp"
 #include "noted/engine/canvas/camera.hpp"
 #include "noted/engine/canvas/page_renderer.hpp"
@@ -176,6 +177,12 @@ private:
     [[nodiscard]] auto init_page_renderer() -> noted::Result<void>;
     [[nodiscard]] auto init_stroke_engine() -> noted::Result<void>;
     [[nodiscard]] auto init_renderer_and_imgui() -> noted::Result<void>;
+
+    // Brush library disk I/O — best-effort. The user file lives at
+    // `<exe_dir>/brushes.json`. Failures log to stderr and degrade
+    // to factory-only behaviour rather than blocking the app.
+    void load_user_brush_library() noexcept;
+    void save_user_brush_library() noexcept;
     void install_frame_hook();
 
     // ---- Members (declaration order = construction / destruction order)
@@ -287,6 +294,20 @@ private:
     // EraserOptions / ...) live on `tools_` and the App pushes them
     // into the stroke engine every frame for live-edit.
     noted::domain::tool::ToolState tools_{};
+    // Brush library — built-ins seeded at startup, user-added presets
+    // loaded from `<exe_dir>/brushes.json` on top, saved back to disk
+    // on every add / remove. The active preset id tracks which card
+    // the user last clicked; hand-editing the sliders falls off this
+    // marker (set back to `invalid_brush_preset_id`).
+    noted::domain::tool::BrushLibrary brush_library_{};
+    noted::domain::tool::BrushPresetId active_brush_preset_{
+        noted::domain::tool::invalid_brush_preset_id};
+    // Cached snapshot of `tools_.pen` taken at the last preset
+    // apply; on each frame we compare and clear `active_brush_preset_`
+    // when the slider values drift away — so the card highlight
+    // honestly reflects "currently using this preset" rather than
+    // "this is the preset I clicked five edits ago".
+    noted::domain::tool::PenOptions pen_at_last_apply_{};
 
     // ---- Selection state ----------------------------------------------
     // The committed selection — modified by the Select tool, eventually
