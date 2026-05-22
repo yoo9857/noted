@@ -52,6 +52,8 @@ auto brush_from_pen(const PenOptions& opt) noexcept -> noted::stroke::BrushStyle
     // boundary in case a degenerate value sneaks in.
     b.softness_ratio = std::clamp(opt.softness, 0.0F, 1.0F);
     b.alpha_gamma = safe_gamma(opt.alpha_gamma);
+    // Curve is authoritative for the engine's stamp shaping.
+    b.pressure_curve = opt.pressure_curve;
     b.r = opt.r;
     b.g = opt.g;
     b.b = opt.b;
@@ -71,6 +73,7 @@ void apply_preset_to(const BrushPreset& preset, PenOptions& opt) noexcept {
     opt.min_radius_px = preset.min_radius_px;
     opt.max_radius_px = preset.max_radius_px;
     opt.alpha_gamma = preset.alpha_gamma;
+    opt.pressure_curve = preset.pressure_curve;
     opt.stabilizer = preset.stabilizer;
     opt.softness = preset.softness;
     if (preset.use_preset_color) {

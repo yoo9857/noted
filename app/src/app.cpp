@@ -253,6 +253,7 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
                 p.min_radius_px = raw->tools_.pen.min_radius_px;
                 p.max_radius_px = raw->tools_.pen.max_radius_px;
                 p.alpha_gamma = raw->tools_.pen.alpha_gamma;
+                p.pressure_curve = raw->tools_.pen.pressure_curve;
                 p.r = raw->tools_.pen.r;
                 p.g = raw->tools_.pen.g;
                 p.b = raw->tools_.pen.b;

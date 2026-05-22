@@ -49,6 +49,42 @@ enum class DrawMode : std::uint8_t {
     erase = 1,
 };
 
+// Pressure → alpha shaping curve. Cubic Bezier from (0,0) to (1,1)
+// with two free intermediate handles. Replaces the single
+// `alpha_gamma` scalar — the curve can express linear, ease-in,
+// ease-out, and S-shaped pressure responses that a power function
+// can't. Defaults give a near-linear response (handles on the
+// diagonal); `from_gamma()` produces a curve approximating
+// `pow(pressure, gamma)` for backward compatibility with stroke
+// data saved before the curve was introduced.
+//
+// Convention: handles are 2D positions in [0, 1]². Endpoint P0 is
+// pinned at (0, 0) and P3 at (1, 1) so the curve always starts at
+// "zero alpha at zero pressure" and ends at "full alpha at full
+// pressure" — the user can't accidentally clip to no-ink-ever.
+struct PressureCurve {
+    float h1_x{1.0F / 3.0F};
+    float h1_y{1.0F / 3.0F};
+    float h2_x{2.0F / 3.0F};
+    float h2_y{2.0F / 3.0F};
+
+    // Evaluate the curve at input pressure x ∈ [0, 1]. Returns the
+    // shaped alpha in [0, 1]. Implementation uses x as the bezier
+    // parameter `t` directly — exactly correct when handles sit on
+    // the x=t diagonal (which the default does), well-behaved and
+    // monotonic for any reasonable handle layout. Avoids the cost
+    // of bezier-x→t inversion which would be needed for arbitrary
+    // handles.
+    [[nodiscard]] auto evaluate(float x) const noexcept -> float;
+
+    // Build a curve that closely approximates `pow(x, gamma)`. Used
+    // by the JSON loader to migrate strokes saved with the legacy
+    // `alpha_gamma` scalar — pen feel survives the v8→v9 upgrade.
+    [[nodiscard]] static auto from_gamma(float gamma) noexcept -> PressureCurve;
+
+    [[nodiscard]] auto operator==(const PressureCurve&) const noexcept -> bool = default;
+};
+
 // Per-engine brush style.
 //
 // Fully described tuple: a radius range, an alpha gamma, a softness
@@ -66,9 +102,21 @@ struct BrushStyle {
     // for future SDF-edge brushes; the ribbon tessellator
     // currently ignores it.
     float softness_ratio{0.20F};
-    // pow(pressure, alpha_gamma). 1.0 = linear, >1 emphasizes
-    // high pressure, <1 emphasizes light touches.
+    // Legacy single-knob pressure shaper. Kept for backward
+    // compatibility with v7/v8 `.noted` strokes and for the simple
+    // "Pressure" slider in the UI which adjusts the curve via
+    // `PressureCurve::from_gamma`. The render path reads
+    // `pressure_curve` below — `alpha_gamma` is no longer
+    // authoritative.
     float alpha_gamma{1.8F};
+    // Authoritative pressure-to-alpha curve. Replaces the
+    // single-scalar gamma at the engine level. Defaults to the
+    // identity bezier (handles on the diagonal → y == x) so
+    // `BrushStyle{}` with no explicit shaping renders linearly.
+    // Production paths (factory presets, brush_from_pen) set this
+    // explicitly via `from_gamma` to match the user-facing
+    // `alpha_gamma` value.
+    PressureCurve pressure_curve{};
     // Straight-alpha color. Alpha is multiplied by the pressure
     // curve; r/g/b pass through unchanged.
     float r{0.0F};

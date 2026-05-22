@@ -33,9 +33,17 @@ auto BrushLibrary::with_builtins() -> BrushLibrary {
 
     // The seven built-in presets cover the major brush families a
     // working illustrator reaches for. Sizing / pressure / softness
-    // numbers tuned by hand for the v1 ribbon tessellator — they
+    // numbers tuned by hand for the v1 ribbon tessellator ??they
     // give visibly distinct feel even before the SDF-edge brush
     // (Phase C+) lands.
+    //
+    // Helper: derive the pressure curve from alpha_gamma at add
+    // time so a future tweak of one preset's gamma value
+    // automatically reshapes its curve too.
+    const auto add_with_curve = [&](BrushPreset p) {
+        p.pressure_curve = noted::stroke::PressureCurve::from_gamma(p.alpha_gamma);
+        (void) lib.add(std::move(p));
+    };
 
     {
         BrushPreset p{};
@@ -48,7 +56,7 @@ auto BrushLibrary::with_builtins() -> BrushLibrary {
         p.softness = 0.05F;
         p.a = 1.0F;
         p.use_preset_color = false;  // ink takes whatever ink colour is selected
-        (void) lib.add(p);
+        add_with_curve(std::move(p));
     }
     {
         BrushPreset p{};
@@ -64,7 +72,7 @@ auto BrushLibrary::with_builtins() -> BrushLibrary {
         p.b = 0.22F;
         p.a = 0.80F;
         p.use_preset_color = true;
-        (void) lib.add(p);
+        add_with_curve(std::move(p));
     }
     {
         BrushPreset p{};
@@ -77,7 +85,7 @@ auto BrushLibrary::with_builtins() -> BrushLibrary {
         p.softness = 0.10F;
         p.a = 0.55F;
         p.use_preset_color = false;
-        (void) lib.add(p);
+        add_with_curve(std::move(p));
     }
     {
         BrushPreset p{};
@@ -91,7 +99,7 @@ auto BrushLibrary::with_builtins() -> BrushLibrary {
         p.spacing = 0.05F;
         p.a = 0.65F;
         p.use_preset_color = false;
-        (void) lib.add(p);
+        add_with_curve(std::move(p));
     }
     {
         BrushPreset p{};
@@ -104,7 +112,7 @@ auto BrushLibrary::with_builtins() -> BrushLibrary {
         p.softness = 0.10F;
         p.a = 1.0F;
         p.use_preset_color = false;
-        (void) lib.add(p);
+        add_with_curve(std::move(p));
     }
     {
         BrushPreset p{};
@@ -118,7 +126,7 @@ auto BrushLibrary::with_builtins() -> BrushLibrary {
         p.spacing = 0.03F;
         p.a = 0.30F;
         p.use_preset_color = false;
-        (void) lib.add(p);
+        add_with_curve(std::move(p));
     }
     {
         BrushPreset p{};
@@ -133,7 +141,7 @@ auto BrushLibrary::with_builtins() -> BrushLibrary {
         p.angle_jitter = 0.0F;
         p.a = 1.0F;
         p.use_preset_color = false;
-        (void) lib.add(p);
+        add_with_curve(std::move(p));
     }
 
     lib.mark_builtins_through(lib.size());
@@ -172,7 +180,7 @@ auto BrushLibrary::remove(BrushPresetId id) -> Result<BrushPreset> {
             auto removed = std::move(presets_[i]);
             presets_.erase(presets_.begin() + static_cast<std::ptrdiff_t>(i));
             // Shift the built-in marker down if a built-in was
-            // removed (rare — the UI doesn't expose deletion of
+            // removed (rare ??the UI doesn't expose deletion of
             // factory presets, but we still keep the invariant).
             if (i < builtin_count_) {
                 --builtin_count_;

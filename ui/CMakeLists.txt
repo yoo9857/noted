@@ -15,6 +15,7 @@ noted_add_module(
         src/widget/top_toolbar.cpp
         src/widget/brush_options.cpp
         src/widget/brush_library_panel.cpp
+        src/widget/pressure_curve_editor.cpp
         src/widget/selection_overlay.cpp
         src/widget/shape_overlay.cpp
         src/widget/text_overlay.cpp
