@@ -286,6 +286,11 @@ private:
     double smooth_x_{0.0};
     double smooth_y_{0.0};
     float smooth_pressure_{1.0F};
+    // Monotonic clock at the most recent press, expressed in seconds.
+    // Every sample appended during the same stroke gets its `t`
+    // field set to `(now - stroke_press_time_)` so the tessellator
+    // can compute per-segment velocity for the speed-taper dynamic.
+    double stroke_press_time_{0.0};
 
     // RAII subscriptions — released when the engine goes out of scope.
     noted::hook::Subscription<noted::hook::PointerPressed> sub_pressed_;

@@ -87,6 +87,13 @@ struct BrushPreset {
     // Random angle delta per stamp (0-1; 1 = ±90°).
     float angle_jitter{0.0F};
 
+    // Velocity-aware size dynamics (mirrors PenOptions /
+    // BrushStyle). Lets a preset declare its own "speed taper" —
+    // e.g. Soft Pencil ships 0.4 (visibly thins on a quick stroke,
+    // emulating a real pencil), Marker ships 0.0 (constant width
+    // matches the physical chisel-tip).
+    float velocity_blend{0.0F};
+
     // When true, the preset overrides the panel's live color on
     // apply. When false, the panel color is preserved — useful for
     // presets that define "shape feel" but should track whatever

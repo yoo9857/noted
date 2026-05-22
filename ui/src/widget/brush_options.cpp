@@ -77,6 +77,15 @@ void draw_pen(noted::domain::tool::PenOptions& opt) {
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Edge feather: 0 = crisp, 1 = soft halo");
     }
+
+    compact_label("Speed taper", kLabelW);
+    ImGui::SetNextItemWidth(row_w);
+    ImGui::SliderFloat("##vbl", &opt.velocity_blend, 0.0F, 1.0F, "%.2f");
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Velocity → size taper: 0 = pressure only,\n"
+            "1 = fast strokes shrink to ~30 % thickness");
+    }
 }
 
 void draw_eraser(noted::domain::tool::EraserOptions& opt) {

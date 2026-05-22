@@ -91,6 +91,13 @@ struct PenOptions {
     // engine-facing data and the UI-facing data stay in lockstep.
     float softness{0.20F};
 
+    // Velocity-aware size taper. 0 = pressure-only sizing; 1 =
+    // strong speed taper (fast strokes shrink to 30 % of their
+    // pressure-mapped radius). The engine reads
+    // `BrushStyle::velocity_blend`; this PenOptions field mirrors
+    // into it via `brush_from_pen`.
+    float velocity_blend{0.0F};
+
     [[nodiscard]] auto operator==(const PenOptions&) const noexcept -> bool = default;
 };
 

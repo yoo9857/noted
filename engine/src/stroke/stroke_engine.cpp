@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <utility>
@@ -48,6 +49,11 @@ constexpr VkDeviceSize kMaxVertexCapacity = 16 * 1024 * 1024;
         return 1.0F;
     }
     return v;
+}
+
+[[nodiscard]] auto monotonic_seconds() noexcept -> double {
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    return std::chrono::duration<double>(now).count();
 }
 
 }  // namespace
@@ -573,10 +579,12 @@ void StrokeEngine::on_pressed(const noted::hook::PointerPressed& e) noexcept {
     smooth_x_ = canvas_x;
     smooth_y_ = canvas_y;
     smooth_pressure_ = e.pressure;
+    stroke_press_time_ = monotonic_seconds();
     StrokeSample sample{};
     sample.x = static_cast<float>(canvas_x);
     sample.y = static_cast<float>(canvas_y);
     sample.pressure = e.pressure;
+    sample.t = 0.0F;  // press is t=0 by definition
     current_stroke_.samples.push_back(sample);
 }
 
@@ -619,6 +627,13 @@ void StrokeEngine::on_moved(const noted::hook::PointerMoved& e) noexcept {
     sample.x = static_cast<float>(smooth_x_);
     sample.y = static_cast<float>(smooth_y_);
     sample.pressure = smooth_pressure_;
+    // Seconds elapsed since the press — the tessellator divides
+    // segment length by `Δt` to compute the per-segment velocity
+    // that drives the speed taper. clamp at 0 in case the steady
+    // clock somehow walks backward (cannot happen on standards-
+    // conforming impls, but the cost of the check is nil).
+    const double now = monotonic_seconds();
+    sample.t = static_cast<float>(std::max(0.0, now - stroke_press_time_));
     current_stroke_.samples.push_back(sample);
 }
 

@@ -134,14 +134,39 @@ auto tessellate_ribbon(const Stroke& stroke,
 
         const auto stamp_a = stamp_from_pressure(stroke.style, samples[i].pressure);
         const auto stamp_b = stamp_from_pressure(stroke.style, samples[i + 1U].pressure);
+
+        // Velocity-aware size dampening. `dt` is the wall-clock
+        // span between the two endpoint samples; `velocity` reads
+        // as canvas-pixels per second. We dampen the segment radius
+        // proportionally — fast strokes (high px/s) shrink to feel
+        // like a real pen on paper, slow strokes keep their full
+        // pressure-mapped width.
+        //
+        // `kVelocityReference` is a hand-tuned "this counts as fast"
+        // anchor; at that velocity with blend=1 the radius collapses
+        // to 30 % of its pressure-only value. Floor at 0.3 so even
+        // extreme blends + extreme velocities don't pinch the stroke
+        // to zero — invisible ink reads as a bug, attenuated ink
+        // reads as the intended speed-taper.
+        //
+        // dt <= 0 (legacy strokes with no timestamps OR coalesce
+        // edge cases) skip the dampening entirely.
+        constexpr float kVelocityReferencePxPerSec = 1500.0F;
+        const float dt = samples[i + 1U].t - samples[i].t;
+        float velocity_factor = 1.0F;
+        if (dt > 0.0F && stroke.style.velocity_blend > 0.0F) {
+            const float v_px_per_sec = len / dt;
+            const float v_norm = std::min(1.0F, v_px_per_sec / kVelocityReferencePxPerSec);
+            const float blend = std::min(1.0F, std::max(0.0F, stroke.style.velocity_blend));
+            velocity_factor = 1.0F - blend * v_norm * 0.7F;  // 0.3 floor at max blend × max v
+        }
+
         // One constant radius per segment so the (side, t) SDF stays
-        // a uniform capsule. Use the average of the two endpoint
-        // pressures' radii — pressure varies slowly across a single
-        // segment so the loss of taper is invisible. Per-segment
-        // tapering (trapezoidal quad with varying r) is a future
-        // refinement; the bigger UX win is the robust topology this
-        // per-segment scheme already gives.
-        const float r = std::max(0.5F, (stamp_a.radius_px + stamp_b.radius_px) * 0.5F);
+        // a uniform capsule. Use the velocity-dampened average of
+        // the two endpoint pressures' radii — pressure varies slowly
+        // across a single segment so the loss of taper is invisible.
+        const float r =
+            std::max(0.5F, (stamp_a.radius_px + stamp_b.radius_px) * 0.5F * velocity_factor);
 
         // Aspect ratio K = body-half-length / radius. Body occupies
         // |t| ≤ K/(K+1); caps occupy K/(K+1) < |t| ≤ 1.

@@ -54,6 +54,8 @@ auto BrushLibrary::with_builtins() -> BrushLibrary {
         p.alpha_gamma = 1.4F;
         p.stabilizer = 0.45F;
         p.softness = 0.05F;
+        // Subtle taper — ink reads slightly thinner on a quick flick.
+        p.velocity_blend = 0.25F;
         p.a = 1.0F;
         p.use_preset_color = false;  // ink takes whatever ink colour is selected
         add_with_curve(std::move(p));
@@ -67,6 +69,8 @@ auto BrushLibrary::with_builtins() -> BrushLibrary {
         p.alpha_gamma = 2.4F;
         p.stabilizer = 0.55F;
         p.softness = 0.45F;
+        // A real pencil thins on quick strokes — moderate speed taper.
+        p.velocity_blend = 0.4F;
         p.r = 0.20F;
         p.g = 0.20F;
         p.b = 0.22F;
