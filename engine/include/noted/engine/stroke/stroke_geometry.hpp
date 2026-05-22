@@ -145,6 +145,15 @@ struct BrushStyle {
     // visibly thin while slow strokes keep full thickness, which is
     // what Procreate's "speed taper" emulates.
     float velocity_blend{0.0F};
+    // Tilt-aware width dynamics. 0 = ignore tilt; 1 = full
+    // calligraphy effect — segments running PARALLEL to the pen's
+    // tilt direction thin to ~40 % of pressure radius (chisel tip
+    // dragged along its length), perpendicular segments stay at
+    // full pressure radius (broad-side stamp). The tessellator
+    // reads both the segment tangent and the per-sample
+    // `tilt_x/y`; mouse / no-tilt devices report zero so the
+    // dynamic vanishes naturally.
+    float tilt_blend{0.0F};
 };
 
 // Per-sample brush evaluation (legacy name "Stamp" — historically
@@ -191,6 +200,13 @@ struct StrokeSample {
     // simultaneous → velocity = 0 → no damping," which reproduces
     // the pre-velocity rendering bit-for-bit.
     float t{0.0F};
+    // Pen tilt at sample time, radians, [-pi/2, pi/2]. Zero for
+    // mouse / non-tilt-sensing pens. The tessellator uses the
+    // magnitude + direction to skew per-segment radius — segments
+    // running PARALLEL to the tilt axis get narrower (chisel-tip
+    // drag), perpendicular segments get wider (broad-side stamp).
+    float tilt_x{0.0F};
+    float tilt_y{0.0F};
 };
 
 // One vector ink stroke. The brush style is captured **at stroke

@@ -94,6 +94,10 @@ struct BrushPreset {
     // matches the physical chisel-tip).
     float velocity_blend{0.0F};
 
+    // Tilt-aware calligraphy. Calligraphy preset ships 0.8 so the
+    // chisel tip is unmistakable; other presets default to 0.
+    float tilt_blend{0.0F};
+
     // When true, the preset overrides the panel's live color on
     // apply. When false, the panel color is preserved — useful for
     // presets that define "shape feel" but should track whatever

@@ -98,6 +98,12 @@ struct PenOptions {
     // into it via `brush_from_pen`.
     float velocity_blend{0.0F};
 
+    // Tilt-aware calligraphy width. 0 = ignore tilt; 1 = full
+    // chisel effect — segments parallel to pen tilt thin to ~40 %.
+    // Mouse / no-tilt devices report zero tilt so the effect
+    // vanishes naturally regardless of this slider's value.
+    float tilt_blend{0.0F};
+
     [[nodiscard]] auto operator==(const PenOptions&) const noexcept -> bool = default;
 };
 

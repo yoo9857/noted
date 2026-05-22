@@ -233,6 +233,13 @@ struct PointerPressed {
     double y = 0.0;
     PointerButton button = PointerButton::left;
     float pressure = 1.0F;
+    // Pen tilt at press time, radians, [-pi/2, pi/2]. Zero on
+    // devices without a tilt sensor (mouse, pen tips that don't
+    // report tilt). Mirrors `PointerMoved` so the stroke engine
+    // can stamp the first sample's tilt without waiting for the
+    // first move event.
+    float tilt_x = 0.0F;
+    float tilt_y = 0.0F;
 };
 
 struct PointerReleased {
