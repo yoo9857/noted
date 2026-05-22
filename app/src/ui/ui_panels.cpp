@@ -12,6 +12,7 @@
 #include "noted/engine/canvas/camera.hpp"
 #include "noted/engine/gpu/swapchain.hpp"
 #include "noted/engine/stroke/stroke_engine.hpp"
+#include "noted/ui/widget/brush_library_panel.hpp"
 #include "noted/ui/widget/brush_options.hpp"
 #include "noted/ui/widget/image_overlay.hpp"
 #include "noted/ui/widget/layer_panel.hpp"
@@ -91,6 +92,11 @@ UiPanels::UiPanels(Deps d) noexcept
       debug_overlay_state_(d.debug_overlay_state),
       outline_rename_(d.outline_rename),
       tools_(d.tools),
+      brush_library_(d.brush_library),
+      active_brush_preset_(d.active_brush_preset),
+      on_apply_preset_(std::move(d.on_apply_preset)),
+      on_save_preset_(std::move(d.on_save_preset)),
+      on_remove_preset_(std::move(d.on_remove_preset)),
       selection_(d.selection),
       shapes_(d.shapes),
       texts_(d.texts),
@@ -195,6 +201,41 @@ void UiPanels::draw() {
     // result struct because dialog reach + Document mutation cannot
     // live in the ui layer.
     {
+        // Brush library grid renders ABOVE the slider section,
+        // inside the same "Brush options" ImGui window. The widget
+        // emits intents (apply / save / remove); the host callbacks
+        // own the actual library mutation + disk persistence.
+        if (menu_state_.show_brush_options &&
+            ImGui::Begin("Brush options", &menu_state_.show_brush_options)) {
+            const auto active_id = active_brush_preset_ != nullptr
+                                       ? *active_brush_preset_
+                                       : noted::domain::tool::invalid_brush_preset_id;
+            const auto la =
+                noted::ui::widget::brush_library_panel(brush_library_, tools_.pen, active_id);
+            using K = noted::ui::widget::BrushLibraryAction::Kind;
+            switch (la.kind) {
+                case K::none:
+                    break;
+                case K::apply:
+                    if (on_apply_preset_) {
+                        on_apply_preset_(la.preset_id);
+                    }
+                    break;
+                case K::save_current:
+                    if (on_save_preset_) {
+                        on_save_preset_(std::move(la.save_name));
+                    }
+                    break;
+                case K::remove:
+                    if (on_remove_preset_) {
+                        on_remove_preset_(la.preset_id);
+                    }
+                    break;
+            }
+            ImGui::Separator();
+            ImGui::End();
+        }
+
         const auto bo_result = noted::ui::widget::brush_options(
             tools_, session_.document().image_assets(), &menu_state_.show_brush_options);
         if (bo_result.pick_image_requested && on_pick_image_) {

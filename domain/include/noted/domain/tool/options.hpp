@@ -43,6 +43,11 @@
 
 namespace noted::domain::tool {
 
+struct BrushPreset;  // brush_preset.hpp — forward-decl avoids the
+                     // options header pulling in the full preset
+                     // definition for callers that just want the
+                     // engine-facing conversion functions.
+
 // Pen — freehand vector ink. Tunable parameters mirror the engine's
 // `BrushStyle` 1:1 (the conversion is essentially a copy), with the
 // addition that `BrushStyle::softness_ratio` is held at its default
@@ -110,5 +115,11 @@ struct EraserOptions {
 // without surprises if the field is ever inspected.
 [[nodiscard]] auto brush_from_eraser(const EraserOptions& opt) noexcept
     -> noted::stroke::BrushStyle;
+
+// Overwrite `opt` with the stroke-engine-facing fields of `preset`.
+// Honours `preset.use_preset_color` — when false the existing
+// `opt.r/g/b/a` survive (artist's current-colour stays). Used by
+// the brush picker UI when the user clicks a preset card.
+void apply_preset_to(const BrushPreset& preset, PenOptions& opt) noexcept;
 
 }  // namespace noted::domain::tool
