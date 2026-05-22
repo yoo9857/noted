@@ -28,12 +28,17 @@
 #include <unordered_map>
 #include <vector>
 
+#include "noted/engine/canvas/layer_id.hpp"
 #include "noted/engine/error/error.hpp"
 
 namespace noted::domain {
 
-using LayerId = std::uint64_t;
-inline constexpr LayerId invalid_layer_id = 0;
+// LayerId is defined at the engine-canvas level so that `Stroke`
+// (engine module) can carry one without a domain dependency. Domain
+// re-exports the alias under its own namespace for ergonomic call-
+// sites (`domain::LayerId` reads cleaner inside the layer code).
+using LayerId = noted::LayerId;
+inline constexpr LayerId invalid_layer_id = noted::invalid_layer_id;
 
 // Standard Photoshop set. Numeric values are stable on disk; new modes
 // append, never reorder.

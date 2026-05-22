@@ -66,6 +66,7 @@
 #include "noted/ui/widget/navigator_panel.hpp"
 #include "noted/ui/widget/outline_panel.hpp"
 #include "noted/ui/widget/top_toolbar.hpp"
+#include "noted/ui/widget/workspace.hpp"
 
 #include "config/app_config.hpp"
 #include "frame/render_passes.hpp"
@@ -269,6 +270,12 @@ private:
     noted::ui::widget::MenuBarState menu_state_{};
     noted::ui::widget::DebugOverlayState debug_overlay_state_{};
     noted::ui::widget::OutlineRenameState outline_rename_{};
+    // Owned at App level (not UiPanels) so the dockspace setup runs
+    // before EVERY `ImGui::Begin` in the frame — including the
+    // Color picker / Navigator panels App draws directly BEFORE the
+    // `UiPanels::draw` call. See `workspace_begin` in
+    // `App::on_frame`.
+    noted::ui::widget::WorkspaceState workspace_state_{};
     noted::ui::theme::ThemeKind applied_theme_{noted::ui::theme::ThemeKind::dark};
     std::string last_window_title_{};
 
@@ -306,7 +313,7 @@ private:
     // Delete path: right-click a swatch → that slot becomes empty
     // (alpha = 0). Subsequent autosaves fill empty slots before
     // evicting populated ones.
-    std::array<std::array<float, 4>, 16> palette_colors_{};
+    std::array<std::array<float, 4>, noted::ui::widget::kPaletteSlotCount> palette_colors_{};
     // In-flight drag — `nullopt` between drags. Populated on Left-down
     // while the Select tool is active; updated on PointerMoved; applied
     // to `selection_` on PointerReleased. (Drag state now lives on the

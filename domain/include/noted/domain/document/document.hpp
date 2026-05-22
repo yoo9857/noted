@@ -40,9 +40,11 @@
 
 #include "noted/domain/document/asset_id.hpp"
 #include "noted/domain/document/image_asset_registry.hpp"
+#include "noted/domain/layer/canvas_layer_stack.hpp"
 #include "noted/domain/tool/image_input.hpp"
 #include "noted/domain/tool/shape_drag.hpp"
 #include "noted/domain/tool/text_input.hpp"
+#include "noted/engine/canvas/layer_id.hpp"
 #include "noted/engine/canvas/page.hpp"
 #include "noted/engine/error/error.hpp"
 #include "noted/engine/stroke/stroke_geometry.hpp"
@@ -437,15 +439,86 @@ public:
         return strokes_;
     }
 
+    // Append a stroke. If `stroke.layer_id == invalid_layer_id` the
+    // active canvas layer is stamped onto it; if no canvas layer
+    // exists yet a default "Layer 1" is lazily created (and becomes
+    // the active layer) so every persisted stroke ends up with a
+    // concrete id. Cheap on the steady-state path (`stroke.layer_id`
+    // already set → no allocation, no canvas-layer mutation).
     [[nodiscard]] auto add_stroke(noted::stroke::Stroke stroke) -> Result<std::size_t>;
 
     auto remove_stroke(std::size_t index) -> Result<void>;
 
+    // Insert at a specific index. Same layer-stamp policy as
+    // `add_stroke` — insertion is the inverse of `remove_stroke` for
+    // undo, so unassigned ids are still defaulted to the active
+    // layer (or a freshly-created one).
     [[nodiscard]] auto insert_stroke(std::size_t index,
                                      noted::stroke::Stroke stroke) -> Result<std::size_t>;
 
     // Replace the entire strokes list. **File-format loader path only.**
     void replace_strokes(std::vector<noted::stroke::Stroke> strokes) noexcept;
+
+    // ---- Canvas layers ---------------------------------------------------
+    //
+    // Ordered ink-layer stack — every Stroke carries a `layer_id` that
+    // resolves to an entry in this list. The render path walks the
+    // stack in z-order and consults `is_visible(id)` to filter; a
+    // hidden layer's strokes stay on disk but vanish from the canvas
+    // until the user toggles them back on.
+    //
+    // `active_layer()` is the layer that new strokes get stamped with
+    // when `Stroke::layer_id == invalid_layer_id`. Defaults to
+    // `invalid_layer_id` on a fresh document; the first `add_stroke`
+    // call creates "Layer 1" and sets it active so a brand-new app
+    // launch can start drawing without the user manually adding a
+    // layer.
+
+    [[nodiscard]] auto canvas_layers() const noexcept -> const CanvasLayerStack& {
+        return canvas_layers_;
+    }
+
+    [[nodiscard]] auto active_layer() const noexcept -> noted::LayerId { return active_layer_; }
+
+    // Set the active layer. Rejects with invalid_argument if `id` is
+    // neither `invalid_layer_id` (= "no active layer") nor a known id
+    // in the stack — silent fallback to default would mask UI bugs.
+    auto set_active_layer(noted::LayerId id) -> Result<void>;
+
+    // Add a new layer at the top of the stack with the given name.
+    // Returns the freshly-allocated id. If the stack was empty the
+    // new layer also becomes the active layer.
+    [[nodiscard]] auto add_canvas_layer(std::string name) -> Result<noted::LayerId>;
+
+    // Remove the layer at `index`. If the removed layer was the
+    // active one the active id is cleared (caller may re-set it).
+    // Strokes that referenced the removed id keep it on disk and
+    // become invisible at render time — see
+    // `CanvasLayerStack::remove_layer` for the rationale.
+    auto remove_canvas_layer(std::size_t index) -> Result<CanvasLayer>;
+
+    auto set_layer_visible(noted::LayerId id, bool visible) -> Result<void>;
+    auto set_layer_locked(noted::LayerId id, bool locked) -> Result<void>;
+    auto set_layer_name(noted::LayerId id, std::string name) -> Result<void>;
+    auto set_layer_opacity(noted::LayerId id, float opacity) -> Result<void>;
+    auto set_layer_blend(noted::LayerId id, BlendMode mode) -> Result<void>;
+
+    // Duplicate the layer at `source_index` directly above itself in
+    // the stack with the given new name. The clone copies every
+    // field (visible / locked / opacity / blend) but allocates a
+    // FRESH `LayerId` — so the engine sees it as a distinct slot.
+    // Returns the assigned id. Used by `DuplicateCanvasLayerCommand`;
+    // the command additionally clones every stroke pinned to the
+    // source onto the new layer.
+    [[nodiscard]] auto duplicate_canvas_layer(std::size_t source_index,
+                                              std::string new_name) -> Result<noted::LayerId>;
+
+    auto move_canvas_layer(std::size_t from, std::size_t to) -> Result<void>;
+
+    // Loader bypass — used by the `.noted` JSON loader. Replaces the
+    // full canvas-layer stack and active id atomically; pass
+    // `invalid_layer_id` to clear the active.
+    void replace_canvas_layers(CanvasLayerStack stack, noted::LayerId active) noexcept;
 
 private:
     // Detach `id` from its parent's children list, leaving the node
@@ -469,6 +542,8 @@ private:
     std::vector<noted::domain::tool::ImagePrimitive> images_{};
     ImageAssetRegistry image_assets_{};
     std::vector<noted::stroke::Stroke> strokes_{};
+    CanvasLayerStack canvas_layers_{};
+    noted::LayerId active_layer_{noted::invalid_layer_id};
 };
 
 }  // namespace noted::domain

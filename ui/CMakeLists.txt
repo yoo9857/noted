@@ -20,6 +20,7 @@ noted_add_module(
         src/widget/image_overlay.cpp
         src/widget/status_bar.cpp
         src/widget/debug_overlay.cpp
+        src/widget/workspace.cpp
         src/theme/theme.cpp
         src/binding/binding.cpp
     PUBLIC_DEPS  noted::domain noted::platform noted::engine imgui Qt6::Core Qt6::Gui

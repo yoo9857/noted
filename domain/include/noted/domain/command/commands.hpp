@@ -376,6 +376,82 @@ private:
     bool applied_{false};
 };
 
+// Append a new canvas layer on top of the stack with the given name.
+// Becomes the active layer (matches the layer-panel UX: "Add Layer"
+// doubles as "switch to it"). On undo the layer is removed and the
+// previously-active id is restored.
+class AddCanvasLayerCommand final : public Command {
+public:
+    explicit AddCanvasLayerCommand(std::string name);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override { return "Add layer"; }
+
+    [[nodiscard]] auto assigned_id() const noexcept -> noted::LayerId { return assigned_id_; }
+
+private:
+    std::string name_;
+    noted::LayerId assigned_id_{noted::invalid_layer_id};
+    noted::LayerId previous_active_{noted::invalid_layer_id};
+    bool applied_{false};
+};
+
+// Duplicate the canvas layer at `source_index` directly above
+// itself in the stack, AND clone every stroke pinned to it.
+// Photoshop's Ctrl+J equivalent — the cloned strokes inherit the
+// source's geometry + style but get re-stamped with the duplicate's
+// new LayerId so the stack stays referentially consistent. On undo
+// the duplicate layer + every cloned stroke is removed; the source
+// is untouched.
+class DuplicateCanvasLayerCommand final : public Command {
+public:
+    explicit DuplicateCanvasLayerCommand(std::size_t source_index, std::string new_name = {});
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override {
+        return "Duplicate layer";
+    }
+
+    [[nodiscard]] auto assigned_id() const noexcept -> noted::LayerId { return assigned_id_; }
+
+private:
+    std::size_t source_index_;
+    std::string new_name_;
+    noted::LayerId assigned_id_{noted::invalid_layer_id};
+    noted::LayerId previous_active_{noted::invalid_layer_id};
+    // First stroke index (in `doc.strokes()`) that was appended for
+    // this duplicate. `assigned_strokes_count_` is how many got
+    // appended — undo erases that contiguous tail back-to-front.
+    std::size_t first_added_stroke_index_{0};
+    std::size_t assigned_strokes_count_{0};
+    bool applied_{false};
+};
+
+// Remove the canvas layer at the given index. Snapshots the layer +
+// its previous index + the active-id-before so undo can restore both.
+// Per the engine contract, strokes pinned to the removed layer keep
+// their id on disk and become orphaned (invisible at render time)
+// until the layer comes back — undo therefore makes them visible
+// again without touching the stroke list.
+class RemoveCanvasLayerCommand final : public Command {
+public:
+    explicit RemoveCanvasLayerCommand(std::size_t index);
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override {
+        return "Remove layer";
+    }
+
+private:
+    std::size_t target_index_;
+    CanvasLayer snapshot_{};
+    noted::LayerId previous_active_{noted::invalid_layer_id};
+    bool applied_{false};
+};
+
 // Rename a block.
 class SetNameCommand final : public Command {
 public:

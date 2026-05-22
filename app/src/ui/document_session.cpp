@@ -7,6 +7,27 @@
 
 namespace noted::app {
 
+namespace {
+
+// Ensure the document has at least one canvas layer + a valid active
+// one — the user experience contract is that there's ALWAYS a paint
+// surface ready (matches Photoshop's "every new document opens with
+// 'Background' selected"). Direct-write rather than via Command so
+// the seed doesn't pollute undo history or mark the document dirty.
+void ensure_default_canvas_layer(noted::domain::Document& doc) {
+    if (doc.canvas_layers().empty()) {
+        (void) doc.add_canvas_layer("Layer 1");
+    } else if (doc.active_layer() == noted::invalid_layer_id) {
+        // Loaded a v8 file whose stack was non-empty but `active` was 0
+        // (or somehow drifted). Pick the top of the stack so the next
+        // stroke lands on a real layer.
+        const auto top = doc.canvas_layers().layers().back().id;
+        (void) doc.set_active_layer(top);
+    }
+}
+
+}  // namespace
+
 auto DocumentSession::title() const -> std::string {
     const std::string name =
         current_path_.has_value() ? current_path_->filename().string() : std::string{"Untitled"};
@@ -31,6 +52,7 @@ void DocumentSession::reset_to_blank() {
     undo_stack_.clear();
     selected_block_ = noted::domain::invalid_block_id;
     current_path_.reset();
+    ensure_default_canvas_layer(document_);
     saved_undo_size_ = undo_stack_.undo_size();
 }
 
@@ -52,6 +74,11 @@ auto DocumentSession::open_from(const std::filesystem::path& path) -> Result<voi
     undo_stack_.clear();
     selected_block_ = noted::domain::invalid_block_id;
     current_path_ = path;
+    // Loaded documents from v7 / older — or hand-built v8 files with
+    // an empty stack — still need a default layer so the user can
+    // start painting immediately after Open. Same direct-write
+    // rationale as `reset_to_blank`.
+    ensure_default_canvas_layer(document_);
     saved_undo_size_ = undo_stack_.undo_size();
     return {};
 }

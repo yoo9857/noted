@@ -110,20 +110,45 @@ public:
     // permanently inert.
     void set_view_transform(double translation_x, double translation_y, double scale) noexcept;
 
-    // Drain-and-draw. For each stroke in `committed` plus the in-flight
-    // `current_stroke_`, tessellates the ribbon, uploads it to the
-    // persistently-mapped vertex buffer, and records the per-mode
-    // pipeline + draw calls. Caller is responsible for being inside an
-    // active vkCmdBeginRendering whose color attachment is the
-    // strokes target (in COLOR_ATTACHMENT_OPTIMAL).
+    // Caller-supplied per-layer opacity lookup. Returns the alpha
+    // multiplier in [0, 1] for `layer_id`; the engine multiplies the
+    // tessellated ribbon's alpha channel by this value before upload.
+    // An empty function (the default) means "every stroke at full
+    // opacity", matching pre-layer-painting behaviour for callers
+    // that don't care about layer opacity yet. Returning `0.0F` is
+    // equivalent to hiding the stroke (alpha becomes zero across the
+    // ribbon, the GPU short-circuits the fragments).
     //
-    // `committed` is the host's authoritative stroke list — passed in
-    // by reference (no caching inside the engine) so undo/redo on the
-    // host side instantly reflects in what gets drawn. Typically
-    // `Document::strokes()`.
+    // The engine doesn't know about the host's layer-stack data
+    // model — the host hands in a closure that resolves the id
+    // against its own table. Hidden strokes should be pre-filtered
+    // out of `committed_in_order` (the engine never sees them) so
+    // this fn is only consulted for strokes whose layer survives the
+    // visibility / orphan filter on the caller side.
+    using OpacityFn = std::function<float(LayerId)>;
+
+    // Drain-and-draw. For each stroke pointer in `committed_in_order`
+    // (intended to be ALREADY SORTED in render order, typically
+    // bottom-up by layer) plus the in-flight `current_stroke_`
+    // (always drawn at full opacity regardless of layer), tessellates
+    // the ribbon, applies layer opacity if `opacity_for_layer` is
+    // bound, uploads to the persistently-mapped vertex buffer, and
+    // records the per-mode pipeline + draw calls. Caller is
+    // responsible for being inside an active vkCmdBeginRendering
+    // whose color attachment is the strokes target (in
+    // COLOR_ATTACHMENT_OPTIMAL).
+    //
+    // Passing pointers (rather than the strokes themselves) keeps the
+    // host's authoritative `Document::strokes()` storage untouched —
+    // re-ordering for layer z-order is one O(n) walk that builds a
+    // pointer index, not an O(n) deep-copy of the stroke vector each
+    // frame (which would heap-allocate per sample vector). Hidden /
+    // orphan strokes simply aren't pushed into the pointer span by
+    // the caller, so the engine has no hidden-vs-visible logic.
     void record(VkCommandBuffer cb,
                 VkExtent2D canvas_extent,
-                std::span<const Stroke> committed) noexcept;
+                std::span<const Stroke* const> committed_in_order,
+                const OpacityFn& opacity_for_layer = {}) noexcept;
 
     // Inspect / control state — used by tests and the future debug UI.
     [[nodiscard]] auto is_drawing() const noexcept -> bool { return drawing_; }

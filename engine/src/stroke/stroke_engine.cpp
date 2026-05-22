@@ -329,13 +329,14 @@ struct StrokeSlice {
 
 void StrokeEngine::record(VkCommandBuffer cb,
                           VkExtent2D canvas_extent,
-                          std::span<const Stroke> committed) noexcept {
+                          std::span<const Stroke* const> committed_in_order,
+                          const OpacityFn& opacity_for_layer) noexcept {
     NOTED_PROFILE_ZONE_N("StrokeEngine::record");
     if (!pipeline_draw_.has_value() || !pipeline_erase_.has_value() || !layout_.has_value() ||
         !vertex_buffer_.has_value()) {
         return;
     }
-    if (committed.empty() && current_stroke_.samples.empty()) {
+    if (committed_in_order.empty() && current_stroke_.samples.empty()) {
         return;
     }
 
@@ -344,9 +345,9 @@ void StrokeEngine::record(VkCommandBuffer cb,
     // upload is one memcpy regardless of stroke count.
     std::vector<RibbonVertex> all_vertices;
     std::vector<StrokeSlice> slices;
-    slices.reserve(committed.size() + 1);
+    slices.reserve(committed_in_order.size() + 1);
 
-    const auto append_stroke = [&](const Stroke& stroke) {
+    const auto append_stroke = [&](const Stroke& stroke, float alpha_scale) {
         // Subdivide each gap into 6 sub-segments via Catmull-Rom so
         // slow / coarse input still produces a visibly smooth curve
         // even at zoom > 1. Costs ~6× the per-segment vertex output;
@@ -356,17 +357,42 @@ void StrokeEngine::record(VkCommandBuffer cb,
         if (ribbon.empty()) {
             return;
         }
+        // Apply the per-layer opacity multiplier to the ribbon's
+        // alpha channel. Skipping the loop when scale==1 avoids
+        // touching the most common path (no opacity tweak).
+        if (alpha_scale < 1.0F) {
+            const float s = (alpha_scale < 0.0F) ? 0.0F : alpha_scale;
+            for (auto& v : ribbon) {
+                v.a *= s;
+            }
+        }
         const auto first = static_cast<std::uint32_t>(all_vertices.size());
         const auto count = static_cast<std::uint32_t>(ribbon.size());
         all_vertices.insert(all_vertices.end(), ribbon.begin(), ribbon.end());
         slices.push_back({first, count, stroke.mode});
     };
 
-    for (const auto& stroke : committed) {
-        append_stroke(stroke);
+    for (const auto* sptr : committed_in_order) {
+        if (sptr == nullptr) {
+            continue;  // defensive — caller should not pass nullptrs
+        }
+        const auto& stroke = *sptr;
+        const float opacity = opacity_for_layer ? opacity_for_layer(stroke.layer_id) : 1.0F;
+        // opacity == 0 → fully transparent. The fragment shader would
+        // still run; short-circuit the upload to save bandwidth.
+        if (opacity <= 0.0F) {
+            continue;
+        }
+        append_stroke(stroke, opacity);
     }
     if (!current_stroke_.samples.empty()) {
-        append_stroke(current_stroke_);
+        // The in-flight stroke isn't on disk yet — its layer_id won't
+        // be stamped until `Document::add_stroke` runs on release —
+        // so we draw it unconditionally at full opacity. Hiding the
+        // user's own active input would feel like a frozen tool, and
+        // applying a stale layer-opacity to a stroke that hasn't been
+        // assigned yet would surprise the user mid-drag.
+        append_stroke(current_stroke_, 1.0F);
     }
     if (slices.empty()) {
         return;

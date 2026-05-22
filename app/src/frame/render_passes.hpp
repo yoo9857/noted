@@ -33,6 +33,7 @@
 //     descriptor sets currently point at.
 
 #include <memory>
+#include <vector>
 
 #include <vulkan/vulkan.h>
 
@@ -60,6 +61,7 @@ class Swapchain;
 
 namespace noted::stroke {
 class StrokeEngine;
+struct Stroke;
 }  // namespace noted::stroke
 
 namespace noted::ui {
@@ -162,6 +164,13 @@ private:
 
     const noted::canvas::Camera& camera_;
     noted::ui::ImGuiHost& imgui_host_;
+
+    // Scratch buffer reused each frame to assemble strokes in
+    // bottom-up layer z-order without per-frame heap allocations.
+    // Pointers reference `Document::strokes()` storage — the
+    // document outlives the render call (single-threaded UI), so
+    // the pointers are stable for the duration of `record()`.
+    std::vector<const noted::stroke::Stroke*> stroke_render_order_{};
 };
 
 }  // namespace noted::app::frame

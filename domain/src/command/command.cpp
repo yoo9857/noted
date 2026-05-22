@@ -669,6 +669,11 @@ auto AddStrokeCommand::apply(Document& doc) -> Result<void> {
         return std::unexpected(std::move(r).error());
     }
     assigned_index_ = *r;
+    // Capture the layer_id the document stamped onto the stroke so a
+    // subsequent undo → redo cycle re-applies the exact same layer
+    // (rather than re-running the lazy-active fallback against a
+    // possibly-different active layer at redo time).
+    stroke_.layer_id = doc.strokes()[assigned_index_].layer_id;
     applied_ = true;
     return {};
 }
@@ -717,6 +722,235 @@ auto RemoveStrokeCommand::undo(Document& doc) -> Result<void> {
     if (!r) {
         return std::unexpected(std::move(r).error());
     }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
+// AddCanvasLayerCommand
+// ============================================================================
+
+AddCanvasLayerCommand::AddCanvasLayerCommand(std::string name) : name_(std::move(name)) {}
+
+auto AddCanvasLayerCommand::apply(Document& doc) -> Result<void> {
+    previous_active_ = doc.active_layer();
+    auto id = doc.add_canvas_layer(name_);
+    if (!id) {
+        return std::unexpected(std::move(id).error());
+    }
+    assigned_id_ = *id;
+    // Promote to active so paint lands on the freshly-added layer —
+    // matches the layer panel's "Add Layer doubles as switch to it"
+    // UX. We do this even if the stack had a different active layer
+    // before (which `add_canvas_layer` would otherwise preserve).
+    if (auto r = doc.set_active_layer(assigned_id_); !r) {
+        // Roll back the add — apply() must leave the doc untouched on
+        // failure (validate-then-mutate). add_canvas_layer succeeded
+        // so the layer IS in the stack; the only failure mode for
+        // set_active is the id not resolving, which can't happen
+        // here. Defensive nonetheless.
+        const auto removed = doc.remove_canvas_layer(doc.canvas_layers().size() - 1U);
+        (void) removed;  // best-effort rollback
+        return std::unexpected(std::move(r).error());
+    }
+    applied_ = true;
+    return {};
+}
+
+auto AddCanvasLayerCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_state,
+                              "AddCanvasLayerCommand::undo: command was not applied"));
+    }
+    // Find the layer by id (its index may have moved if other layer
+    // commands ran in between — though in practice the UndoStack
+    // serializes execution).
+    const auto& layers = doc.canvas_layers().layers();
+    std::size_t idx = layers.size();
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        if (layers[i].id == assigned_id_) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx == layers.size()) {
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_state,
+                                                 "AddCanvasLayerCommand::undo: layer id " +
+                                                     std::to_string(assigned_id_) +
+                                                     " not found — stack mutated externally?"));
+    }
+    auto removed = doc.remove_canvas_layer(idx);
+    if (!removed) {
+        return std::unexpected(std::move(removed).error());
+    }
+    // Restore the previous active id. If it pointed at a layer that
+    // has since been removed, set_active_layer rejects — clear to
+    // invalid in that case rather than failing the undo.
+    if (previous_active_ != noted::invalid_layer_id) {
+        if (auto r = doc.set_active_layer(previous_active_); !r) {
+            (void) doc.set_active_layer(noted::invalid_layer_id);
+        }
+    } else {
+        (void) doc.set_active_layer(noted::invalid_layer_id);
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
+// DuplicateCanvasLayerCommand
+// ============================================================================
+
+DuplicateCanvasLayerCommand::DuplicateCanvasLayerCommand(std::size_t source_index,
+                                                         std::string new_name)
+    : source_index_(source_index), new_name_(std::move(new_name)) {}
+
+auto DuplicateCanvasLayerCommand::apply(Document& doc) -> Result<void> {
+    if (source_index_ >= doc.canvas_layers().size()) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_argument,
+            "DuplicateCanvasLayerCommand::apply: source index " + std::to_string(source_index_) +
+                " out of range (size " + std::to_string(doc.canvas_layers().size()) + ")"));
+    }
+    previous_active_ = doc.active_layer();
+    const auto source_id = doc.canvas_layers().layers()[source_index_].id;
+    // Default name: "<source name> copy" matches Photoshop's
+    // duplicate convention; the caller can override.
+    std::string name = new_name_;
+    if (name.empty()) {
+        name = doc.canvas_layers().layers()[source_index_].name + " copy";
+    }
+    auto new_id_r = doc.duplicate_canvas_layer(source_index_, std::move(name));
+    if (!new_id_r) {
+        return std::unexpected(std::move(new_id_r).error());
+    }
+    assigned_id_ = *new_id_r;
+
+    // Clone every stroke whose layer_id matches the source onto the
+    // new layer. Snapshot the current strokes vector first so we
+    // don't iterate over our own appends.
+    first_added_stroke_index_ = doc.strokes().size();
+    assigned_strokes_count_ = 0;
+    const auto& strokes = doc.strokes();
+    const std::size_t snapshot_size = strokes.size();
+    for (std::size_t i = 0; i < snapshot_size; ++i) {
+        if (strokes[i].layer_id != source_id) {
+            continue;
+        }
+        noted::stroke::Stroke clone = strokes[i];
+        clone.layer_id = assigned_id_;
+        auto added = doc.add_stroke(std::move(clone));
+        if (!added) {
+            // Roll back partial appends + the new layer to keep
+            // apply atomic.
+            const auto added_so_far = doc.strokes().size() - first_added_stroke_index_;
+            for (std::size_t k = 0; k < added_so_far; ++k) {
+                (void) doc.remove_stroke(doc.strokes().size() - 1U);
+            }
+            // The duplicate layer is at source_index_ + 1 (it was
+            // moved there in duplicate_canvas_layer).
+            (void) doc.remove_canvas_layer(source_index_ + 1U);
+            return std::unexpected(std::move(added).error());
+        }
+        ++assigned_strokes_count_;
+    }
+    // Promote the duplicate to active — matches the "Add layer"
+    // command convention so the user can paint on the clone right
+    // away.
+    (void) doc.set_active_layer(assigned_id_);
+    applied_ = true;
+    return {};
+}
+
+auto DuplicateCanvasLayerCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_state,
+                              "DuplicateCanvasLayerCommand::undo: command was not applied"));
+    }
+    // Remove the cloned strokes from the tail (they were appended
+    // in apply via add_stroke, so they live at indices
+    // [first_added_stroke_index_, first_added_stroke_index_ +
+    // assigned_strokes_count_)).
+    for (std::size_t k = 0; k < assigned_strokes_count_; ++k) {
+        if (auto r = doc.remove_stroke(doc.strokes().size() - 1U); !r) {
+            return std::unexpected(std::move(r).error());
+        }
+    }
+    // Find the duplicate layer by id (its index may have moved if
+    // other layer commands ran in between).
+    const auto& layers = doc.canvas_layers().layers();
+    std::size_t idx = layers.size();
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        if (layers[i].id == assigned_id_) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx == layers.size()) {
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_state,
+                                                 "DuplicateCanvasLayerCommand::undo: layer id " +
+                                                     std::to_string(assigned_id_) +
+                                                     " not found — stack mutated externally?"));
+    }
+    auto removed = doc.remove_canvas_layer(idx);
+    if (!removed) {
+        return std::unexpected(std::move(removed).error());
+    }
+    if (previous_active_ != noted::invalid_layer_id) {
+        if (auto r = doc.set_active_layer(previous_active_); !r) {
+            (void) doc.set_active_layer(noted::invalid_layer_id);
+        }
+    } else {
+        (void) doc.set_active_layer(noted::invalid_layer_id);
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
+// RemoveCanvasLayerCommand
+// ============================================================================
+
+RemoveCanvasLayerCommand::RemoveCanvasLayerCommand(std::size_t index) : target_index_(index) {}
+
+auto RemoveCanvasLayerCommand::apply(Document& doc) -> Result<void> {
+    if (target_index_ >= doc.canvas_layers().size()) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_argument,
+            "RemoveCanvasLayerCommand::apply: index " + std::to_string(target_index_) +
+                " out of range (size " + std::to_string(doc.canvas_layers().size()) + ")"));
+    }
+    previous_active_ = doc.active_layer();
+    snapshot_ = doc.canvas_layers().layers()[target_index_];
+    auto removed = doc.remove_canvas_layer(target_index_);
+    if (!removed) {
+        return std::unexpected(std::move(removed).error());
+    }
+    applied_ = true;
+    return {};
+}
+
+auto RemoveCanvasLayerCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_state,
+                              "RemoveCanvasLayerCommand::undo: command was not applied"));
+    }
+    // Restore the layer at its original index via the stack's
+    // bypass-path inverse. We don't have a public `insert_layer` on
+    // Document but `CanvasLayerStack::insert_layer` (visible via
+    // replace_canvas_layers) reseats it. Build the new stack by
+    // copying current + inserting snapshot at target_index_.
+    auto stack = doc.canvas_layers();
+    if (auto r = stack.insert_layer(target_index_, snapshot_); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    // Restore the previous active id (which may have been the
+    // removed layer itself, or a sibling — either way it should be
+    // valid against the reseated stack).
+    doc.replace_canvas_layers(std::move(stack), previous_active_);
     applied_ = false;
     return {};
 }

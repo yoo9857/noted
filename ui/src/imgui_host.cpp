@@ -13,6 +13,7 @@
 #include "noted/engine/gpu/device.hpp"
 #include "noted/engine/gpu/instance.hpp"
 #include "noted/engine/gpu/physical_device.hpp"
+#include "noted/platform/fs/fs.hpp"
 
 namespace noted::ui {
 
@@ -237,6 +238,23 @@ auto ImGuiHost::create(const ImGuiHostCreateInfo& info) -> Result<ImGuiHost> {
     // windows that conflict with our pen-input subclass on Windows
     // (ADR 0017). Re-enable if the docking refactor establishes a
     // clean child-window pen-input path.
+
+    // Anchor the ini path to the executable directory so docking
+    // layout / window positions survive across launches regardless
+    // of CWD. ImGui caches the pointer (no copy) — `ini_path_storage_`
+    // is a member so the std::string outlives every frame. Falling
+    // back to ImGui's default ("imgui.ini" relative to CWD) leaves
+    // panel positions tied to wherever the shell happened to launch
+    // from, which means "ran from build/" and "ran by double-click"
+    // produce two different layout files and the user can't tell why
+    // their docking suddenly resets.
+    {
+        const auto exe = noted::platform::fs::executable_dir();
+        if (!exe.empty()) {
+            host.ini_path_storage_ = (exe / "imgui.ini").string();
+            io.IniFilename = host.ini_path_storage_.c_str();
+        }
+    }
 
     // 2a. Font atlas. Wire the optional CJK font BEFORE the Vulkan
     // backend init so ImGui_ImplVulkan_Init's lazy font-texture upload

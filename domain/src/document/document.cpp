@@ -300,9 +300,14 @@ void Document::clear() noexcept {
     images_.clear();
     image_assets_.clear();
     strokes_.clear();
+    canvas_layers_ = CanvasLayerStack{};
+    active_layer_ = noted::invalid_layer_id;
     // next_id_ is intentionally NOT reset — IDs stay monotonic across
     // clears so any history / undo references survive the wipe. The
-    // same rule applies to the registry's internal `next_id_`.
+    // same rule applies to the registry's internal `next_id_` AND
+    // the canvas layer stack's id allocator (a fresh stack starts at
+    // 1 anyway, but legacy strokes from before the clear might still
+    // reference old ids on undo).
 }
 
 auto Document::add_page(float w,
@@ -440,7 +445,41 @@ void Document::replace_image_assets(ImageAssetRegistry registry) noexcept {
     image_assets_ = std::move(registry);
 }
 
+namespace {
+
+// Walk the stack and confirm `id` resolves to a real layer. Used by
+// the layer-stamp helper to validate the active id before sealing it
+// onto a stroke (and by `set_active_layer` to reject typos).
+[[nodiscard]] auto stack_contains(const CanvasLayerStack& stack,
+                                  noted::LayerId id) noexcept -> bool {
+    return id != noted::invalid_layer_id && stack.find(id) != nullptr;
+}
+
+}  // namespace
+
 auto Document::add_stroke(noted::stroke::Stroke stroke) -> Result<std::size_t> {
+    // If the caller hasn't pre-assigned a layer (the common case for
+    // freshly-drawn strokes coming through the stroke sink), stamp the
+    // active layer onto it now. Lazy-create the default layer if the
+    // stack is empty so the very first stroke in a fresh document
+    // doesn't need explicit setup from the host.
+    if (stroke.layer_id == noted::invalid_layer_id) {
+        if (canvas_layers_.empty()) {
+            auto created = canvas_layers_.add_layer("Layer 1");
+            if (!created) {
+                return std::unexpected(std::move(created).error());
+            }
+            active_layer_ = *created;
+        } else if (!stack_contains(canvas_layers_, active_layer_)) {
+            // Active id was somehow invalid (e.g. user removed the
+            // active layer and we never refreshed). Fall back to the
+            // top of the stack so the stroke still lands somewhere
+            // concrete rather than silently going to the unassigned
+            // sentinel.
+            active_layer_ = canvas_layers_.layers().back().id;
+        }
+        stroke.layer_id = active_layer_;
+    }
     strokes_.push_back(std::move(stroke));
     return strokes_.size() - 1;
 }
@@ -464,12 +503,136 @@ auto Document::insert_stroke(std::size_t index,
                               "Document::insert_stroke: index " + std::to_string(index) +
                                   " out of range (size " + std::to_string(strokes_.size()) + ")"));
     }
+    // Same lazy-stamp policy as add_stroke. Insertion is the inverse
+    // of remove_stroke for undo; the snapshot captured by the
+    // RemoveStrokeCommand already carries a concrete layer_id, so
+    // the lazy branch only fires for hand-built strokes (tests).
+    if (stroke.layer_id == noted::invalid_layer_id) {
+        if (canvas_layers_.empty()) {
+            auto created = canvas_layers_.add_layer("Layer 1");
+            if (!created) {
+                return std::unexpected(std::move(created).error());
+            }
+            active_layer_ = *created;
+        } else if (!stack_contains(canvas_layers_, active_layer_)) {
+            active_layer_ = canvas_layers_.layers().back().id;
+        }
+        stroke.layer_id = active_layer_;
+    }
     strokes_.insert(strokes_.begin() + static_cast<std::ptrdiff_t>(index), std::move(stroke));
     return index;
 }
 
 void Document::replace_strokes(std::vector<noted::stroke::Stroke> strokes) noexcept {
     strokes_ = std::move(strokes);
+}
+
+auto Document::set_active_layer(noted::LayerId id) -> Result<void> {
+    if (id != noted::invalid_layer_id && !stack_contains(canvas_layers_, id)) {
+        return std::unexpected(
+            noted::make_error(noted::ErrorCode::invalid_argument,
+                              "Document::set_active_layer: id not found in canvas layers"));
+    }
+    active_layer_ = id;
+    return {};
+}
+
+auto Document::add_canvas_layer(std::string name) -> Result<noted::LayerId> {
+    const bool was_empty = canvas_layers_.empty();
+    auto id = canvas_layers_.add_layer(std::move(name));
+    if (!id) {
+        return std::unexpected(std::move(id).error());
+    }
+    if (was_empty) {
+        active_layer_ = *id;
+    }
+    return *id;
+}
+
+auto Document::remove_canvas_layer(std::size_t index) -> Result<CanvasLayer> {
+    auto removed = canvas_layers_.remove_layer(index);
+    if (!removed) {
+        return std::unexpected(std::move(removed).error());
+    }
+    if (active_layer_ == removed->id) {
+        // Caller decides whether to point at a sibling; we don't
+        // pick for them — silent reassignment would mask intent.
+        active_layer_ = noted::invalid_layer_id;
+    }
+    return *std::move(removed);
+}
+
+auto Document::set_layer_visible(noted::LayerId id, bool visible) -> Result<void> {
+    return canvas_layers_.set_visible(id, visible);
+}
+
+auto Document::set_layer_locked(noted::LayerId id, bool locked) -> Result<void> {
+    return canvas_layers_.set_locked(id, locked);
+}
+
+auto Document::set_layer_name(noted::LayerId id, std::string name) -> Result<void> {
+    return canvas_layers_.set_name(id, std::move(name));
+}
+
+auto Document::set_layer_opacity(noted::LayerId id, float opacity) -> Result<void> {
+    return canvas_layers_.set_opacity(id, opacity);
+}
+
+auto Document::set_layer_blend(noted::LayerId id, BlendMode mode) -> Result<void> {
+    return canvas_layers_.set_blend(id, mode);
+}
+
+auto Document::duplicate_canvas_layer(std::size_t source_index,
+                                      std::string new_name) -> Result<noted::LayerId> {
+    if (source_index >= canvas_layers_.size()) {
+        return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                 "Document::duplicate_canvas_layer: source index " +
+                                                     std::to_string(source_index) +
+                                                     " out of range"));
+    }
+    // Snapshot fields BEFORE the add_layer mutation because the stack
+    // may reallocate its vector. add_layer appends at the TOP of the
+    // stack — we then move it into position just above the source so
+    // the clone draws right on top of the original (Photoshop's
+    // "Duplicate Layer" convention).
+    const auto source = canvas_layers_.layers()[source_index];
+    auto new_id = canvas_layers_.add_layer(std::move(new_name));
+    if (!new_id) {
+        return std::unexpected(std::move(new_id).error());
+    }
+    // Copy the source's display fields onto the freshly-added layer
+    // (it inherits visible/locked/opacity/blend mode, which is what
+    // the user expects from a Duplicate).
+    (void) canvas_layers_.set_visible(*new_id, source.visible);
+    (void) canvas_layers_.set_locked(*new_id, source.locked);
+    (void) canvas_layers_.set_opacity(*new_id, source.opacity);
+    (void) canvas_layers_.set_blend(*new_id, source.blend);
+    // Move it from top into source_index + 1. layers_ is bottom-up,
+    // so `source_index + 1` sits IMMEDIATELY above the source.
+    const auto current_top = canvas_layers_.size() - 1U;
+    const auto target = source_index + 1U;
+    if (target < current_top) {
+        if (auto r = canvas_layers_.move(current_top, target); !r) {
+            return std::unexpected(std::move(r).error());
+        }
+    }
+    return *new_id;
+}
+
+auto Document::move_canvas_layer(std::size_t from, std::size_t to) -> Result<void> {
+    return canvas_layers_.move(from, to);
+}
+
+void Document::replace_canvas_layers(CanvasLayerStack stack, noted::LayerId active) noexcept {
+    canvas_layers_ = std::move(stack);
+    if (active == noted::invalid_layer_id || stack_contains(canvas_layers_, active)) {
+        active_layer_ = active;
+    } else {
+        // Loader handed us an active id that isn't in the stack —
+        // accept the stack but clear active rather than crashing.
+        // The host can re-establish it after load via set_active_layer.
+        active_layer_ = noted::invalid_layer_id;
+    }
 }
 
 auto Document::move_to(BlockId id, BlockId new_parent, std::size_t index) -> Result<void> {

@@ -42,15 +42,23 @@ struct ColorPickerResult {
     int palette_delete_index{-1};
 };
 
+// Total slots on the artist's palette. 4 columns × 5 rows = 20 —
+// roughly matches a physical wooden palette's well count and fits
+// without scrolling at the default panel height. Pinned here so the
+// App-side storage array and the panel widget share one source of
+// truth.
+inline constexpr std::size_t kPaletteSlotCount = 20U;
+
 // Render the colour picker panel. `rgba` is the persistent storage
 // for the colour (typically `&tools_.pen.r`); the picker mutates it
-// in place. `recent_colors` is the host-owned ring buffer of recent
-// colours (caller manages eviction); the swatch row reads it. Returns
-// the user-action flags so the caller knows when to push the current
-// colour into the recent ring.
-[[nodiscard]] auto color_picker_panel(float* rgba_xyzw,
-                                      const std::array<std::array<float, 4>, 16>& palette_colors,
-                                      float top_offset_px,
-                                      float panel_width_px = 220.0F) -> ColorPickerResult;
+// in place. The 20-slot `palette_colors` array is owned by the host
+// (App keeps it alive across frames); the widget reads/applies
+// swatches and surfaces add / delete intents back via
+// `ColorPickerResult`.
+[[nodiscard]] auto color_picker_panel(
+    float* rgba_xyzw,
+    const std::array<std::array<float, 4>, kPaletteSlotCount>& palette_colors,
+    float top_offset_px,
+    float panel_width_px = 220.0F) -> ColorPickerResult;
 
 }  // namespace noted::ui::widget
