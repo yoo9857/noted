@@ -1309,6 +1309,27 @@ void App::wire_keyboard_shortcuts(const noted::ui::widget::MenuBarStatus& status
             }
         }
 
+        // Ctrl+Shift+E — Merge Visible (Photoshop chord). Checked
+        // BEFORE plain Ctrl+E so the shifted variant wins ImGui's
+        // chord dispatch and Merge Down isn't fired by accident
+        // when both modifiers are held.
+        {
+            std::size_t visible_count = 0;
+            for (const auto& l : cl.layers()) {
+                if (l.visible) {
+                    ++visible_count;
+                }
+            }
+            if (visible_count >= 2U &&
+                ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_E)) {
+                if (auto r =
+                        session_.execute(std::make_unique<noted::domain::MergeVisibleCommand>());
+                    !r) {
+                    std::cerr << r.error().format() << '\n';
+                }
+            }
+        }
+
         // Ctrl+E — merge the active layer DOWN into the one below.
         // Photoshop fidelity. Disabled when active is the bottom-
         // most layer (active_idx == 0) — nothing to merge into.

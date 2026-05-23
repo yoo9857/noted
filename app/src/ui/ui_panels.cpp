@@ -219,6 +219,12 @@ void UiPanels::draw() {
             case K::merge_down:
                 exec(std::make_unique<noted::domain::MergeDownCommand>(la.index));
                 break;
+            case K::merge_visible:
+                exec(std::make_unique<noted::domain::MergeVisibleCommand>());
+                break;
+            case K::flatten_image:
+                exec(std::make_unique<noted::domain::FlattenImageCommand>());
+                break;
         }
     }
 

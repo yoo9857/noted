@@ -11,7 +11,9 @@ using noted::domain::AddStrokeCommand;
 using noted::domain::BlendMode;
 using noted::domain::Document;
 using noted::domain::DuplicateCanvasLayerCommand;
+using noted::domain::FlattenImageCommand;
 using noted::domain::MergeDownCommand;
+using noted::domain::MergeVisibleCommand;
 using noted::domain::MoveCanvasLayerCommand;
 using noted::domain::RemoveCanvasLayerCommand;
 using noted::domain::SetLayerBlendCommand;
@@ -625,6 +627,145 @@ TEST(DocumentCanvasLayers, MergeDownLeavesOtherLayerStrokesUntouched) {
     // C's stroke moves to B with baked alpha.
     EXPECT_EQ(doc.strokes()[2].layer_id, b);
     EXPECT_FLOAT_EQ(doc.strokes()[2].style.a, 0.9F * 0.5F);
+}
+
+// ---- Merge Visible --------------------------------------------------------
+
+TEST(DocumentCanvasLayers, MergeVisibleCollapsesVisibleIntoBottomMost) {
+    Document doc;
+    auto a = *doc.add_canvas_layer("A");  // bottom-most, visible
+    auto b = *doc.add_canvas_layer("B");  // middle, hidden
+    auto c = *doc.add_canvas_layer("C");  // top, visible
+    ASSERT_TRUE(doc.set_layer_visible(b, false));
+    ASSERT_TRUE(doc.set_layer_opacity(c, 0.5F));
+    // Strokes on each layer.
+    Stroke s_a = make_stroke();
+    s_a.layer_id = a;
+    s_a.style.a = 1.0F;
+    ASSERT_TRUE(doc.add_stroke(s_a));
+    Stroke s_b = make_stroke();
+    s_b.layer_id = b;
+    s_b.style.a = 0.7F;
+    ASSERT_TRUE(doc.add_stroke(s_b));
+    Stroke s_c = make_stroke();
+    s_c.layer_id = c;
+    s_c.style.a = 0.8F;
+    ASSERT_TRUE(doc.add_stroke(s_c));
+
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<MergeVisibleCommand>(), doc));
+    // After: only B and A remain (B was hidden, untouched). C
+    // merged into A; sink = A (bottom-most visible).
+    ASSERT_EQ(doc.canvas_layers().size(), 2U);
+    EXPECT_EQ(doc.canvas_layers().layers()[0].id, a);
+    EXPECT_EQ(doc.canvas_layers().layers()[1].id, b);
+    EXPECT_EQ(doc.active_layer(), a);
+    // All 3 strokes preserved. A's stroke unchanged. B's stroke
+    // untouched (hidden). C's stroke moves to A with baked alpha.
+    ASSERT_EQ(doc.strokes().size(), 3U);
+    EXPECT_FLOAT_EQ(doc.strokes()[0].style.a, 1.0F);
+    EXPECT_EQ(doc.strokes()[0].layer_id, a);
+    EXPECT_FLOAT_EQ(doc.strokes()[1].style.a, 0.7F);
+    EXPECT_EQ(doc.strokes()[1].layer_id, b);  // hidden — untouched
+    EXPECT_EQ(doc.strokes()[2].layer_id, a);
+    EXPECT_FLOAT_EQ(doc.strokes()[2].style.a, 0.8F * 0.5F);
+}
+
+TEST(DocumentCanvasLayers, MergeVisibleUndoRestoresStackAndStrokes) {
+    Document doc;
+    auto a = *doc.add_canvas_layer("A");
+    auto c = *doc.add_canvas_layer("C");
+    ASSERT_TRUE(doc.set_layer_opacity(c, 0.5F));
+    Stroke s_c = make_stroke();
+    s_c.layer_id = c;
+    s_c.style.a = 0.8F;
+    ASSERT_TRUE(doc.add_stroke(s_c));
+
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<MergeVisibleCommand>(), doc));
+    ASSERT_TRUE(stack.undo(doc));
+    ASSERT_EQ(doc.canvas_layers().size(), 2U);
+    EXPECT_EQ(doc.canvas_layers().layers()[1].id, c);
+    EXPECT_FLOAT_EQ(doc.canvas_layers().find(c)->opacity, 0.5F);
+    EXPECT_EQ(doc.strokes()[0].layer_id, c);
+    EXPECT_FLOAT_EQ(doc.strokes()[0].style.a, 0.8F);
+    (void) a;
+}
+
+TEST(DocumentCanvasLayers, MergeVisibleIsNoOpForSingleVisibleLayer) {
+    Document doc;
+    auto a = *doc.add_canvas_layer("A");
+    auto b = *doc.add_canvas_layer("B");
+    ASSERT_TRUE(doc.set_layer_visible(b, false));
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<MergeVisibleCommand>(), doc));
+    EXPECT_EQ(doc.canvas_layers().size(), 2U);  // unchanged
+    (void) a;
+}
+
+// ---- Flatten Image --------------------------------------------------------
+
+TEST(DocumentCanvasLayers, FlattenImageMergesVisibleAndDropsHidden) {
+    Document doc;
+    auto a = *doc.add_canvas_layer("A");  // visible, kept as sink
+    auto b = *doc.add_canvas_layer("B");  // hidden — dropped
+    auto c = *doc.add_canvas_layer("C");  // visible — merged into A
+    ASSERT_TRUE(doc.set_layer_visible(b, false));
+    Stroke s_a = make_stroke();
+    s_a.layer_id = a;
+    s_a.style.a = 1.0F;
+    ASSERT_TRUE(doc.add_stroke(s_a));
+    Stroke s_b = make_stroke();
+    s_b.layer_id = b;  // hidden stroke — should be dropped
+    s_b.style.a = 0.5F;
+    ASSERT_TRUE(doc.add_stroke(s_b));
+    Stroke s_c = make_stroke();
+    s_c.layer_id = c;
+    s_c.style.a = 0.8F;
+    ASSERT_TRUE(doc.add_stroke(s_c));
+
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<FlattenImageCommand>(), doc));
+    // Only the sink (A) remains.
+    ASSERT_EQ(doc.canvas_layers().size(), 1U);
+    EXPECT_EQ(doc.canvas_layers().layers()[0].id, a);
+    EXPECT_EQ(doc.active_layer(), a);
+    // 2 strokes: A's original + C's merged. B's hidden stroke is
+    // gone.
+    ASSERT_EQ(doc.strokes().size(), 2U);
+    EXPECT_EQ(doc.strokes()[0].layer_id, a);
+    EXPECT_FLOAT_EQ(doc.strokes()[0].style.a, 1.0F);
+    EXPECT_EQ(doc.strokes()[1].layer_id, a);
+    EXPECT_FLOAT_EQ(doc.strokes()[1].style.a, 0.8F);
+}
+
+TEST(DocumentCanvasLayers, FlattenImageUndoRestoresHiddenLayerAndStrokes) {
+    Document doc;
+    auto a = *doc.add_canvas_layer("A");
+    auto b = *doc.add_canvas_layer("B");
+    ASSERT_TRUE(doc.set_layer_visible(b, false));
+    Stroke s_b = make_stroke();
+    s_b.layer_id = b;
+    s_b.style.a = 0.5F;
+    ASSERT_TRUE(doc.add_stroke(s_b));
+
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<FlattenImageCommand>(), doc));
+    ASSERT_TRUE(stack.undo(doc));
+    ASSERT_EQ(doc.canvas_layers().size(), 2U);
+    EXPECT_EQ(doc.canvas_layers().layers()[1].id, b);
+    ASSERT_EQ(doc.strokes().size(), 1U);
+    EXPECT_EQ(doc.strokes()[0].layer_id, b);
+    EXPECT_FLOAT_EQ(doc.strokes()[0].style.a, 0.5F);
+    (void) a;
+}
+
+TEST(DocumentCanvasLayers, FlattenImageIsNoOpForAlreadyFlat) {
+    Document doc;
+    (void) *doc.add_canvas_layer("Only");
+    UndoStack stack;
+    ASSERT_TRUE(stack.execute(std::make_unique<FlattenImageCommand>(), doc));
+    EXPECT_EQ(doc.canvas_layers().size(), 1U);
 }
 
 TEST(DocumentCanvasLayers, FieldCommandClearsRedoStackEvenOnCoalesce) {

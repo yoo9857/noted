@@ -140,6 +140,18 @@ auto layer_panel(const noted::domain::Document& doc, bool* open) -> LayerPanelAc
     const bool can_duplicate = have_active && active_idx != stack.size();
     // Merge Down requires a layer beneath the source (active_idx > 0).
     const bool can_merge_down = have_active && active_idx != stack.size() && active_idx > 0U;
+    // Merge Visible needs at least 2 visible layers.
+    std::size_t visible_count = 0;
+    for (const auto& l : stack.layers()) {
+        if (l.visible) {
+            ++visible_count;
+        }
+    }
+    const bool can_merge_visible = visible_count >= 2U;
+    // Flatten is meaningful when there are 2+ layers OR any hidden
+    // layer at all (single visible + 1 hidden still has work to do:
+    // drop the hidden one).
+    const bool can_flatten = stack.size() >= 2U;
 
     if (ImGui::SmallButton("+")) {
         action.kind = LayerPanelAction::Kind::add;
@@ -199,6 +211,28 @@ auto layer_panel(const noted::domain::Document& doc, bool* open) -> LayerPanelAc
         ImGui::SetTooltip(
             "Merge down (Ctrl+E)\nBakes this layer's strokes (alpha × opacity)\ninto the "
             "layer below, then removes this one.");
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!can_merge_visible);
+    if (ImGui::SmallButton("MV")) {
+        action.kind = LayerPanelAction::Kind::merge_visible;
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered() && can_merge_visible) {
+        ImGui::SetTooltip(
+            "Merge Visible (Ctrl+Shift+E)\nCollapses every visible layer into the\n"
+            "bottom-most visible one. Hidden layers untouched.");
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!can_flatten);
+    if (ImGui::SmallButton("flat")) {
+        action.kind = LayerPanelAction::Kind::flatten_image;
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered() && can_flatten) {
+        ImGui::SetTooltip(
+            "Flatten Image\nMerges every visible layer AND discards hidden\n"
+            "layers (with their strokes). Use Ctrl+Z to recover.");
     }
     ImGui::Separator();
 
