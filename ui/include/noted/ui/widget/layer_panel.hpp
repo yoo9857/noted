@@ -58,12 +58,15 @@ struct LayerPanelAction {
         // Per-layer field edits — `target_id` carries the layer; the
         // host wraps each in the matching `SetLayer*Command` so undo
         // / dirty tracking fire automatically.
-        set_visible = 6,  // target_id, bool_value
-        set_locked = 7,   // target_id, bool_value
-        set_name = 8,     // target_id, string_value
-        set_opacity = 9,  // target_id, float_value
-        set_blend = 10,   // target_id, blend_value
-        set_active = 11,  // target_id  (direct, not undoable — see host)
+        set_visible = 6,     // target_id, bool_value
+        set_locked = 7,      // target_id, bool_value
+        set_name = 8,        // target_id, string_value
+        set_opacity = 9,     // target_id, float_value
+        set_blend = 10,      // target_id, blend_value
+        set_active = 11,     // target_id  (direct, not undoable — see host)
+        merge_down = 12,     // index  (the SOURCE; target = index - 1)
+        merge_visible = 13,  // (no payload — document-level op)
+        flatten_image = 14,  // (no payload — document-level op)
     };
     Kind kind{Kind::none};
 
