@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <memory>
+#include <string_view>
 #include <utility>
 
 #include <imgui.h>
@@ -489,9 +490,39 @@ void UiPanels::draw() {
         }
         ImGui::End();
     }
+    // Pull active-layer summary so the status bar can surface paint
+    // gating to the user. Read after every layer command in this
+    // frame has already been dispatched (above) so the readout is
+    // never one frame stale on a toggle.
+    std::string_view active_name;
+    bool active_visible = true;
+    bool active_locked = false;
+    bool active_orphan = false;
+    {
+        const auto& cl_status = session_.document().canvas_layers();
+        const auto active_id_status = session_.document().active_layer();
+        if (!cl_status.empty()) {
+            if (const auto* layer = cl_status.find(active_id_status); layer != nullptr) {
+                active_name = layer->name;
+                active_visible = layer->visible;
+                active_locked = layer->locked;
+            } else {
+                // Stack has layers but the active id is invalid (just
+                // after a Remove that didn't auto-promote, or a v8
+                // load that came in with active=0). Show the topmost
+                // layer's name plus an explicit "no active" warning.
+                active_name = cl_status.layers().back().name;
+                active_orphan = true;
+            }
+        }
+    }
     noted::ui::widget::status_bar({
         .frame_index = engine_.frame_index(),
         .zoom_pct = static_cast<float>(camera_.scale() * 100.0),
+        .active_layer_name = active_name,
+        .active_layer_visible = active_visible,
+        .active_layer_locked = active_locked,
+        .active_layer_orphaned = active_orphan,
     });
 }
 
