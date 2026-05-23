@@ -610,6 +610,71 @@ private:
     bool applied_{false};
 };
 
+// Merge every VISIBLE canvas layer into the bottom-most visible
+// one. Hidden layers + their strokes are left untouched (this is
+// what differentiates this from `FlattenImageCommand`). The
+// alpha-baking semantics match `MergeDownCommand`: each merged
+// stroke's `style.a` is multiplied by its original layer's
+// opacity so the post-merge `normal`-blend render reproduces the
+// pre-merge composite.
+//
+// No-op (success) when fewer than 2 visible layers exist —
+// nothing to merge. Returns the rendering result unchanged and
+// the undo stack receives an entry whose `undo` is also a no-op,
+// so Ctrl+Z reads sensibly even on the no-op path.
+//
+// Snapshot strategy: full pre-apply copy of `Document::strokes()`
+// and `Document::canvas_layers()`. Less surgical than MergeDown's
+// per-stroke index capture, but bulletproof for the multi-layer
+// case and still cheap at v0.x layer / stroke counts.
+class MergeVisibleCommand final : public Command {
+public:
+    MergeVisibleCommand() = default;
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override {
+        return "Merge visible";
+    }
+
+private:
+    std::vector<noted::stroke::Stroke> strokes_snapshot_{};
+    CanvasLayerStack stack_snapshot_{};
+    noted::LayerId previous_active_{noted::invalid_layer_id};
+    bool applied_{false};
+    bool was_noop_{false};
+};
+
+// Flatten the document — Photoshop's "Layer → Flatten Image".
+// Combines:
+//   - merge every visible layer into the bottom-most visible
+//     (same semantics as `MergeVisibleCommand`),
+//   - PLUS delete every hidden layer AND every stroke pinned
+//     to a hidden layer (the "discard hidden layers" prompt
+//     Photoshop shows is implicit here — v0.x doesn't gate on
+//     a confirmation dialog, but undo is one Ctrl+Z away).
+//
+// No-op (success) when the document has 0 layers OR 0 strokes
+// AND a single layer. Returns a clean undo-able entry either
+// way so Ctrl+Z reads sensibly.
+class FlattenImageCommand final : public Command {
+public:
+    FlattenImageCommand() = default;
+
+    [[nodiscard]] auto apply(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto undo(Document& doc) -> Result<void> override;
+    [[nodiscard]] auto label() const noexcept -> std::string_view override {
+        return "Flatten image";
+    }
+
+private:
+    std::vector<noted::stroke::Stroke> strokes_snapshot_{};
+    CanvasLayerStack stack_snapshot_{};
+    noted::LayerId previous_active_{noted::invalid_layer_id};
+    bool applied_{false};
+    bool was_noop_{false};
+};
+
 // Change a canvas layer's blend mode. Discrete (dropdown selection
 // is one-shot), no coalescing.
 class SetLayerBlendCommand final : public Command {

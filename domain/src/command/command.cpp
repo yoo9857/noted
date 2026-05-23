@@ -1325,6 +1325,242 @@ auto MergeDownCommand::undo(Document& doc) -> Result<void> {
 }
 
 // ============================================================================
+// MergeVisibleCommand
+// ============================================================================
+
+namespace {
+
+// Shared helper for Merge Visible / Flatten. Builds the new
+// strokes vector by:
+//   1. Choosing a sink (bottom-most visible layer id; 0 if none).
+//   2. For each input stroke:
+//      - if its layer is in `merge_visible_ids` → rewrite layer_id
+//        to sink AND multiply style.a by the original layer's
+//        opacity (the merge bake);
+//      - if its layer is in `delete_layer_ids` → drop it from the
+//        output;
+//      - otherwise (kept layer, or orphan stroke whose layer no
+//        longer exists) → pass through unchanged.
+// Returns the rewritten strokes vector. Pure function: no doc
+// mutation here — caller assembles + replaces.
+[[nodiscard]] auto rewrite_strokes_for_merge(const std::vector<noted::stroke::Stroke>& src,
+                                             const CanvasLayerStack& stack,
+                                             noted::LayerId sink_id,
+                                             const std::vector<noted::LayerId>& merge_visible_ids,
+                                             const std::vector<noted::LayerId>& delete_layer_ids)
+    -> std::vector<noted::stroke::Stroke> {
+    const auto contains = [](const std::vector<noted::LayerId>& v, noted::LayerId id) noexcept {
+        for (auto x : v) {
+            if (x == id) {
+                return true;
+            }
+        }
+        return false;
+    };
+    std::vector<noted::stroke::Stroke> out;
+    out.reserve(src.size());
+    for (const auto& s : src) {
+        if (contains(delete_layer_ids, s.layer_id)) {
+            continue;  // dropped on flatten
+        }
+        if (contains(merge_visible_ids, s.layer_id)) {
+            noted::stroke::Stroke copy = s;
+            float opacity = 1.0F;
+            if (const auto* l = stack.find(s.layer_id); l != nullptr) {
+                opacity = l->opacity;
+            }
+            float combined = copy.style.a * opacity;
+            if (combined < 0.0F) {
+                combined = 0.0F;
+            } else if (combined > 1.0F) {
+                combined = 1.0F;
+            }
+            copy.style.a = combined;
+            copy.layer_id = sink_id;
+            out.push_back(std::move(copy));
+        } else {
+            out.push_back(s);
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+auto MergeVisibleCommand::apply(Document& doc) -> Result<void> {
+    // Count visible layers to identify the no-op case AND to find
+    // the sink (bottom-most visible).
+    const auto& cl = doc.canvas_layers();
+    std::vector<noted::LayerId> visible_ids;
+    visible_ids.reserve(cl.size());
+    for (const auto& l : cl.layers()) {
+        if (l.visible) {
+            visible_ids.push_back(l.id);
+        }
+    }
+    // Snapshot first — even on the no-op path so undo restores the
+    // active id cleanly (no functional change, just a UX-stable
+    // history entry).
+    strokes_snapshot_ = doc.strokes();
+    stack_snapshot_ = cl;
+    previous_active_ = doc.active_layer();
+    if (visible_ids.size() < 2U) {
+        was_noop_ = true;
+        applied_ = true;
+        return {};
+    }
+    const auto sink_id = visible_ids.front();  // bottom-most visible
+    // Everything visible EXCEPT the sink gets merged in.
+    std::vector<noted::LayerId> merge_ids;
+    merge_ids.reserve(visible_ids.size() - 1U);
+    for (std::size_t i = 1; i < visible_ids.size(); ++i) {
+        merge_ids.push_back(visible_ids[i]);
+    }
+    auto new_strokes = rewrite_strokes_for_merge(strokes_snapshot_,
+                                                 stack_snapshot_,
+                                                 sink_id,
+                                                 merge_ids,
+                                                 /*delete_layer_ids=*/{});
+    doc.replace_strokes(std::move(new_strokes));
+    // Remove the merged-in layers from top to bottom so each erase
+    // doesn't shift indices we still need. Indices come from the
+    // bottom-up stack; iterate the merged ids in reverse z-order
+    // by walking the original stack from top.
+    auto new_stack = stack_snapshot_;
+    for (std::size_t i = new_stack.size(); i-- > 0;) {
+        const auto id = new_stack.layers()[i].id;
+        bool drop = false;
+        for (auto mid : merge_ids) {
+            if (mid == id) {
+                drop = true;
+                break;
+            }
+        }
+        if (drop) {
+            if (auto r = new_stack.remove_layer(i); !r) {
+                // Stack manipulation can't realistically fail here
+                // (i < size already checked), but propagate to keep
+                // the contract.
+                return std::unexpected(std::move(r).error());
+            }
+        }
+    }
+    doc.replace_canvas_layers(std::move(new_stack), sink_id);
+    was_noop_ = false;
+    applied_ = true;
+    return {};
+}
+
+auto MergeVisibleCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_state, "MergeVisibleCommand::undo: command was not applied"));
+    }
+    if (!was_noop_) {
+        doc.replace_strokes(strokes_snapshot_);
+        doc.replace_canvas_layers(stack_snapshot_, previous_active_);
+    } else {
+        // No-op path: only active id may have drifted (which
+        // shouldn't happen — apply didn't touch it), so this is
+        // a no-op too. We still restore active to be defensive.
+        (void) doc.set_active_layer(previous_active_);
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
+// FlattenImageCommand
+// ============================================================================
+
+auto FlattenImageCommand::apply(Document& doc) -> Result<void> {
+    const auto& cl = doc.canvas_layers();
+    std::vector<noted::LayerId> visible_ids;
+    std::vector<noted::LayerId> hidden_ids;
+    visible_ids.reserve(cl.size());
+    hidden_ids.reserve(cl.size());
+    for (const auto& l : cl.layers()) {
+        if (l.visible) {
+            visible_ids.push_back(l.id);
+        } else {
+            hidden_ids.push_back(l.id);
+        }
+    }
+    strokes_snapshot_ = doc.strokes();
+    stack_snapshot_ = cl;
+    previous_active_ = doc.active_layer();
+
+    // No-op cases:
+    //   - 0 layers (nothing to do; preserves the "empty document"
+    //     invariant rather than synthesising a layer that the user
+    //     didn't ask for),
+    //   - exactly 1 visible layer AND 0 hidden layers (already
+    //     flat). The single-visible-with-hidden case is NOT a no-op
+    //     because hidden layers still need to be dropped.
+    if (cl.empty() || (visible_ids.size() == 1U && hidden_ids.empty())) {
+        was_noop_ = true;
+        applied_ = true;
+        return {};
+    }
+
+    // Sink: bottom-most visible layer (matches Merge Visible). If
+    // ZERO visible layers, fall back to the bottom-most layer
+    // overall — Photoshop's Flatten on an all-hidden document
+    // preserves at least one paint surface.
+    noted::LayerId sink_id = noted::invalid_layer_id;
+    if (!visible_ids.empty()) {
+        sink_id = visible_ids.front();
+    } else if (!cl.empty()) {
+        sink_id = cl.layers().front().id;
+    }
+
+    // Merge: every visible layer except the sink → merged into sink.
+    std::vector<noted::LayerId> merge_ids;
+    merge_ids.reserve(visible_ids.size());
+    for (auto id : visible_ids) {
+        if (id != sink_id) {
+            merge_ids.push_back(id);
+        }
+    }
+    // Delete: every hidden layer's strokes are dropped (and the
+    // layer itself is removed).
+    auto new_strokes = rewrite_strokes_for_merge(
+        strokes_snapshot_, stack_snapshot_, sink_id, merge_ids, hidden_ids);
+    doc.replace_strokes(std::move(new_strokes));
+
+    // Rebuild the stack with only the sink.
+    auto new_stack = stack_snapshot_;
+    // Walk top→bottom so erases don't shift unfinished indices.
+    for (std::size_t i = new_stack.size(); i-- > 0;) {
+        if (new_stack.layers()[i].id == sink_id) {
+            continue;
+        }
+        if (auto r = new_stack.remove_layer(i); !r) {
+            return std::unexpected(std::move(r).error());
+        }
+    }
+    doc.replace_canvas_layers(std::move(new_stack), sink_id);
+    was_noop_ = false;
+    applied_ = true;
+    return {};
+}
+
+auto FlattenImageCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_state, "FlattenImageCommand::undo: command was not applied"));
+    }
+    if (!was_noop_) {
+        doc.replace_strokes(strokes_snapshot_);
+        doc.replace_canvas_layers(stack_snapshot_, previous_active_);
+    } else {
+        (void) doc.set_active_layer(previous_active_);
+    }
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
 // UndoStack
 // ============================================================================
 
