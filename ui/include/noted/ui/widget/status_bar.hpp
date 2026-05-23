@@ -13,6 +13,7 @@
 // docking integration matures.
 
 #include <cstdint>
+#include <string_view>
 
 namespace noted::ui::widget {
 
@@ -26,6 +27,25 @@ struct StatusBarInfo {
     // non-positive) skips the readout — leaves room for tests /
     // headless contexts that don't bind a camera.
     float zoom_pct{100.0F};
+
+    // Active canvas layer summary. Empty `active_layer_name` (the
+    // default) suppresses the readout entirely — keeps tests /
+    // headless contexts from rendering "Painting: ?" with no
+    // session bound.
+    //
+    // When non-empty the bar reads "Painting: <name>" and, if the
+    // active layer is non-paintable (hidden or locked or pointing
+    // at an unresolvable id), appends a high-contrast warning tag
+    // so the user notices BEFORE they try to draw and wonder why
+    // nothing happens. Worst v0.x usability foot-gun before this
+    // landed: a hidden layer silently consumed input.
+    std::string_view active_layer_name;
+    bool active_layer_visible{true};
+    bool active_layer_locked{false};
+    // True when there's a stack but no active id resolves — usually
+    // a transient state right after a Remove. The bar surfaces this
+    // explicitly so the user understands why paint fails.
+    bool active_layer_orphaned{false};
 };
 
 // Render the status bar. Always visible; toggling lives behind the

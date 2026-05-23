@@ -1246,6 +1246,126 @@ void App::wire_keyboard_shortcuts(const noted::ui::widget::MenuBarStatus& status
         }
     }
 
+    // ---- Layer shortcuts -----------------------------------------------
+    // Match Photoshop's mnemonics so muscle memory carries over.
+    // All routes go through `session_.execute` so the user can
+    // Ctrl+Z them and the dirty proxy fires correctly. Each chord
+    // is short-circuited when there's no active layer to act on —
+    // a hidden / orphan state surfaces in the status bar so the
+    // shortcut not firing is at least visible.
+    {
+        const auto& cl = session_.document().canvas_layers();
+        const auto active_id = session_.document().active_layer();
+        const auto* active = cl.find(active_id);
+        std::size_t active_idx = cl.size();
+        if (active != nullptr) {
+            for (std::size_t i = 0; i < cl.size(); ++i) {
+                if (cl.layers()[i].id == active_id) {
+                    active_idx = i;
+                    break;
+                }
+            }
+        }
+        const bool have_active = active != nullptr && active_idx != cl.size();
+
+        // Ctrl+Shift+N — new layer above the active one (becomes
+        // active, matching `AddCanvasLayerCommand`'s contract).
+        // Ordered before plain `Ctrl+N` so the modifier combination
+        // wins ImGui's chord dispatch.
+        if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N)) {
+            // Defer to ui_panels for the "Layer N" naming helper —
+            // the App side just picks the next ordinal off the stack.
+            // Cheap inline equivalent (small N): max "Layer K" then +1.
+            int max_ord = 0;
+            for (const auto& l : cl.layers()) {
+                constexpr std::string_view kPrefix = "Layer ";
+                if (l.name.size() <= kPrefix.size() ||
+                    l.name.compare(0, kPrefix.size(), kPrefix) != 0) {
+                    continue;
+                }
+                try {
+                    const auto ord = std::stoi(l.name.substr(kPrefix.size()));
+                    if (ord > max_ord) {
+                        max_ord = ord;
+                    }
+                } catch (const std::invalid_argument&) {
+                } catch (const std::out_of_range&) {
+                }
+            }
+            std::string name = "Layer " + std::to_string(max_ord + 1);
+            if (auto r =
+                    session_.execute(std::make_unique<noted::domain::AddCanvasLayerCommand>(name));
+                !r) {
+                std::cerr << r.error().format() << '\n';
+            }
+        }
+
+        // Ctrl+J — duplicate the active layer + its strokes.
+        if (have_active && ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_J)) {
+            if (auto r = session_.execute(
+                    std::make_unique<noted::domain::DuplicateCanvasLayerCommand>(active_idx));
+                !r) {
+                std::cerr << r.error().format() << '\n';
+            }
+        }
+
+        // Ctrl+Backspace — remove the active layer. Chosen over plain
+        // Delete to avoid colliding with the shape-selection Delete
+        // shortcut above. The UI button's "more than one layer" guard
+        // is also enforced here so a user can't shortcut into an
+        // empty stack (which would put the next paint on a lazy-
+        // created Layer 1 with a different id than the deleted one).
+        if (have_active && cl.size() > 1U &&
+            ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Backspace)) {
+            if (auto r = session_.execute(
+                    std::make_unique<noted::domain::RemoveCanvasLayerCommand>(active_idx));
+                !r) {
+                std::cerr << r.error().format() << '\n';
+            }
+            // Same UX assist as ui_panels.cpp's Remove path: promote
+            // the top of stack to active if the remove cleared it.
+            if (session_.document().active_layer() == noted::invalid_layer_id &&
+                !session_.document().canvas_layers().empty()) {
+                const auto top = session_.document().canvas_layers().layers().back().id;
+                (void) session_.document().set_active_layer(top);
+            }
+        }
+
+        // Ctrl+] / Ctrl+[ — raise / lower the active layer in z-order.
+        // "Raise" = closer to the top of the stack (higher index in
+        // the bottom-up vector). Matches Photoshop's convention so
+        // muscle memory carries over.
+        if (have_active && active_idx + 1U < cl.size() &&
+            ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_RightBracket)) {
+            if (auto r = session_.execute(std::make_unique<noted::domain::MoveCanvasLayerCommand>(
+                    active_idx, active_idx + 1U));
+                !r) {
+                std::cerr << r.error().format() << '\n';
+            }
+        }
+        if (have_active && active_idx > 0U &&
+            ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_LeftBracket)) {
+            if (auto r = session_.execute(std::make_unique<noted::domain::MoveCanvasLayerCommand>(
+                    active_idx, active_idx - 1U));
+                !r) {
+                std::cerr << r.error().format() << '\n';
+            }
+        }
+
+        // Alt+] / Alt+[ — switch the active selection up / down one
+        // layer. Direct mutation (not undoable) matches Photoshop's
+        // row-selection convention; same precedent as the panel's
+        // `set_active` action.
+        if (have_active && active_idx + 1U < cl.size() &&
+            ImGui::IsKeyChordPressed(ImGuiMod_Alt | ImGuiKey_RightBracket)) {
+            (void) session_.document().set_active_layer(cl.layers()[active_idx + 1U].id);
+        }
+        if (have_active && active_idx > 0U &&
+            ImGui::IsKeyChordPressed(ImGuiMod_Alt | ImGuiKey_LeftBracket)) {
+            (void) session_.document().set_active_layer(cl.layers()[active_idx - 1U].id);
+        }
+    }
+
     // F2 = rename the selected block. Gated on "have a selection",
     // "no rename already in flight", and (already-checked above)
     // "no text input is consuming keys." Pre-fills the buffer from

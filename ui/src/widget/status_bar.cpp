@@ -34,6 +34,29 @@ void status_bar(const StatusBarInfo& info) {
             ImGui::SameLine(0.0F, 24.0F);
             ImGui::Text("%d%%", static_cast<int>(info.zoom_pct + 0.5F));
         }
+        // Active-layer readout. Photoshop / Procreate keep "Painting on:
+        // <name>" visible at the bottom because the alternative is
+        // silently painting into the wrong layer (or a hidden one) and
+        // wondering why nothing shows up. The warning tag flips to
+        // bright orange when paint will silently no-op.
+        if (!info.active_layer_name.empty()) {
+            ImGui::SameLine(0.0F, 24.0F);
+            ImGui::TextDisabled("Painting:");
+            ImGui::SameLine(0.0F, 4.0F);
+            ImGui::TextUnformatted(info.active_layer_name.data(),
+                                   info.active_layer_name.data() + info.active_layer_name.size());
+            const bool blocked = info.active_layer_orphaned || !info.active_layer_visible ||
+                                 info.active_layer_locked;
+            if (blocked) {
+                const char* tag = info.active_layer_orphaned   ? "[no active]"
+                                  : !info.active_layer_visible ? "[hidden]"
+                                                               : "[locked]";
+                ImGui::SameLine(0.0F, 6.0F);
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0F, 0.65F, 0.20F, 1.0F));
+                ImGui::TextUnformatted(tag);
+                ImGui::PopStyleColor();
+            }
+        }
         ImGui::SameLine(0.0F, 24.0F);
         ImGui::TextDisabled("noted v0.x");
     }
