@@ -78,9 +78,27 @@ constexpr std::array<std::string_view, 2> kCanvasLayersKeys{"active", "items"};
 constexpr std::array<std::string_view, 6> kCanvasLayerItemKeys{
     "id", "name", "visible", "opacity", "locked", "blend"};
 
-// Per-style-object keys (inside a stroke). v7 schema.
-constexpr std::array<std::string_view, 9> kStrokeStyleKeys{
-    "min_r", "max_r", "soft", "ag", "r", "g", "b", "a", "stab"};
+// Per-style-object keys (inside a stroke). v7 schema = first 9; v9
+// adds "pc" (PressureCurve object), "vb" (velocity_blend), "tb"
+// (tilt_blend). All v9 additions are optional on read at every
+// version — absent ⇒ migrated from `ag` (pc) or 0.0F (vb/tb). The
+// strict key check accepts the wider set on v7/v8 files too, since
+// our writers never emit them there and a hand-crafted file
+// supplying them at an older version is harmless (loader treats
+// them with the same migration path as a v9 file with neutral
+// defaults).
+constexpr std::array<std::string_view, 12> kStrokeStyleKeys{
+    "min_r", "max_r", "soft", "ag", "r", "g", "b", "a", "stab", "pc", "vb", "tb"};
+
+// Per-PressureCurve-object keys (inside a stroke style). v9 schema.
+constexpr std::array<std::string_view, 4> kPressureCurveKeys{"h1x", "h1y", "h2x", "h2y"};
+
+// Per-version sample-array stride. v7/v8: (x, y, p). v9+: (x, y, p,
+// t, tx, ty). Keep this as a single lookup so the parser doesn't
+// branch on the version inside the inner loop.
+[[nodiscard]] constexpr auto sample_stride_for(int version) noexcept -> std::size_t {
+    return version >= 9 ? 6U : 3U;
+}
 
 // Per-block keys we recognize.
 constexpr std::array<std::string_view, 7> kBlockKeys{
@@ -399,6 +417,12 @@ template <typename T>
 }
 
 [[nodiscard]] auto serialize_stroke_style(const noted::stroke::BrushStyle& s) -> json {
+    // v9: emit the pen-dynamics block too. `ag` stays for backward
+    // compatibility with v7/v8 readers — they would reject the new
+    // keys (strict mode) but at least see `ag`. We don't gate the
+    // current-version writer on a "support older reader" flag; the
+    // file's `version` field tells any future reader exactly what
+    // shape to expect.
     return json{
         {"min_r", s.min_radius_px},
         {"max_r", s.max_radius_px},
@@ -409,23 +433,38 @@ template <typename T>
         {"b", s.b},
         {"a", s.a},
         {"stab", s.stabilizer},
+        {"pc",
+         json{
+             {"h1x", s.pressure_curve.h1_x},
+             {"h1y", s.pressure_curve.h1_y},
+             {"h2x", s.pressure_curve.h2_x},
+             {"h2y", s.pressure_curve.h2_y},
+         }},
+        {"vb", s.velocity_blend},
+        {"tb", s.tilt_blend},
     };
 }
 
 [[nodiscard]] auto serialize_strokes(const std::vector<noted::stroke::Stroke>& strokes) -> json {
-    // Samples are written as a flat float array (x, y, pressure
-    // triples) so a 500-sample stroke costs ~1500 numbers instead of
-    // 500 small objects with three named fields each. The named-key
-    // overhead would be 4-5× larger on disk; the flat layout reads
-    // back just as cleanly via a stride-3 loop.
+    // Samples are written as a flat float array. v7/v8 used stride-3
+    // (x, y, pressure) triples; v9 widens to stride-6 (x, y, p, t,
+    // tx, ty) to persist pen-dynamics inputs (sample time, tilt
+    // axis) which the tessellator needs for velocity / tilt-aware
+    // width. The named-key overhead would be 4-5× larger on disk;
+    // the flat layout reads back just as cleanly via a stride-6
+    // loop. A 500-sample stroke is ~3000 numbers — still well within
+    // the JSON parse / archive zip budget.
     json arr = json::array();
     for (const auto& stroke : strokes) {
         json samples = json::array();
-        samples.get_ptr<json::array_t*>()->reserve(stroke.samples.size() * 3U);
+        samples.get_ptr<json::array_t*>()->reserve(stroke.samples.size() * 6U);
         for (const auto& s : stroke.samples) {
             samples.push_back(s.x);
             samples.push_back(s.y);
             samples.push_back(s.pressure);
+            samples.push_back(s.t);
+            samples.push_back(s.tilt_x);
+            samples.push_back(s.tilt_y);
         }
         arr.push_back({
             {"mode", static_cast<int>(stroke.mode)},
@@ -1019,8 +1058,9 @@ auto document_from_json(std::string_view json_text) -> Result<Document> {
     }
 
     // Strokes — v7+. Optional at every version. v1..v6 files load
-    // with an empty strokes list. Sample arrays use the flat (x, y,
-    // pressure) triple layout — see the schema doc.
+    // with an empty strokes list. Sample arrays use the flat layout
+    // — stride 3 for v7/v8, stride 6 for v9+ (adds per-sample t /
+    // tilt_x / tilt_y). The version variable is captured above.
     if (root_obj.contains("strokes")) {
         const auto& strokes_arr = root_obj.at("strokes");
         if (!strokes_arr.is_array()) {
@@ -1028,6 +1068,7 @@ auto document_from_json(std::string_view json_text) -> Result<Document> {
                 noted::make_error(noted::ErrorCode::invalid_argument,
                                   "document_from_json: 'strokes' is not an array"));
         }
+        const std::size_t stride = sample_stride_for(*version);
         std::vector<noted::stroke::Stroke> strokes;
         strokes.reserve(strokes_arr.size());
         for (std::size_t i = 0; i < strokes_arr.size(); ++i) {
@@ -1052,7 +1093,9 @@ auto document_from_json(std::string_view json_text) -> Result<Document> {
                     context + ": mode ordinal " + std::to_string(*mode_int) + " out of range"));
             }
 
-            // Samples — flat float array, length must be a multiple of 3.
+            // Samples — flat float array, length must be a multiple
+            // of `stride`. Stride is version-keyed (see
+            // sample_stride_for).
             if (!item.contains("samples")) {
                 return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
                                                          context + ": missing 'samples'"));
@@ -1062,20 +1105,30 @@ auto document_from_json(std::string_view json_text) -> Result<Document> {
                 return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
                                                          context + ": 'samples' is not an array"));
             }
-            if (samples_arr.size() % 3U != 0U) {
+            if (samples_arr.size() % stride != 0U) {
+                const char* layout_descr =
+                    stride == 3U ? "(x, y, pressure triples)" : "(x, y, p, t, tx, ty 6-tuples)";
                 return std::unexpected(noted::make_error(
                     noted::ErrorCode::invalid_argument,
                     context + ": 'samples' length " + std::to_string(samples_arr.size()) +
-                        " is not a multiple of 3 (x, y, pressure triples)"));
+                        " is not a multiple of " + std::to_string(stride) + " " + layout_descr));
             }
             std::vector<noted::stroke::StrokeSample> samples;
-            samples.reserve(samples_arr.size() / 3U);
-            for (std::size_t j = 0; j + 2U < samples_arr.size(); j += 3U) {
+            samples.reserve(samples_arr.size() / stride);
+            for (std::size_t j = 0; j + (stride - 1U) < samples_arr.size(); j += stride) {
                 noted::stroke::StrokeSample s{};
                 try {
                     s.x = samples_arr[j].get<float>();
                     s.y = samples_arr[j + 1U].get<float>();
                     s.pressure = samples_arr[j + 2U].get<float>();
+                    if (stride == 6U) {
+                        s.t = samples_arr[j + 3U].get<float>();
+                        s.tilt_x = samples_arr[j + 4U].get<float>();
+                        s.tilt_y = samples_arr[j + 5U].get<float>();
+                    }
+                    // v7/v8 stride 3 leaves t / tilt at the
+                    // StrokeSample defaults (0) — collapses to
+                    // pre-velocity rendering bit-for-bit.
                 } catch (const json::exception& e) {
                     return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
                                                              context + ": 'samples'[" +
@@ -1152,6 +1205,75 @@ auto document_from_json(std::string_view json_text) -> Result<Document> {
             style.stabilizer = (std::isnan(*stab) || *stab < 0.0F) ? 0.0F
                                : (*stab > 0.95F)                   ? 0.95F
                                                                    : *stab;
+
+            // v9 pen-dynamics fields. All optional at every version:
+            //   - `pc` absent ⇒ migrate from `ag` via
+            //     `PressureCurve::from_gamma`, which is the closed-
+            //     form bezier matching `pow(x, gamma)` and lets the
+            //     user-facing pen feel survive the v8→v9 upgrade.
+            //   - `vb` / `tb` absent ⇒ 0 (no damping; collapses to
+            //     pre-velocity / pre-tilt rendering).
+            // Handles clamped to [0, 1] so a corrupted curve can't
+            // drag a tessellator-side y < 0 / y > 1 sample.
+            style.pressure_curve = noted::stroke::PressureCurve::from_gamma(style.alpha_gamma);
+            if (style_obj.contains("pc")) {
+                const auto& pc_obj = style_obj.at("pc");
+                if (!pc_obj.is_object()) {
+                    return std::unexpected(noted::make_error(noted::ErrorCode::invalid_argument,
+                                                             context + ".style.pc: not an object"));
+                }
+                if (auto bad = find_unknown_key(pc_obj, kPressureCurveKeys); !bad.empty()) {
+                    return std::unexpected(
+                        noted::make_error(noted::ErrorCode::invalid_argument,
+                                          context + ".style.pc: unknown key '" + bad + "'"));
+                }
+                auto h1x = require<float>(pc_obj, "h1x", context + ".style.pc");
+                auto h1y = require<float>(pc_obj, "h1y", context + ".style.pc");
+                auto h2x = require<float>(pc_obj, "h2x", context + ".style.pc");
+                auto h2y = require<float>(pc_obj, "h2y", context + ".style.pc");
+                if (!h1x) {
+                    return std::unexpected(std::move(h1x).error());
+                }
+                if (!h1y) {
+                    return std::unexpected(std::move(h1y).error());
+                }
+                if (!h2x) {
+                    return std::unexpected(std::move(h2x).error());
+                }
+                if (!h2y) {
+                    return std::unexpected(std::move(h2y).error());
+                }
+                const auto clamp01 = [](float v) noexcept -> float {
+                    if (std::isnan(v) || v < 0.0F) {
+                        return 0.0F;
+                    }
+                    return v > 1.0F ? 1.0F : v;
+                };
+                style.pressure_curve.h1_x = clamp01(*h1x);
+                style.pressure_curve.h1_y = clamp01(*h1y);
+                style.pressure_curve.h2_x = clamp01(*h2x);
+                style.pressure_curve.h2_y = clamp01(*h2y);
+            }
+            const auto clamp01 = [](float v) noexcept -> float {
+                if (std::isnan(v) || v < 0.0F) {
+                    return 0.0F;
+                }
+                return v > 1.0F ? 1.0F : v;
+            };
+            if (style_obj.contains("vb")) {
+                auto vb = require<float>(style_obj, "vb", context + ".style");
+                if (!vb) {
+                    return std::unexpected(std::move(vb).error());
+                }
+                style.velocity_blend = clamp01(*vb);
+            }
+            if (style_obj.contains("tb")) {
+                auto tb = require<float>(style_obj, "tb", context + ".style");
+                if (!tb) {
+                    return std::unexpected(std::move(tb).error());
+                }
+                style.tilt_blend = clamp01(*tb);
+            }
 
             // `lid` is v8+ but optional on every version. Absent →
             // invalid_layer_id (= 0); the migration block below either

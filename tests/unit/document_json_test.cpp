@@ -330,10 +330,10 @@ TEST(DocumentJson, EmittedJsonContainsVersionAndKindOrdinal) {
     (void) h;
     const auto text = document_to_json(src);
     // The output should include the wire-stable version + heading ordinal (2).
-    EXPECT_NE(text.find("\"version\": 8"), std::string::npos);
+    EXPECT_NE(text.find("\"version\": 9"), std::string::npos);
     EXPECT_NE(text.find("\"kind\": 0"), std::string::npos);  // group
     EXPECT_NE(text.find("\"kind\": 2"), std::string::npos);  // heading
-    // v2..v8 — writer emits every side-table even when empty.
+    // v2..v9 — writer emits every side-table even when empty.
     EXPECT_NE(text.find("\"pages\""), std::string::npos);
     EXPECT_NE(text.find("\"shapes\""), std::string::npos);
     EXPECT_NE(text.find("\"texts\""), std::string::npos);
@@ -896,6 +896,184 @@ TEST(DocumentJsonReject, StrokesModeOutOfRange) {
             "style": {"min_r": 2, "max_r": 10, "soft": 0.2, "ag": 1.8,
                       "r": 0, "g": 0, "b": 0, "a": 1, "stab": 0.5}
         }]
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+// ---- v9 pen-dynamics round-trip + back-compat -----------------------------
+
+TEST(DocumentJson, V9StrokesPenDynamicsRoundTrip) {
+    // Stroke with all pen-dynamics fields populated: per-sample t /
+    // tilt, custom PressureCurve handles, non-zero velocity_blend /
+    // tilt_blend. Survives a v9 writer → v9 reader round-trip
+    // bit-for-bit on every new field.
+    Document src;
+    noted::stroke::Stroke s{};
+    s.samples = {
+        {.x = 10.0F, .y = 20.0F, .pressure = 1.0F, .t = 0.0F, .tilt_x = 0.30F, .tilt_y = -0.10F},
+        {.x = 30.0F, .y = 40.0F, .pressure = 0.5F, .t = 0.016F, .tilt_x = 0.25F, .tilt_y = -0.05F},
+        {.x = 50.0F, .y = 60.0F, .pressure = 0.8F, .t = 0.033F, .tilt_x = 0.20F, .tilt_y = 0.00F}};
+    s.style.min_radius_px = 3.0F;
+    s.style.max_radius_px = 12.0F;
+    s.style.softness_ratio = 0.15F;
+    s.style.alpha_gamma = 1.5F;
+    s.style.pressure_curve =
+        noted::stroke::PressureCurve{.h1_x = 0.10F, .h1_y = 0.42F, .h2_x = 0.80F, .h2_y = 0.85F};
+    s.style.velocity_blend = 0.40F;
+    s.style.tilt_blend = 0.70F;
+    s.style.r = 0.7F;
+    s.style.g = 0.3F;
+    s.style.b = 0.1F;
+    s.style.a = 0.9F;
+    s.style.stabilizer = 0.4F;
+    s.mode = noted::stroke::DrawMode::draw;
+    ASSERT_TRUE(src.add_stroke(s));
+
+    auto loaded = document_from_json(document_to_json(src));
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->strokes().size(), 1U);
+    const auto& g = loaded->strokes()[0];
+    ASSERT_EQ(g.samples.size(), 3U);
+    EXPECT_FLOAT_EQ(g.samples[0].t, 0.0F);
+    EXPECT_FLOAT_EQ(g.samples[0].tilt_x, 0.30F);
+    EXPECT_FLOAT_EQ(g.samples[0].tilt_y, -0.10F);
+    EXPECT_FLOAT_EQ(g.samples[1].t, 0.016F);
+    EXPECT_FLOAT_EQ(g.samples[1].tilt_x, 0.25F);
+    EXPECT_FLOAT_EQ(g.samples[2].t, 0.033F);
+    EXPECT_FLOAT_EQ(g.samples[2].tilt_y, 0.00F);
+    EXPECT_FLOAT_EQ(g.style.pressure_curve.h1_x, 0.10F);
+    EXPECT_FLOAT_EQ(g.style.pressure_curve.h1_y, 0.42F);
+    EXPECT_FLOAT_EQ(g.style.pressure_curve.h2_x, 0.80F);
+    EXPECT_FLOAT_EQ(g.style.pressure_curve.h2_y, 0.85F);
+    EXPECT_FLOAT_EQ(g.style.velocity_blend, 0.40F);
+    EXPECT_FLOAT_EQ(g.style.tilt_blend, 0.70F);
+}
+
+TEST(DocumentJson, V8FileMigratesPenDynamicsFromAlphaGamma) {
+    // Legacy v8 file: stride-3 samples, no pc / vb / tb fields. v9
+    // reader synthesises `pressure_curve` from `ag` via
+    // `from_gamma`, defaults vb / tb to 0, and zero-fills per-sample
+    // t / tilt. The migrated curve must match what `from_gamma`
+    // would produce in production so pen feel survives the upgrade.
+    const auto v8 = R"({
+        "version": 8, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [], "images": [], "image_assets": [],
+        "strokes": [{
+            "mode": 0,
+            "samples": [0, 0, 1, 10, 20, 0.5],
+            "style": {"min_r": 2, "max_r": 10, "soft": 0.2, "ag": 1.8,
+                      "r": 0, "g": 0, "b": 0, "a": 1, "stab": 0.5}
+        }]
+    })";
+    auto loaded = document_from_json(v8);
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->strokes().size(), 1U);
+    const auto& s = loaded->strokes()[0];
+    ASSERT_EQ(s.samples.size(), 2U);
+    EXPECT_FLOAT_EQ(s.samples[0].t, 0.0F);
+    EXPECT_FLOAT_EQ(s.samples[0].tilt_x, 0.0F);
+    EXPECT_FLOAT_EQ(s.samples[0].tilt_y, 0.0F);
+    EXPECT_FLOAT_EQ(s.style.velocity_blend, 0.0F);
+    EXPECT_FLOAT_EQ(s.style.tilt_blend, 0.0F);
+    const auto expected = noted::stroke::PressureCurve::from_gamma(1.8F);
+    EXPECT_FLOAT_EQ(s.style.pressure_curve.h1_x, expected.h1_x);
+    EXPECT_FLOAT_EQ(s.style.pressure_curve.h1_y, expected.h1_y);
+    EXPECT_FLOAT_EQ(s.style.pressure_curve.h2_x, expected.h2_x);
+    EXPECT_FLOAT_EQ(s.style.pressure_curve.h2_y, expected.h2_y);
+}
+
+TEST(DocumentJsonReject, V9SamplesLengthNotMultipleOf6) {
+    const auto bad = R"({
+        "version": 9, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [], "images": [], "image_assets": [],
+        "strokes": [{
+            "mode": 0,
+            "samples": [0, 0, 1, 0, 0],
+            "style": {"min_r": 2, "max_r": 10, "soft": 0.2, "ag": 1.8,
+                      "r": 0, "g": 0, "b": 0, "a": 1, "stab": 0.5}
+        }]
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+TEST(DocumentJson, V9PressureCurveHandlesClampedToUnitSquare) {
+    // Out-of-range handles must clamp at the data boundary so a
+    // corrupted file can't poison the tessellator's [0, 1] alpha
+    // assumption.
+    const auto bad_pc = R"({
+        "version": 9, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [], "images": [], "image_assets": [],
+        "strokes": [{
+            "mode": 0,
+            "samples": [0, 0, 1, 0, 0, 0],
+            "style": {"min_r": 2, "max_r": 10, "soft": 0.2, "ag": 1.8,
+                      "r": 0, "g": 0, "b": 0, "a": 1, "stab": 0.5,
+                      "pc": {"h1x": -1.5, "h1y": 2.0, "h2x": 0.5, "h2y": 0.7},
+                      "vb": 0.0, "tb": 0.0}
+        }]
+    })";
+    auto loaded = document_from_json(bad_pc);
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->strokes().size(), 1U);
+    const auto& s = loaded->strokes()[0];
+    EXPECT_GE(s.style.pressure_curve.h1_x, 0.0F);
+    EXPECT_LE(s.style.pressure_curve.h1_x, 1.0F);
+    EXPECT_GE(s.style.pressure_curve.h1_y, 0.0F);
+    EXPECT_LE(s.style.pressure_curve.h1_y, 1.0F);
+    EXPECT_FLOAT_EQ(s.style.pressure_curve.h2_x, 0.5F);
+    EXPECT_FLOAT_EQ(s.style.pressure_curve.h2_y, 0.7F);
+}
+
+TEST(DocumentJson, V9VelocityAndTiltBlendClampedToUnit) {
+    const auto bad_blends = R"({
+        "version": 9, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [], "images": [], "image_assets": [],
+        "strokes": [{
+            "mode": 0,
+            "samples": [0, 0, 1, 0, 0, 0],
+            "style": {"min_r": 2, "max_r": 10, "soft": 0.2, "ag": 1.8,
+                      "r": 0, "g": 0, "b": 0, "a": 1, "stab": 0.5,
+                      "vb": 5.0, "tb": -2.0}
+        }]
+    })";
+    auto loaded = document_from_json(bad_blends);
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->strokes().size(), 1U);
+    const auto& s = loaded->strokes()[0];
+    EXPECT_FLOAT_EQ(s.style.velocity_blend, 1.0F);
+    EXPECT_FLOAT_EQ(s.style.tilt_blend, 0.0F);
+}
+
+TEST(DocumentJsonReject, V9PressureCurveUnknownKey) {
+    // Strict-mode key check applies to the pc sub-object too. A
+    // typo'd key catches the writer's mistake immediately instead of
+    // silently dropping the data on round-trip.
+    const auto bad = R"({
+        "version": 9, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []},
+        "shapes": [], "texts": [], "images": [], "image_assets": [],
+        "strokes": [{
+            "mode": 0,
+            "samples": [0, 0, 1, 0, 0, 0],
+            "style": {"min_r": 2, "max_r": 10, "soft": 0.2, "ag": 1.8,
+                      "r": 0, "g": 0, "b": 0, "a": 1, "stab": 0.5,
+                      "pc": {"h1x": 0.3, "h1y": 0.3, "h2x": 0.6, "h2y": 0.6,
+                             "bogus": 1.0}}
+        }]
+    })";
+    EXPECT_FALSE(document_from_json(bad));
+}
+
+TEST(DocumentJsonReject, UnsupportedVersion10) {
+    // Future versions must be rejected — silently truncating unknown
+    // fields would risk data loss on round-trip.
+    const auto bad = R"({
+        "version": 10, "root": 0, "blocks": [],
+        "pages": {"gap_px": 0.0, "items": []}
     })";
     EXPECT_FALSE(document_from_json(bad));
 }

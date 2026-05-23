@@ -12,7 +12,7 @@
 // Schema summary (see ADR 0025 for the full spec):
 //
 //   {
-//     "version": 8,
+//     "version": 9,
 //     "root": <BlockId>,                 // 0 when document is empty
 //     "blocks": [ ... ],                 // same as prior versions
 //     "pages": { ... },                  // same as v2
@@ -39,13 +39,21 @@
 //       {
 //         "mode":    <int>,              // DrawMode ordinal (draw=0, erase=1)
 //         "lid":     <uint64>,           // v8+; LayerId, 0 = unassigned
-//         "samples": [x0, y0, p0, x1, y1, p1, ...],  // flat float array (x, y, pressure triples)
+//         "samples": [...],              // v7/v8: stride-3 (x, y, p);
+//                                        //   v9+: stride-6 (x, y, p, t, tx, ty)
 //         "style": {
 //           "min_r": <float>, "max_r": <float>,
 //           "soft":  <float>, "ag":    <float>,
 //           "r":     <float>, "g":     <float>,
 //           "b":     <float>, "a":     <float>,
-//           "stab":  <float>             // input-stabilizer weight
+//           "stab":  <float>,            // input-stabilizer weight
+//           // v9+ additive pen-dynamics fields. Older v7/v8 readers
+//           // never wrote these; v9 readers default them to neutral
+//           // values when absent (see migration notes below).
+//           "pc":    { "h1x": <float>, "h1y": <float>,
+//                      "h2x": <float>, "h2y": <float> },  // PressureCurve handles
+//           "vb":    <float>,            // velocity_blend, [0, 1]
+//           "tb":    <float>             // tilt_blend, [0, 1]
 //         }
 //       },
 //       ...
@@ -85,6 +93,18 @@
 //         Strokes whose `lid` doesn't resolve in `canvas_layers` are
 //         loaded as-is (renderer treats them as hidden — see
 //         `CanvasLayerStack::is_visible` contract).
+//   - v9: persists pen-dynamics — per-sample time + tilt (samples
+//         become 6-tuples) and per-stroke pressure-curve handles +
+//         velocity_blend + tilt_blend. v7/v8 files load with:
+//           * per-sample t / tilt = 0 (collapses to pre-velocity
+//             rendering, bit-for-bit),
+//           * pressure_curve = `PressureCurve::from_gamma(ag)` so the
+//             user-facing pen feel survives the upgrade,
+//           * velocity_blend = tilt_blend = 0 (no damping).
+//         A v9 writer round-trips a loaded v7/v8 file losslessly with
+//         respect to the legacy fields and adds the new ones at their
+//         migrated values; subsequent v9 readers therefore see exactly
+//         the curve/dynamics they would have synthesized from `ag`.
 //   Writer always emits the current version.
 //
 // The payload object's keys depend on the block's kind. See ADR 0025
@@ -110,7 +130,7 @@ namespace noted::domain::io {
 
 // On-disk schema version. Writer always emits this; reader accepts
 // this value AND every prior supported version.
-inline constexpr int kDocumentJsonVersion = 8;
+inline constexpr int kDocumentJsonVersion = 9;
 inline constexpr int kDocumentJsonMinReadableVersion = 1;
 
 // Serialize `doc` to JSON. Output is pretty-printed with 2-space
