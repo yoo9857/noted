@@ -1217,6 +1217,114 @@ auto SetLayerBlendCommand::undo(Document& doc) -> Result<void> {
 }
 
 // ============================================================================
+// MergeDownCommand
+// ============================================================================
+
+MergeDownCommand::MergeDownCommand(std::size_t source_index) : source_index_(source_index) {}
+
+auto MergeDownCommand::apply(Document& doc) -> Result<void> {
+    const auto& cl = doc.canvas_layers();
+    if (source_index_ == 0U || source_index_ >= cl.size()) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_argument,
+            "MergeDownCommand::apply: source index " + std::to_string(source_index_) +
+                " has no layer below it to merge into (size " + std::to_string(cl.size()) + ")"));
+    }
+    source_snapshot_ = cl.layers()[source_index_];
+    const auto target_id = cl.layers()[source_index_ - 1U].id;
+    previous_active_ = doc.active_layer();
+
+    // Build a mutated stroke vector + parallel snapshot table for
+    // undo. We touch only strokes whose layer_id matches the
+    // source; everything else passes through. `replace_strokes` is
+    // the bulk swap that makes this atomic from the renderer's POV.
+    auto new_strokes = doc.strokes();  // copy
+    stroke_snapshots_.clear();
+    stroke_snapshots_.reserve(new_strokes.size());
+    const float merge_alpha = (source_snapshot_.opacity < 0.0F)   ? 0.0F
+                              : (source_snapshot_.opacity > 1.0F) ? 1.0F
+                                                                  : source_snapshot_.opacity;
+    for (std::size_t i = 0; i < new_strokes.size(); ++i) {
+        auto& s = new_strokes[i];
+        if (s.layer_id != source_snapshot_.id) {
+            continue;
+        }
+        stroke_snapshots_.push_back(
+            {.index = i, .original_layer_id = s.layer_id, .original_alpha = s.style.a});
+        s.layer_id = target_id;
+        // Bake source.opacity into per-stroke alpha so the post-
+        // merge render reproduces the pre-merge composite (for the
+        // `normal` blend case — non-normal source blend is a v0.x
+        // limitation documented on the command).
+        float combined = s.style.a * merge_alpha;
+        if (combined < 0.0F) {
+            combined = 0.0F;
+        } else if (combined > 1.0F) {
+            combined = 1.0F;
+        }
+        s.style.a = combined;
+    }
+    doc.replace_strokes(std::move(new_strokes));
+
+    // Remove the source layer. If this fails the strokes are in
+    // the post-merge state and we'd lose atomicity — restore the
+    // snapshots first.
+    auto removed = doc.remove_canvas_layer(source_index_);
+    if (!removed) {
+        // Roll back the stroke mutation.
+        auto rollback = doc.strokes();
+        for (const auto& snap : stroke_snapshots_) {
+            if (snap.index < rollback.size()) {
+                rollback[snap.index].layer_id = snap.original_layer_id;
+                rollback[snap.index].style.a = snap.original_alpha;
+            }
+        }
+        doc.replace_strokes(std::move(rollback));
+        stroke_snapshots_.clear();
+        return std::unexpected(std::move(removed).error());
+    }
+
+    // Active follows the merge target so the next paint stroke
+    // lands on the now-thicker bottom layer — Photoshop's
+    // convention.
+    (void) doc.set_active_layer(target_id);
+    applied_ = true;
+    return {};
+}
+
+auto MergeDownCommand::undo(Document& doc) -> Result<void> {
+    if (!applied_) {
+        return std::unexpected(noted::make_error(
+            noted::ErrorCode::invalid_state, "MergeDownCommand::undo: command was not applied"));
+    }
+    // Re-insert the source layer at its original index. The
+    // CanvasLayerStack's `insert_layer` rejects duplicate ids; we
+    // already removed `source_snapshot_.id` in apply, so the slot
+    // is free.
+    auto stack = doc.canvas_layers();
+    if (auto r = stack.insert_layer(source_index_, source_snapshot_); !r) {
+        return std::unexpected(std::move(r).error());
+    }
+    doc.replace_canvas_layers(std::move(stack), previous_active_);
+
+    // Restore each migrated stroke's layer_id + style.a.
+    auto restored = doc.strokes();
+    for (const auto& snap : stroke_snapshots_) {
+        if (snap.index >= restored.size()) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::invalid_state,
+                "MergeDownCommand::undo: stroke index " + std::to_string(snap.index) +
+                    " out of range — strokes vector mutated externally?"));
+        }
+        restored[snap.index].layer_id = snap.original_layer_id;
+        restored[snap.index].style.a = snap.original_alpha;
+    }
+    doc.replace_strokes(std::move(restored));
+    applied_ = false;
+    return {};
+}
+
+// ============================================================================
 // UndoStack
 // ============================================================================
 

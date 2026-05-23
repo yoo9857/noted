@@ -64,6 +64,7 @@ struct LayerPanelAction {
         set_opacity = 9,  // target_id, float_value
         set_blend = 10,   // target_id, blend_value
         set_active = 11,  // target_id  (direct, not undoable — see host)
+        merge_down = 12,  // index  (the SOURCE; target = index - 1)
     };
     Kind kind{Kind::none};
 

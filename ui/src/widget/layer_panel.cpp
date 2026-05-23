@@ -138,6 +138,8 @@ auto layer_panel(const noted::domain::Document& doc, bool* open) -> LayerPanelAc
     const bool can_move_down = have_active && active_idx != stack.size() && active_idx > 0;
     const bool can_remove = stack.size() > 1U && have_active;
     const bool can_duplicate = have_active && active_idx != stack.size();
+    // Merge Down requires a layer beneath the source (active_idx > 0).
+    const bool can_merge_down = have_active && active_idx != stack.size() && active_idx > 0U;
 
     if (ImGui::SmallButton("+")) {
         action.kind = LayerPanelAction::Kind::add;
@@ -185,6 +187,18 @@ auto layer_panel(const noted::domain::Document& doc, bool* open) -> LayerPanelAc
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered() && can_remove) {
         ImGui::SetTooltip("Remove layer");
+    }
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!can_merge_down);
+    if (ImGui::SmallButton("merge")) {
+        action.kind = LayerPanelAction::Kind::merge_down;
+        action.index = active_idx;
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered() && can_merge_down) {
+        ImGui::SetTooltip(
+            "Merge down (Ctrl+E)\nBakes this layer's strokes (alpha × opacity)\ninto the "
+            "layer below, then removes this one.");
     }
     ImGui::Separator();
 
