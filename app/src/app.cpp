@@ -1309,6 +1309,18 @@ void App::wire_keyboard_shortcuts(const noted::ui::widget::MenuBarStatus& status
             }
         }
 
+        // Ctrl+E — merge the active layer DOWN into the one below.
+        // Photoshop fidelity. Disabled when active is the bottom-
+        // most layer (active_idx == 0) — nothing to merge into.
+        if (have_active && active_idx > 0U &&
+            ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_E)) {
+            if (auto r =
+                    session_.execute(std::make_unique<noted::domain::MergeDownCommand>(active_idx));
+                !r) {
+                std::cerr << r.error().format() << '\n';
+            }
+        }
+
         // Ctrl+Backspace — remove the active layer. Chosen over plain
         // Delete to avoid colliding with the shape-selection Delete
         // shortcut above. The UI button's "more than one layer" guard

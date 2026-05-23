@@ -216,6 +216,9 @@ void UiPanels::draw() {
                     std::cerr << r.error().format() << '\n';
                 }
                 break;
+            case K::merge_down:
+                exec(std::make_unique<noted::domain::MergeDownCommand>(la.index));
+                break;
         }
     }
 
