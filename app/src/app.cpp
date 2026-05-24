@@ -339,7 +339,11 @@ auto App::init_gpu_stack() -> noted::Result<void> {
     auto instance = noted::gpu::Instance::create({
         .app_name = "noted",
         .app_version = VK_MAKE_API_VERSION(0, 0, 1, 0),
-        .api_version = VK_API_VERSION_1_3,
+        // 1.4 to unlock dynamicRenderingLocalRead (used by the
+        // shader-blend compositor pipeline for Photoshop modes).
+        // Drivers without 1.4 still create the device — the feature
+        // is enabled opportunistically per `DeviceCreateInfo`.
+        .api_version = VK_API_VERSION_1_4,
         .enable_validation = static_cast<bool>(flag_validation_layers),
         .extra_extensions = {},
         .surface_extensions = required_surface_extensions(),

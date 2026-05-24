@@ -45,6 +45,18 @@ struct DeviceCreateInfo {
     //                              that draws without a vertex buffer
     //                              (fullscreen quad, instanced sprites).
     bool enable_shader_draw_parameters = true;
+
+    // ---- Vulkan 1.4 (optional) ----
+    // dynamic_rendering_local_read — fragment shader can read the
+    // current color attachment value via input-attachment-style
+    // semantics under dynamic rendering. Required by the layer
+    // compositor's shader-blend pipeline for the 12 Photoshop blend
+    // modes that aren't expressible via fixed-function blend (overlay,
+    // soft_light, hue, …). Opportunistic: when the physical device
+    // doesn't support the feature, Device::create() leaves it
+    // disabled and the compositor falls back to NORMAL for those
+    // modes (the same behaviour the pre-Phase-C code had).
+    bool enable_dynamic_rendering_local_read = true;
 };
 
 // Logical device + queue handles.
@@ -77,6 +89,17 @@ public:
     }
     [[nodiscard]] auto present_family() const noexcept -> std::uint32_t { return present_family_; }
 
+    // True iff Device::create successfully enabled the Vulkan 1.4
+    // `dynamicRenderingLocalRead` feature. Callers that want to use
+    // a shader pipeline reading its own color attachment must check
+    // this before creating that pipeline. False is the same code path
+    // the engine took before Phase C: shader-blend pipelines are
+    // skipped and the compositor falls back to NORMAL for the modes
+    // that would have used them.
+    [[nodiscard]] auto has_dynamic_rendering_local_read() const noexcept -> bool {
+        return has_dynamic_rendering_local_read_;
+    }
+
     // Blocks the calling thread until every queue on this device is idle.
     // Used before destroying resources that the GPU might still reference.
     void wait_idle() const noexcept;
@@ -90,6 +113,7 @@ private:
     VkQueue present_queue_ = VK_NULL_HANDLE;
     std::uint32_t graphics_family_ = UINT32_MAX;
     std::uint32_t present_family_ = UINT32_MAX;
+    bool has_dynamic_rendering_local_read_ = false;
 };
 
 }  // namespace noted::gpu

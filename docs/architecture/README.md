@@ -43,6 +43,7 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0035 | [`.noted` v9 schema — pen-dynamics persistence](0035-noted-v9-pen-dynamics.md) | Accepted |
 | 0036 | [`.noted` asset bundle in the zip archive](0036-noted-asset-bundle.md) | Accepted |
 | 0037 | [Image asset GPU upload + ImTextureID registry](0037-image-asset-gpu-upload.md) | Accepted |
+| 0038 | [Shader-based blend modes via dynamicRenderingLocalRead](0038-shader-blend-modes.md) | Accepted (Stage 1 — feature unlock) |
 
 ## Format
 

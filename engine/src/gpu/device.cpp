@@ -114,9 +114,32 @@ auto Device::create(const PhysicalDevice& physical,
         vk12.timelineSemaphore = VK_TRUE;
     }
 
+    // ---- Vulkan 1.4 optional features ----
+    // dynamicRenderingLocalRead is the core-1.4 promotion of
+    // VK_KHR_dynamic_rendering_local_read. We query first and only
+    // chain the struct (with the bit set) when the physical device
+    // advertises support; older devices skip it gracefully and the
+    // compositor falls back to NORMAL for the 12 shader-blend modes.
+    VkPhysicalDeviceVulkan14Features vk14{};
+    vk14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
+    bool local_read_supported = false;
+    if (info.enable_dynamic_rendering_local_read) {
+        VkPhysicalDeviceVulkan14Features query{};
+        query.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
+        VkPhysicalDeviceFeatures2 query_feat2{};
+        query_feat2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        query_feat2.pNext = &query;
+        vkGetPhysicalDeviceFeatures2(physical.handle(), &query_feat2);
+        local_read_supported = (query.dynamicRenderingLocalRead == VK_TRUE);
+        if (local_read_supported) {
+            vk14.dynamicRenderingLocalRead = VK_TRUE;
+            vk14.pNext = &vk12;
+        }
+    }
+
     VkPhysicalDeviceFeatures2 feat2{};
     feat2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    feat2.pNext = &vk12;
+    feat2.pNext = local_read_supported ? static_cast<void*>(&vk14) : static_cast<void*>(&vk12);
 
     VkDeviceCreateInfo dci{};
     dci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -137,6 +160,7 @@ auto Device::create(const PhysicalDevice& physical,
     out.handle_ = raw;
     out.graphics_family_ = graphics_fam;
     out.present_family_ = present_fam;
+    out.has_dynamic_rendering_local_read_ = local_read_supported;
     vkGetDeviceQueue(raw, graphics_fam, 0, &out.graphics_queue_);
     vkGetDeviceQueue(raw, present_fam, 0, &out.present_queue_);
     return out;
@@ -147,12 +171,14 @@ Device::Device(Device&& other) noexcept
       graphics_queue_(other.graphics_queue_),
       present_queue_(other.present_queue_),
       graphics_family_(other.graphics_family_),
-      present_family_(other.present_family_) {
+      present_family_(other.present_family_),
+      has_dynamic_rendering_local_read_(other.has_dynamic_rendering_local_read_) {
     other.handle_ = VK_NULL_HANDLE;
     other.graphics_queue_ = VK_NULL_HANDLE;
     other.present_queue_ = VK_NULL_HANDLE;
     other.graphics_family_ = UINT32_MAX;
     other.present_family_ = UINT32_MAX;
+    other.has_dynamic_rendering_local_read_ = false;
 }
 
 auto Device::operator=(Device&& other) noexcept -> Device& {
@@ -163,11 +189,13 @@ auto Device::operator=(Device&& other) noexcept -> Device& {
         present_queue_ = other.present_queue_;
         graphics_family_ = other.graphics_family_;
         present_family_ = other.present_family_;
+        has_dynamic_rendering_local_read_ = other.has_dynamic_rendering_local_read_;
         other.handle_ = VK_NULL_HANDLE;
         other.graphics_queue_ = VK_NULL_HANDLE;
         other.present_queue_ = VK_NULL_HANDLE;
         other.graphics_family_ = UINT32_MAX;
         other.present_family_ = UINT32_MAX;
+        other.has_dynamic_rendering_local_read_ = false;
     }
     return *this;
 }
