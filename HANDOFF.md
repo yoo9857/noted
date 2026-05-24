@@ -295,10 +295,21 @@ tests/        Unit + integration + bench + fuzz scaffolds
    `VK_API_VERSION_1_4`, `DeviceCreateInfo` gains an
    opportunistic `enable_dynamic_rendering_local_read` flag,
    `Device::has_dynamic_rendering_local_read()` exposes the
-   negotiated result. No behavioural change yet (the 12 fall-
-   through modes still increment `fallback_count_`); the
-   shader-blend pipeline + per-mode math ships in stage 2.
-   Smoke-tested on GTX 1050 Ti — clean exit, zero validation.
+   negotiated result. Smoke-tested on RTX 3060 — clean exit,
+   zero validation.
+✅ **Phase C stage 2a — shader-blend math (ADR 0038 stage 2a)**:
+   `shaders/layer.slang` gains `ps_layer_shader_blend` — a
+   second fragment entry that switches on a push-constant
+   `mode` ordinal and computes all 12 Photoshop blend modes
+   (overlay / soft_light / hard_light / color_dodge /
+   color_burn / linear_burn / difference / exclusion / hue /
+   saturation / color / luminosity) via the W3C compositing
+   1.0 reference math. `LayerPush` (shader + C++) grows from
+   16 to 32 bytes — mode ordinal alongside the premultiplied
+   color. CMake adds the new entry as a third SPIR-V
+   output (`layer.ps_layer_shader_blend.spv`). No routing
+   change yet: stage 2b wires the pipeline + snapshot copy
+   that actually drives the new entry.
 ✅ **B.7.b.2b — image GPU upload (ADR 0037)**:
    `compositor::ImageAssetGpuRegistry` maps `AssetId` → `gpu::Image`
    + ImGui descriptor set. `sync_image_assets` (called per frame
@@ -411,8 +422,10 @@ tests/        Unit + integration + bench + fuzz scaffolds
   fixed-function pipelines for normal / multiply / linear_dodge /
   screen and counts the rest as a fallback. Phase C stage 1
   (ADR 0038) unlocked the `dynamicRenderingLocalRead` Vulkan 1.4
-  feature the shader pipeline needs; stage 2 wires the
-  shader-blend pipeline + per-mode math.
+  feature; stage 2a landed the shader math (`ps_layer_shader_blend`
+  + push struct + CMake target); stage 2b wires the actual
+  shader-blend pipeline + snapshot copy that drives the new
+  fragment entry.
 - **Asset / history embedding** in the `.noted` archive — image
   blobs decoded by `stb_image` live only in RAM; save/load
   round-trips an `AssetId` to nothing. **B.7.b.3** is the
@@ -550,9 +563,10 @@ filters, color management). Phased to keep each PR focused:
 | **R.2** | **App-layer decomposition** — `CameraController` extracted (PR #76, ADR 0032) | ✅ |
 | **R.3** | **App-layer decomposition** — `RenderPasses` (4-pass canvas pipeline) extracted (PR #78, ADR 0032) | ✅ |
 | **R.4** | **App-layer decomposition** — `UiPanels` (draw_widgets body) extracted (PR #79, ADR 0032) | ✅ |
-| **C.11** | **Vulkan 1.4 + `dynamicRenderingLocalRead` feature unlock for shader-blend pipeline (ADR 0038 stage 1)** | ✅ |
-| C.12 | Shader-blend pipeline + 12-mode math (ADR 0038 stage 2) | |
-| C.13 | Layer filter pipeline + color management | |
+| **C.11** | **Vulkan 1.4 + `dynamicRenderingLocalRead` feature unlock (ADR 0038 stage 1)** | ✅ |
+| **C.12** | **Shader-blend math — `ps_layer_shader_blend` Slang entry + LayerPush growth + CMake target (ADR 0038 stage 2a)** | ✅ |
+| C.13 | Shader-blend pipeline + snapshot mechanics (ADR 0038 stage 2b) | |
+| C.14 | Layer filter pipeline + color management | |
 | D   | Goodnotes polish — smart shapes, lasso + transform handles, pen-button mapping, page templates, PDF export | |
 | E   | (optional) Native chrome — ImGui → Qt/Slint per ADR 0027 v1.0 boundary | |
 
@@ -583,25 +597,30 @@ viewport that QWindow already hosts.
   `brush_options` last because it has the most controls).
   Branch family: `feat/qml-panel-*`.
 
-**Option 2 — Phase C stage 2: shader-blend pipeline (the natural
-follow-up).** Stage 1 unlocked `dynamicRenderingLocalRead` (ADR
-0038). Stage 2 wires the shader-blend pipeline + 12-mode math:
+**Option 2 — Phase C stage 2b: shader-blend pipeline + snapshot
+mechanics (the natural follow-up).** Stage 1 unlocked
+`dynamicRenderingLocalRead`; stage 2a landed the
+`ps_layer_shader_blend` fragment entry with W3C-compositing
+math for all 12 modes. Stage 2b wires the pipeline + plumbing
+that actually drives the shader:
 
-  - Slang shader entry that reads the color attachment as a
-    `SubpassInput<float4>` (Slang exposes the input-attachment
-    semantic that maps to local-read under dynamic rendering).
-  - `LayerCompositor` gains a second pipeline (`blendEnable =
-    FALSE`, pipeline create info chained with
-    `VkRenderingInputAttachmentIndexInfoKHR`) + an
-    `INPUT_ATTACHMENT` descriptor pointing at the canvas view.
-  - Per composite() inner-loop: for any of the 12 modes (and
-    only when `device.has_dynamic_rendering_local_read()`),
-    bind shader-blend pipeline + push the mode ordinal + draw.
-    `fallback_count_` only ticks on the unsupported-device
-    fallback path.
-  - 12 modes share one shader via a `switch` on the push-
-    constant ordinal — Photoshop reference formulas.
-  - Branch: `feat/layer-blend-modes-shader`.
+  - `LayerCompositor` adds a second graphics pipeline
+    (`blendEnable = FALSE`, samples a `dst` snapshot at
+    `set=1, binding=0`).
+  - The compositor reserves a canvas-sized scratch image and
+    a `VkSampler`; per shader-blend layer it ends the current
+    rendering, blits canvas → snapshot, transitions snapshot
+    → `SHADER_READ_ONLY`, re-opens rendering with `LOAD_OP_LOAD`,
+    binds shader_blend + descriptor + push, draws, then
+    continues.
+  - `slot_for(mode)` is updated so the 12 fall-through modes
+    return the new shader_blend slot; `fallback_count_` only
+    ticks when the snapshot machinery isn't usable (extent
+    change in flight, allocator failure).
+  - Caller (RenderPasses) passes the canvas image/view to
+    `composite()` so the compositor can issue barriers
+    against the right `VkImage`.
+  - Branch: `feat/layer-blend-modes-pipeline`.
 
 **Option 3 — Async image decode**. The synchronous decode in
 `sync_image_assets` stalls the frame on large picks (a 4K JPG
@@ -613,9 +632,11 @@ on each tick. Branch: `feat/async-asset-loading`.
 (PRs #111-#113) and smart shapes (PR #103) done. Open: pen-button
 mapping, page templates, PDF export.
 
-**Recommendation: Option 1** — the QML phase 4 port is the
-single biggest UI-quality lift remaining and unlocks the
-ADR 0034 v1.0 target.
+**Recommendation: Option 2** — finishing Phase C closes a
+Photoshop-feature gap that already has the shader math + the
+Vulkan 1.4 feature unlock in place; the remaining work is the
+fewest moving parts of the four options and ships visible
+Photoshop-grade output.
 
 ---
 

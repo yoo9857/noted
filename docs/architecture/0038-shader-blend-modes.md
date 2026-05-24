@@ -1,7 +1,7 @@
 # ADR 0038 — Shader-based layer blend modes via dynamicRenderingLocalRead
 
-**Status:** Phase C foundation accepted. Shader pipeline + blend math
-ship in a follow-up.
+**Status:** Stages 1–2a accepted. Stage 2b (pipeline + snapshot
+mechanics) lands in a follow-up.
 **Date:** 2026-05-24
 **Builds on:** [ADR 0019 (layer compositor)](0019-layer-compositor.md),
 [ADR 0028 (compositor frame-safe init)](0028-compositor-frame-safe-init.md).
@@ -48,7 +48,31 @@ its current routing. The 12 fall-through modes still increment
 `fallback_count_`. This is intentionally just the **feature
 unlock**.
 
-### Stage 2 (follow-up PR) — shader-blend pipeline
+### Stage 2a (this PR follow-up) — shader written + push struct grown
+
+The fragment-side math for all 12 modes lands now so the next PR
+only has to add pipeline + descriptor + snapshot-copy plumbing,
+not the formulas themselves:
+
+- `shaders/layer.slang` gains a `ps_layer_shader_blend` fragment
+  entry alongside the existing `ps_layer`. The W3C compositing 1.0
+  reference math covers all 12 modes via a `switch` on a
+  push-constant `mode` ordinal. NORMAL collapses to "over" so
+  pushing `mode = 0` round-trips losslessly.
+- `LayerPush` (in shader + C++) grows from 16 to 32 bytes —
+  `vec4 color + uint mode + 12 bytes pad`. The mode field is
+  written every layer regardless of pipeline; FF pipelines
+  ignore it, the shader-blend pipeline reads it.
+- `shaders/CMakeLists.txt` adds the new entry as a third SPIR-V
+  output (`layer.ps_layer_shader_blend.spv`).
+- Behavioural change: **none yet**. The 12 modes still route
+  through `slot_for(...)` returning the NORMAL slot + a
+  `fallback_count_++`; the shader-blend pipeline that *uses*
+  the new entry ships in stage 2b. This split keeps the
+  shader-math PR independently reviewable and verifiable
+  (it's all just Slang code one can step through).
+
+### Stage 2b (follow-up PR) — pipeline + snapshot mechanics
 
 A second graphics pipeline in `LayerCompositor`:
 
