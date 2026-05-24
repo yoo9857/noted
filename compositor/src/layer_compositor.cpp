@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <utility>
 
 #include "noted/engine/gpu/allocator.hpp"
@@ -15,11 +16,20 @@ namespace noted::compositor {
 namespace {
 
 // ---- Push-constant payload ------------------------------------------------
-// Matches LayerPush in shaders/layer.slang (vec4 color). 16 bytes total.
+// Matches LayerPush in shaders/layer.slang (vec4 color + uint mode + pad).
+// 32 bytes total — well under the 128-byte minimum Vulkan guarantees.
+// The mode ordinal is consumed only by the shader-blend pipeline; the FF
+// path ignores it. Keeping a single push struct (vs. two separate types)
+// lets `composite()` write once per layer regardless of which pipeline
+// the layer routes to.
 struct LayerPush {
     float color[4];
+    std::uint32_t mode;  // BlendMode ordinal — mirrors domain::BlendMode
+    std::uint32_t _pad0;
+    std::uint32_t _pad1;
+    std::uint32_t _pad2;
 };
-static_assert(sizeof(LayerPush) == 16, "LayerPush must be 16 bytes");
+static_assert(sizeof(LayerPush) == 32, "LayerPush must be 32 bytes");
 
 // All channels write enabled. Same for every blend mode we support.
 constexpr VkColorComponentFlags kAllChannels = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
@@ -409,7 +419,10 @@ void LayerCompositor::composite(VkCommandBuffer cb,
 
         // Visit the payload variant. For SolidColor: multiply RGBA by
         // opacity to produce a pre-multiplied color the FF blend expects.
+        // `mode` mirrors `domain::BlendMode` ordinals — only the
+        // shader-blend pipeline reads it, the FF pipelines ignore it.
         LayerPush p{};
+        p.mode = static_cast<std::uint32_t>(e.blend);
         std::visit(
             [&](const auto& payload) {
                 using T = std::decay_t<decltype(payload)>;

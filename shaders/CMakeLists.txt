@@ -54,8 +54,15 @@ noted_compile_slang_entry(
     OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/page_bg.ps_page_bg.spv"
 )
 
-# Layer compositor shader — two entries (vs_layer + ps_layer). One
-# fullscreen triangle per layer; push-constant pre-multiplied RGBA.
+# Layer compositor shader — three entries:
+#   * vs_layer               — shared fullscreen-triangle vertex stage.
+#   * ps_layer               — fixed-function blend output (current).
+#   * ps_layer_shader_blend  — 12 Photoshop modes via dst-snapshot
+#                              sampling (ADR 0038 stage 2). Used by the
+#                              shader-blend pipeline when local-read
+#                              isn't available — the pipeline wiring
+#                              + compositor plumbing is the follow-up
+#                              this entry will be linked into.
 set(_layer_src "${CMAKE_CURRENT_SOURCE_DIR}/layer.slang")
 noted_compile_slang_entry(
     SOURCE  "${_layer_src}"
@@ -66,6 +73,11 @@ noted_compile_slang_entry(
     SOURCE  "${_layer_src}"
     ENTRY   ps_layer
     OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/layer.ps_layer.spv"
+)
+noted_compile_slang_entry(
+    SOURCE  "${_layer_src}"
+    ENTRY   ps_layer_shader_blend
+    OUTPUT  "${NOTED_SHADER_OUTPUT_DIR}/layer.ps_layer_shader_blend.spv"
 )
 
 add_custom_target(noted_shaders ALL
@@ -79,6 +91,7 @@ add_custom_target(noted_shaders ALL
         "${NOTED_SHADER_OUTPUT_DIR}/page_bg.ps_page_bg.spv"
         "${NOTED_SHADER_OUTPUT_DIR}/layer.vs_layer.spv"
         "${NOTED_SHADER_OUTPUT_DIR}/layer.ps_layer.spv"
+        "${NOTED_SHADER_OUTPUT_DIR}/layer.ps_layer_shader_blend.spv"
 )
 
 set(NOTED_SHADER_OUTPUT_DIR "${NOTED_SHADER_OUTPUT_DIR}" PARENT_SCOPE)
