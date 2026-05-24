@@ -1,6 +1,6 @@
 # Handoff — where the project is and what's next
 
-**Last updated:** 2026-05-20 · **main HEAD:** `0198483` (clean, 0 open PRs)
+**Last updated:** 2026-05-24 · **main HEAD:** `87b0130` (clean, 0 open PRs)
 
 Goal: a professional note-taking + raster image editor that exceeds
 Goodnotes (vector ink, stylus-first) AND Photoshop (raster layers,
@@ -11,37 +11,63 @@ exception handling.
 
 ## Where we are
 
-**The app builds, runs, and is interactive end-to-end** (within v0.x
-demo scope). A 1600×1000 window opens, the GPU is picked, a
-`LayerCompositor` walks a 4-layer demo `LayerGraph` (normal / multiply
-/ linear_dodge blend modes), the stroke engine overlays vector-ink
-polyline ribbons (pressure-modulated width) on top, and a Dear ImGui-
-driven product shell renders on top with:
+**The app builds, runs, and is interactive end-to-end** (mid v1.0
+migration). A frameless 1600×1000 `QWindow` opens with Mac-style
+chrome (traffic-light controls, vibrant titlebar). The GPU is
+picked via `QVulkanInstance`, a `LayerCompositor` walks the active
+document's `LayerGraph` (4 fixed-function blend modes + counted
+fallback for the other 12), the stroke engine overlays vector-ink
+polyline ribbons with **real pen-dynamics** (2-handle bezier
+`PressureCurve`, velocity-tapered width, tilt-aware calligraphy
+width, SDF soft-edge falloff), and a hybrid Qt-QML + Dear ImGui
+product shell renders on top:
 
-  - **Menu bar** (File / Edit / View / About). File's New / Open /
-    Save / Save As back the `.noted` JSON+zip format via a native
-    OS dialog (nativefiledialog-extended). Edit's Undo / Redo back
-    the live `UndoStack`; Edit → Add Block emits `AddBlockCommand`
-    for any of the 7 BlockKinds. The title bar shows the filename
-    + `*` dirty marker. Keyboard shortcuts (Ctrl+N/O/S/Shift+S/Z/Y/Q)
-    fire the same signals as the menu items. A modal asks
-    Save / Discard / Cancel when the user closes the window or
-    starts a New on a dirty document.
-  - **Page strip** — left-rail panel listing every page in the
-    current document. Each row shows "Page N (background-name)",
-    a mini preview of the actual page pattern (grid / lined /
-    dotted), and surfaces add / remove via "+ Add page" footer +
-    right-click → Remove context menu. Clicking a row jumps the
-    camera to that page; "+ Add page" auto-focuses the new page.
-  - **Debug overlay** (View → Debug overlay; off by default) — small
-    floating window with frame index + FPS, a 120-sample CPU-time
-    line plot, the LayerCompositor fallback count, and every
-    `harness::Counter` row.
-  - **Layer panel** — visibility checkbox per layer wires through
-    `LayerGraph::set_visible`; compositor reflects next frame.
-  - **Outline panel** — tree view of `Document.preorder` with
-    click-to-select + F2 inline rename via `SetNameCommand`.
-  - **Status bar** — frame index + FPS + zoom % pinned to bottom.
+  - **12-o'clock floating toolbar** (QML, Phase 3 of ADR 0034) —
+    Mac-grade icon strip anchored top-centre with hover blur.
+  - **Side rails (still Dear ImGui — Phase 4 pending)**:
+
+    - **Menu bar** (File / Edit / View / About). File's New / Open /
+      Save / Save As back the `.noted` JSON+zip format via
+      nativefiledialog-extended. Edit's Undo / Redo back the live
+      `UndoStack`; Edit → Add Block emits `AddBlockCommand` for any
+      of the 7 BlockKinds. Title bar shows filename + `*` dirty
+      marker. Ctrl+N/O/S/Shift+S/Z/Y/Q chords. Dirty-confirm modal
+      on close / New.
+    - **Page strip** — left-rail. Mini preview of each page's
+      actual pattern (grid / lined / dotted); add / remove via
+      footer button + right-click menu. Click row → camera jumps.
+    - **Tool palette** — pen / eraser / selection (rect) / lasso /
+      shape (rect, ellipse) / text / image. Each tool snapshots
+      its options at PRESS so toggling a tool never rewrites
+      already-committed work.
+    - **Brush options** — size sliders, opacity, **2-handle
+      bezier pressure-curve editor**, velocity/tilt blend sliders,
+      soft-edge `softness_ratio`. Live-edited every frame.
+    - **Brush library picker** — AAA presets (pencil / ink pen /
+      felt-tip / soft brush / charcoal / highlighter) + custom
+      brush save/load (`~/.noted/brushes.json`).
+    - **Floating colour picker** (right side, OpenCanvas-style) —
+      swatches + HSV wheel + history strip.
+    - **Layer panel** — visibility, opacity (slider-coalesced
+      Command), blend mode, name; keyboard shortcuts
+      Ctrl+Shift+N (new), Ctrl+J (duplicate), Delete (remove),
+      Alt+]/[ (cycle active), Ctrl+E (merge down),
+      Ctrl+Shift+E (merge visible). Every mutation is a Command
+      on `UndoStack`.
+    - **Navigator** — scaled-down canvas thumbnail with live
+      viewport rect; drag the rect to pan camera.
+    - **Outline panel** — tree of `Document.preorder` with
+      click-to-select + F2 inline rename.
+    - **Status bar** — frame index + FPS + zoom % + **active
+      layer name** pinned to bottom.
+    - **Debug overlay** (View → Debug overlay; off by default) —
+      frame + FPS, 120-sample CPU plot, `LayerCompositor`
+      fallback count, every `harness::Counter`.
+
+Pages render on a single neutral desk fill (ADR 0033), each with
+a soft drop shadow + AA edges — no canvas-margin band under zoom
+out. Smart-shape recognizer (PR #103) snaps drawn freehand into
+ShapePrimitive when geometric + dwell heuristics agree.
 
 The frame loop ticks at ~0.5 ms CPU on a GTX 1050 Ti (240-frame
 sample) with **zero Vulkan validation errors** — the LayerCompositor
@@ -61,11 +87,17 @@ every other engine assertion (ADR 0027).
   - 1.1 features: `shaderDrawParameters`
 - **Slang** (Microsoft + Khronos) as the only shader language
 - **VMA** (AMD GPUOpen) for GPU memory
-- **GLFW 3.4** for windowing + input
+- **Qt 6.7+** (`QVulkanInstance` / `QWindow` / Qt Quick) — v1.0
+  UI shell per ADR 0034. The 12-o'clock toolbar is already QML;
+  side panels migrate in Phase 4.
 - **stb_image** for PNG/JPG decode
 - **nlohmann/json** for `.noted` document serialization
 - **miniz** for the `.noted` zip container
-- **Dear ImGui** (docking branch) for the v0.x product shell
+- **Dear ImGui** (docking branch) — transitional side panels
+  during the Qt migration window; expected to retire at
+  ADR 0034 Phase 4 completion
+- **nativefiledialog-extended** — native open/save dialogs and
+  the "Pick image…" picker
 - **CMake 3.28+** with `FetchContent` for deps
 - **GoogleTest** for unit tests
 
@@ -250,25 +282,121 @@ tests/        Unit + integration + bench + fuzz scaffolds
    `draw_widgets` is now a one-line forward. App.cpp 1207 →
    **1002** (-205). Cumulative R.1-R.4: **1402 → 1002, -400 LOC,
    -28.5%**.
+✅ **B.7.b.1 — image asset registry (PR #98)**: `ImageAssetRegistry`
+   maps `AssetId` → `ImTextureID`, observes `Document::images()` and
+   reclaims handles on remove. `ImagePrimitive` gains `AssetId`.
+   `.noted` schema v6.
+✅ **B.7.b.2 — file picker + decode (PR #100)**: "Pick image…"
+   button wired via `nativefiledialog-extended`, stb_image decode
+   to capture intrinsic dimensions, fresh `AssetId` allocated and
+   stamped onto `ImageOptions::pending_asset_id`. (Real GPU upload
+   lives in the still-open B.7.b.2b.)
+✅ **Page-on-desk visual model + strokes persistence (PR #101,
+   ADR 0033)**: single neutral desk fills viewport outside pages;
+   each page carries soft drop shadow + AA edges; canvas clear
+   matches desk so no margin band appears under zoom-out. Strokes
+   graduate to `Document::strokes()` with Add/RemoveStrokeCommand
+   (`.noted` v7). Auto shape detection during stroke commit.
+✅ **Stroke storage refactor (PR #102)**: StrokeEngine drops its
+   internal vector — host (Document) owns the strokes vector and
+   engine reads it by reference each frame. Eliminates the
+   double-source-of-truth that was masking off-by-one bugs across
+   undo/redo.
+✅ **Smart-shape recognizer (PR #103)**: freehand strokes auto-snap
+   into `ShapePrimitive` (rect / ellipse / line) when geometric
+   tolerance + dwell heuristic pass. Hold-to-keep-stroke pen
+   gesture honoured.
+✅ **Qt 6 UI migration (ADR 0034, PRs #104-#108)** — the v1.0
+   product UI replacement for Dear ImGui shell:
+   - **Phase 0 (PR #105)**: Qt 6.7+ added as required dep,
+     `noted_app` links it but no Qt API used yet.
+   - **Phase 1 (PR #106)**: `platform::Window` swapped from GLFW
+     to `QWindow` + `QVulkanInstance`. Event pump runs through Qt.
+   - **Phase 2 (PR #107)**: Mac-style window chrome — frameless
+     window, traffic-light controls, vibrant titlebar blur.
+   - **Phase 3 (PR #108)**: 12-o'clock floating toolbar built in
+     QML, anchored to the top centre. Dear ImGui still owns the
+     side panels until Phase 4 ports them.
+✅ **Shape clipboard (PR #109)**: Ctrl+X / Ctrl+C / Ctrl+V / Delete
+   chords operate on the currently-selected shape primitives via
+   `Selection` + a `domain::ClipboardBuffer`.
+✅ **Floating colour picker panel (PR #110)**: right-side
+   OpenCanvas-style swatches + HSV wheel + history strip.
+✅ **Lasso tool (PRs #111-#113)**:
+   - **Step 1 (PR #111)**: `domain::Selection::Polygon` variant.
+   - **Step 2 (PR #112)**: `app::input::LassoToolHandler` — drag
+     deposits polygon vertices, release closes the loop and
+     mutates `Selection`.
+   - **Step 3 (PR #113)**: `compositor::SelectionRasterizer`
+     scanline-fills the polygon into the `SelectionMask`.
+✅ **Navigator panel (PR #114)**: scaled-down canvas thumbnail with
+   live viewport rectangle. Click-drag the rect to pan camera.
+✅ **Layer painting + Photoshop-grade workspace (PR #115)**:
+   strokes target a chosen `LayerId`. Workspace docks rearranged
+   to put layers/colour on the right rail.
+✅ **AAA brush library (PR #116)**: shipped presets (pencil / ink
+   pen / felt-tip / soft brush / charcoal / highlighter), custom
+   brush save/load, persisted to a separate `~/.noted/brushes.json`.
+   Picker widget with thumbnail strokes.
+✅ **brush options single-scope + camera scroll gate (PR #117)**:
+   brush_options panel reads one ToolState (no per-tool dup); the
+   camera scroll handler now gates on `WantCaptureMouse` so
+   scrolling inside ImGui panels no longer zooms the canvas.
+✅ **Real soft-edge SDF brush (PR #118)**: `softness_ratio` now
+   drives a real SDF-edge alpha falloff in `polyline.slang`. The
+   "no fake sliders" gate from the previous handoff lifted —
+   softness now actually does something. Cards rephrased
+   honestly (no "approximation" wording).
+✅ **Pressure curve editor (PR #119)**: 2-handle bezier
+   `PressureCurve` replaces the single `alpha_gamma` scalar.
+   `brush_options` gains a visual editor — drag the two handles
+   on a 256×128 widget to author the pressure → alpha mapping.
+✅ **Velocity-aware brush size (PR #120)**: per-sample velocity
+   tapers width via `velocity_blend ∈ [0,1]`. Tessellator reads
+   `t` (seconds-since-stroke-start) from each `StrokeSample`.
+✅ **Tilt-aware calligraphy width (PR #121)**: pen tilt
+   (`tilt_x`, `tilt_y` unit vector) modulates ribbon width along
+   tilt direction via `tilt_blend ∈ [0,1]`. Tilt-pen feel.
+✅ **`.noted` v9 — pen-dynamics in save/load (PR #122, ADR 0035)**:
+   sample stride 3 → 6 to persist `t`, `tilt_x`, `tilt_y`. Style
+   block gains `pc` (PressureCurve handles), `vb`, `tb`. v1..v8
+   readers retained for forward-compat.
+✅ **Layer mutation commands + slider coalescing (PR #123)**: every
+   layer panel action (add/remove/move/set_visible/set_opacity/
+   set_blend_mode) now flows through a Command on `UndoStack`.
+   Sliders coalesce continuous drags into a single command on
+   release (so dragging opacity doesn't fill the undo history).
+✅ **Layer-UI keyboard shortcuts + active-layer status (PR #127)**:
+   Ctrl+Shift+N (new layer), Ctrl+J (duplicate), Delete (remove),
+   Alt+]/[ (cycle active). Status bar shows the active layer name.
+✅ **Layer merge ops (PR #128)**: Merge Down (Ctrl+E), Merge
+   Visible (Ctrl+Shift+E), Flatten Image — all GPU-side via the
+   existing compositor, results read back into a fresh
+   `RasterLayer`. Commands so undo works.
 
 ### What does NOT work yet (by design — not bugs)
 
-- **Hardness slider on the brush** — `BrushStyle::softness_ratio`
-  is preserved in PenOptions but not exposed in the UI because the
-  ribbon tessellator currently ignores it. Lands alongside the
-  SDF-edge brush in a future phase. **No fake sliders** policy.
-- **Shape / text / image tools** beyond their enum presence — one
-  behavioural PR each, per ADR 0031's roadmap.
-- **Selection consumed by Copy / Cut / Delete / Fill** — the
-  Selection data is live (Phase B.4) but the commands that act
-  on it haven't been wired yet. Same with feeding it into the
-  compositor's `SelectionMask` (the GPU plumbing exists per
-  ADR 0021 / 0022 but isn't enabled in App).
-- **Asset / LayerGraph / history embedding** in the `.noted` archive
-  — Phase C/D follow-ups.
-- **Pen pressure on macOS / Linux** — Win32 WM_POINTER only today.
-- **Edit coalescing** in `UndoStack` (every keystroke is one undo
-  entry).
+- **12 of 16 layer blend modes** — `LayerCompositor` ships
+  fixed-function pipelines for normal / multiply / linear_dodge /
+  screen and counts the rest as a fallback. Phase C item.
+- **Asset / history embedding** in the `.noted` archive — image
+  blobs decoded by `stb_image` live only in RAM; save/load
+  round-trips an `AssetId` to nothing. **B.7.b.3** is the
+  remaining slice.
+- **ADR 0034 Phase 4** — the side panels (`tool_palette`,
+  `page_strip`, `layer_panel`, `brush_options`, `navigator`,
+  `status_bar`, `outline_panel`, `debug_overlay`) still render
+  through Dear ImGui inside the QWindow. Phase 4 ports them to
+  QML one widget at a time.
+- **PDF export / page templates / pen-button mapping** — Phase D
+  Goodnotes-polish backlog still open.
+- **Pen pressure on macOS / Linux** — Win32 WM_POINTER only today
+  (the QWindow shell preserves the same pen-event path via a
+  native event filter on Windows; macOS / Linux pen ports still
+  pending).
+- **Edit coalescing** in `UndoStack` for non-slider commands
+  (every keystroke is still one undo entry; layer-slider
+  coalescing landed in PR #123 but text edits did not).
 - **GPU tests in CI** (CI runners have no GPU).
 
 ---
@@ -289,6 +417,12 @@ uv tool install 'clang-format==18.1.8'
 git lfs install
 ```
 Restart the shell.
+
+**Qt 6.7+ is now required** (ADR 0034 Phase 0, PR #105). Install
+via the Qt online installer or `aqt`, then set `CMAKE_PREFIX_PATH`
+to the kit's `lib/cmake/Qt6` dir (e.g.
+`C:/Qt/6.8.1/msvc2022_64`). See `docs/SETUP.md` for the exact
+component list (Qt Quick, Qt Quick Controls 2, Qt Shader Tools).
 
 The build matrix expects `clang-format-18` on PATH. Without it the
 lint CI job still runs (it installs its own), but local pre-commit
@@ -352,7 +486,32 @@ filters, color management). Phased to keep each PR focused:
 | **P.S.1** | **Persistence consolidation — shapes graduate** to `Document::shapes()` + `Add/RemoveShapeCommand` + `.noted` v3 (PR #86) | ✅ |
 | **P.S.2** | **Persistence consolidation — texts graduate** to `Document::texts()` + `Add/RemoveTextCommand` + `.noted` v4 (PR #87) | ✅ |
 | **P.S.3** | **Persistence consolidation — images graduate** to `Document::images()` + `Add/RemoveImageCommand` + `.noted` v5 (PR #88) | ✅ |
-| B.7.b | Image tool follow-up — nativefiledialog picker + stb_image decode + VMA `VkImage` upload + `ImTextureID` registry | |
+| **B.7.b.1** | **ImageAssetRegistry + AssetId on ImagePrimitive + `.noted` v6 (PR #98)** | ✅ |
+| **B.7.b.2** | **"Pick image…" + stb_image decode + AssetId allocation (PR #100)** | ✅ |
+| B.7.b.3 | Asset bundle in `.noted` zip — encoded payload alongside `document.json` | |
+| B.7.b.2b | VMA `VkImage` GPU upload + `ImTextureID` registry — re-decode from bundled bytes | |
+| **D.1** | **Page-on-desk visual model (ADR 0033, PR #101)** — desk fill, drop shadows, AA page edges, strokes graduated to `Document` (`.noted` v7) | ✅ |
+| **D.2** | **Stroke storage refactor (PR #102)** — engine reads Document, no internal vector | ✅ |
+| **D.3** | **Smart-shape recognizer (PR #103)** — freehand → ShapePrimitive snap with dwell heuristic | ✅ |
+| **U.0** | **Qt 6 build integration (ADR 0034 Phase 0, PR #105)** | ✅ |
+| **U.1** | **GLFW → QWindow shell (ADR 0034 Phase 1, PR #106)** | ✅ |
+| **U.2** | **Mac-style window chrome (ADR 0034 Phase 2, PR #107)** | ✅ |
+| **U.3** | **12-o'clock floating toolbar in QML (ADR 0034 Phase 3, PR #108)** | ✅ |
+| U.4 | ADR 0034 Phase 4 — port the rest of the ImGui side panels into QML | |
+| **D.4** | **Shape clipboard — Cut / Copy / Paste / Delete (PR #109)** | ✅ |
+| **D.5** | **Floating colour picker panel (PR #110)** | ✅ |
+| **D.6** | **Lasso tool — polygon Selection + scanline rasteriser (PRs #111-#113)** | ✅ |
+| **D.7** | **Navigator panel — thumbnail + viewport rect (PR #114)** | ✅ |
+| **C.1** | **Layer painting + Photoshop-grade workspace (PR #115)** — strokes target a `LayerId` | ✅ |
+| **C.2** | **AAA brush library — presets + custom + persistence (PR #116)** | ✅ |
+| **C.3** | **Real soft-edge SDF brush + honest cards (PR #118)** — `softness_ratio` finally does something | ✅ |
+| **C.4** | **Pressure curve editor — 2-handle bezier `PressureCurve` (PR #119)** | ✅ |
+| **C.5** | **Velocity-aware brush size — speed taper (PR #120)** | ✅ |
+| **C.6** | **Tilt-aware calligraphy width (PR #121)** | ✅ |
+| **C.7** | **`.noted` v9 — pen-dynamics in save/load (PR #122, ADR 0035)** | ✅ |
+| **C.8** | **Every layer mutation is a Command + slider coalescing (PR #123)** | ✅ |
+| **C.9** | **Layer-UI keyboard shortcuts + active-layer indicator (PR #127)** | ✅ |
+| **C.10** | **Layer merge down / merge visible / flatten image (PR #128)** | ✅ |
 | **R.1** | **App-layer decomposition** — `ToolInputRouter` + `SelectionToolHandler` extracted (PR #75, ADR 0032) | ✅ |
 | **R.2** | **App-layer decomposition** — `CameraController` extracted (PR #76, ADR 0032) | ✅ |
 | **R.3** | **App-layer decomposition** — `RenderPasses` (4-pass canvas pipeline) extracted (PR #78, ADR 0032) | ✅ |
@@ -370,48 +529,60 @@ filters, color management). Phased to keep each PR focused:
 
 ### Next session — pick up here
 
-**Persistence trilogy complete** (PRs #86 / #87 / #88). Shapes /
-texts / images all graduated to `Document::*()` with Add/Remove
-commands; `.noted` schema at v5 with v1..v4 forward-compat.
-App owns no primitive vectors any more. Pick the next bite:
+The last 28 PRs (#100 → #128) landed three major lines of work:
+**Qt 6 migration** through Phase 3 (ADR 0034); **pen-dynamics
+stack** culminating in `.noted` v9 (ADR 0035); **layer ops**
+through merge-down / flatten-image with every mutation on the
+undo stack. The pickable next bites:
 
-**Option 1 — B.7.b real raster upload.** Real image loading on
-top of the persistence contract:
+**Option 1 — B.7.b.3 asset bundle in `.noted` zip (recommended
+finish-the-job).** B.7.b.1 (registry + AssetId, PR #98) and
+B.7.b.2 (picker + decode, PR #100) shipped, but the decoded
+pixel bytes get discarded immediately and `.noted` save/load
+round-trips an `AssetId` to nothing on the other side. Land the
+third slice:
 
-  - `nativefiledialog-extended` picker wired to the "Pick image…"
-    button in `brush_options.cpp` (currently disabled-text)
-  - `stb_image` decode into a CPU `vector<uint8_t>` (RGBA8)
-  - VMA-backed `VkImage` upload via a transient staging buffer +
-    pre-frame layout transition
-  - New `ImageAssetRegistry` mapping `AssetId` →
-    `ImGui_ImplVulkan_AddTexture` handle; registry observes
-    `Document::images()` and reclaims handles on remove
-  - Extend `ImagePrimitive` with an `AssetId` field; persist it
-    in `.noted` v6 alongside the asset blob (binary in the zip
-    archive next to `document.json`)
-  - Replace `AddRectFilled` body in `image_overlay.cpp` with
-    `AddImage` keyed by `ImTextureID`; keep border + label as
-    fallback when an asset fails to load
+  - `ImageAsset` gains an encoded-payload field (the original
+    PNG/JPG bytes, not decoded RGBA — much smaller and preserves
+    quality across re-saves).
+  - `App::run_image_picker` reads the file bytes alongside the
+    decode it already does.
+  - `platform::io::save_noted_file` writes each registered
+    asset's payload as its own zip member (`assets/<id>`);
+    `load_noted_file` extracts them back into `source_bytes`.
+  - Schema bump to v10 (zip-layout-only — the JSON shape stays
+    constant); v1..v9 readers retained for forward-compat.
+  - 256 MB document.json cap from ADR 0026 stays; add a
+    per-asset extraction cap (64 MiB) for the new path.
 
-Likely split into 3 PRs:
-  - **B.7.b.1** — `ImageAssetRegistry` + `AssetId` on
-    `ImagePrimitive` + schema v6
-  - **B.7.b.2** — file picker + stb_image decode + VMA upload
-  - **B.7.b.3** — `.noted` asset bundle in the zip archive
-    (binary file alongside document.json)
+  Branch: `feat/noted-asset-bundle`.
 
-Branch family: `feat/image-upload-*`.
+**Option 2 — ADR 0034 Phase 4: port remaining ImGui panels to
+QML.** Phases 0-3 landed the Qt build, QWindow shell, Mac chrome,
+and 12-o'clock toolbar (PRs #105-#108). The side rails
+(`tool_palette`, `page_strip`, `layer_panel`, `brush_options`,
+`navigator`, etc.) are still Dear ImGui. Phase 4 lifts them into
+QML one panel at a time; the canvas itself stays in the Vulkan
+viewport that QWindow already hosts.
 
-**Option 2 — Selection operations.** Document-owned primitives
-can be selected. Build cut / copy / paste / delete that target
-shapes / texts / images via the existing `Selection` infra.
-Branch: `feat/selection-clipboard`.
+  Likely sub-PRs: one widget at a time, smallest first
+  (`status_bar`, then `tool_palette`, then `layer_panel`,
+  `brush_options` last because it has the most controls).
+  Branch family: `feat/qml-panel-*`.
 
-**Option 3 — Phase C: shader blend modes.** 12 missing blend
-modes in `shaders/layer.slang` + compositor plumbing. Pure GPU
-work, no domain churn. Branch: `feat/layer-blend-modes`.
+**Option 3 — Phase C: shader blend modes (still open).** 12 of
+the 16 declared blend modes in `LayerGraph` fall through to the
+counted fallback in `LayerCompositor`. Pure GPU work — write
+the math in `shaders/layer.slang`, add the pipelines, drop the
+fallback counter. No domain churn, no UI churn.
+Branch: `feat/layer-blend-modes`.
 
-**Recommendation: B.7.b**, sliced into the 3 sub-PRs above.
+**Option 4 — Phase D Goodnotes polish — remaining items.** Lasso
+(PRs #111-#113) and smart shapes (PR #103) done. Open: pen-button
+mapping, page templates, PDF export.
+
+**Recommendation: Option 1** — finishes a half-implemented user-
+visible promise (images persist) and is scoped to one PR.
 
 ---
 

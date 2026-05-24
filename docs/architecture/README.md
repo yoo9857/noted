@@ -38,6 +38,9 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0030 | [Runtime config — typed `AppConfig` for user-facing tunables](0030-runtime-config.md) | Accepted |
 | 0031 | [Tool state machine + canvas pass strategy for editing tools](0031-tool-state-machine.md) | Accepted |
 | 0032 | [App layer responsibility decomposition (R.1–R.4)](0032-app-layer-decomposition.md) | Accepted |
+| 0033 | [Page-on-desk visual model](0033-page-desk-visual-model.md) | Accepted |
+| 0034 | [UI framework migration to Qt 6 + QML](0034-ui-framework-migration-qt6.md) | Accepted |
+| 0035 | [`.noted` v9 schema — pen-dynamics persistence](0035-noted-v9-pen-dynamics.md) | Accepted |
 
 ## Format
 
