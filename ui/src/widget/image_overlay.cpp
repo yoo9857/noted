@@ -1,9 +1,11 @@
 #include "noted/ui/widget/image_overlay.hpp"
 
 #include <algorithm>
+#include <cstdint>
 
 #include <imgui.h>
 
+#include "noted/domain/document/asset_id.hpp"
 #include "noted/domain/tool/image_input.hpp"
 
 namespace noted::ui::widget {
@@ -26,6 +28,7 @@ constexpr ImU32 kBorderColour = IM_COL32(40, 40, 40, 220);
 
 void image_overlay(const std::vector<noted::domain::tool::ImagePrimitive>& images,
                    const ImageCanvasToScreenFn& canvas_to_screen,
+                   const ImageTextureLookupFn& texture_lookup,
                    bool enabled) {
     if (!enabled || !canvas_to_screen) {
         return;
@@ -45,6 +48,32 @@ void image_overlay(const std::vector<noted::domain::tool::ImagePrimitive>& image
         const ImVec2 p0{sx0, sy0};
         const ImVec2 p1{sx1, sy1};
         const ImU32 tint = pack_color(im.r, im.g, im.b, im.a);
+
+        // Textured path (B.7.b.2b) — only if the asset is bound to a
+        // GPU texture. Falls through to the placeholder block below
+        // when the lookup returns 0 (no callback, no asset, decode in
+        // flight, or asset has no source_bytes yet).
+        const std::uint64_t tex_handle =
+            (texture_lookup && im.asset_id != noted::domain::invalid_asset_id)
+                ? texture_lookup(im.asset_id)
+                : 0U;
+        if (tex_handle != 0U) {
+            // ImTextureID is ImU64 in the docking branch we ship —
+            // a static_cast is the correct conversion (reinterpret
+            // is for pointer types).
+            dl->AddImage(static_cast<ImTextureID>(tex_handle),
+                         p0,
+                         p1,
+                         /*uv_min=*/ImVec2{0.0F, 0.0F},
+                         /*uv_max=*/ImVec2{1.0F, 1.0F},
+                         tint);
+            // A subtle 1 px border keeps the image readable against
+            // any page background without competing with content.
+            dl->AddRect(p0, p1, kBorderColour, /*rounding=*/0.0F, /*flags=*/0, /*thickness=*/1.0F);
+            continue;
+        }
+
+        // Placeholder path — same triad as before B.7.b.2b.
 
         // 1. Tinted fill — the placeholder body.
         dl->AddRectFilled(p0, p1, tint);

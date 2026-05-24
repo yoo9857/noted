@@ -289,8 +289,21 @@ tests/        Unit + integration + bench + fuzz scaffolds
 ✅ **B.7.b.2 — file picker + decode (PR #100)**: "Pick image…"
    button wired via `nativefiledialog-extended`, stb_image decode
    to capture intrinsic dimensions, fresh `AssetId` allocated and
-   stamped onto `ImageOptions::pending_asset_id`. (Real GPU upload
-   lives in the still-open B.7.b.2b.)
+   stamped onto `ImageOptions::pending_asset_id`.
+✅ **B.7.b.2b — image GPU upload (ADR 0037)**:
+   `compositor::ImageAssetGpuRegistry` maps `AssetId` → `gpu::Image`
+   + ImGui descriptor set. `sync_image_assets` (called per frame
+   between `imgui_host.begin_frame` and the workspace dockspace)
+   decodes each new asset's `source_bytes` via
+   `platform::image_io::decode_rgba8` (new memory variant),
+   VMA-uploads via the synchronous staging path, and registers
+   with `ImGui_ImplVulkan_AddTexture`. Removed assets enter a
+   3-frame retire queue before `ImGui_ImplVulkan_RemoveTexture`
+   actually frees the descriptor set, covering the swapchain's
+   `frames_in_flight = 2` plus margin. `ui::widget::image_overlay`
+   gains a texture-lookup callback: textured `AddImage` when
+   bound, dashed placeholder when not. Single shared LINEAR
+   sampler.
 ✅ **B.7.b.3 — asset bundle in `.noted` zip (ADR 0036)**:
    `ImageAsset` gains `source_bytes` (encoded payload, e.g. raw
    PNG/JPG). `App::run_image_picker` reads the file bytes too.
@@ -498,7 +511,7 @@ filters, color management). Phased to keep each PR focused:
 | **B.7.b.1** | **ImageAssetRegistry + AssetId on ImagePrimitive + `.noted` v6 (PR #98)** | ✅ |
 | **B.7.b.2** | **"Pick image…" + stb_image decode + AssetId allocation (PR #100)** | ✅ |
 | **B.7.b.3** | **Asset bundle in `.noted` zip — encoded payload at `assets/<id>` + `.noted` v10 (ADR 0036)** | ✅ |
-| B.7.b.2b | VMA `VkImage` GPU upload + `ImTextureID` registry — re-decode from `source_bytes` | |
+| **B.7.b.2b** | **GPU upload — `compositor::ImageAssetGpuRegistry` + `sync_image_assets`, per-frame reconcile, frame-in-flight delayed destroy (ADR 0037)** | ✅ |
 | **D.1** | **Page-on-desk visual model (ADR 0033, PR #101)** — desk fill, drop shadows, AA page edges, strokes graduated to `Document` (`.noted` v7) | ✅ |
 | **D.2** | **Stroke storage refactor (PR #102)** — engine reads Document, no internal vector | ✅ |
 | **D.3** | **Smart-shape recognizer (PR #103)** — freehand → ShapePrimitive snap with dwell heuristic | ✅ |
@@ -538,28 +551,12 @@ filters, color management). Phased to keep each PR focused:
 
 ### Next session — pick up here
 
-B.7.b.3 just landed: asset bytes round-trip end-to-end through
-`.noted` v10 (ADR 0036). 659/659 unit tests green on Windows MSVC
-Release. The remaining open bites:
+The image-tool slice is finally end-to-end: picker → decode →
+domain → `.noted` zip → reload → decode-from-bytes → GPU upload →
+`AddImage`. 663/663 unit tests green on Windows MSVC Release.
+What's pickable next:
 
-**Option 1 — B.7.b.2b GPU upload (the natural follow-up).** Image
-primitives now carry their bytes through save/load, but the
-renderer still draws a dashed placeholder. Land the path that
-turns `ImageAsset::source_bytes` into a sampled texture:
-
-  - `ImageAssetGpuRegistry` (engine side) — observes
-    `Document::image_assets()`, decodes each asset's
-    `source_bytes` once via stb_image, VMA-uploads to a
-    `VkImage`, exposes the `ImTextureID` keyed by `AssetId`.
-  - `image_overlay.cpp` swaps the `AddRectFilled` placeholder
-    for `AddImage` when the asset has an uploaded handle;
-    placeholder + label remain the fallback path.
-  - Lifecycle: registry handle reclaimed when the asset is
-    removed from `Document::image_assets()`. Frame-in-flight
-    safety as per ADR 0028's pattern.
-  - Branch: `feat/image-gpu-upload`.
-
-**Option 2 — ADR 0034 Phase 4: port remaining ImGui panels to
+**Option 1 — ADR 0034 Phase 4: port remaining ImGui panels to
 QML.** Phases 0-3 landed the Qt build, QWindow shell, Mac chrome,
 and 12-o'clock toolbar (PRs #105-#108). The side rails
 (`tool_palette`, `page_strip`, `layer_panel`, `brush_options`,
@@ -572,20 +569,26 @@ viewport that QWindow already hosts.
   `brush_options` last because it has the most controls).
   Branch family: `feat/qml-panel-*`.
 
-**Option 3 — Phase C: shader blend modes (still open).** 12 of
+**Option 2 — Phase C: shader blend modes (still open).** 12 of
 the 16 declared blend modes in `LayerGraph` fall through to the
 counted fallback in `LayerCompositor`. Pure GPU work — write
 the math in `shaders/layer.slang`, add the pipelines, drop the
 fallback counter. No domain churn, no UI churn.
 Branch: `feat/layer-blend-modes`.
 
+**Option 3 — Async image decode**. The synchronous decode in
+`sync_image_assets` stalls the frame on large picks (a 4K JPG
+can take tens of ms). Move decode to a worker thread; registry
+keeps its current API and just polls a completed-decodes queue
+on each tick. Branch: `feat/async-asset-loading`.
+
 **Option 4 — Phase D Goodnotes polish — remaining items.** Lasso
 (PRs #111-#113) and smart shapes (PR #103) done. Open: pen-button
 mapping, page templates, PDF export.
 
-**Recommendation: Option 1** — closes the user-visible loop
-opened by B.7.b.1/2/3 (picked images now actually paint pixels)
-and is bounded to engine + a one-line app call.
+**Recommendation: Option 1** — the QML phase 4 port is the
+single biggest UI-quality lift remaining and unlocks the
+ADR 0034 v1.0 target.
 
 ---
 

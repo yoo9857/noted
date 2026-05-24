@@ -105,7 +105,8 @@ UiPanels::UiPanels(Deps d) noexcept
       prompt_(d.prompt),
       save_for_dirty_prompt_(std::move(d.save_for_dirty_prompt)),
       execute_pending_dirty_action_(std::move(d.execute_pending_dirty_action)),
-      on_pick_image_(std::move(d.on_pick_image)) {}
+      on_pick_image_(std::move(d.on_pick_image)),
+      image_texture_lookup_(std::move(d.image_texture_lookup)) {}
 
 auto UiPanels::create(Deps deps) -> std::unique_ptr<UiPanels> {
     return std::unique_ptr<UiPanels>(new UiPanels{std::move(deps)});
@@ -469,7 +470,8 @@ void UiPanels::draw() {
             return {static_cast<float>(camera_.project_x(cx)),
                     static_cast<float>(camera_.project_y(cy))};
         };
-        noted::ui::widget::image_overlay(images_, project, menu_state_.show_image_overlay);
+        noted::ui::widget::image_overlay(
+            images_, project, image_texture_lookup_, menu_state_.show_image_overlay);
     }
 
     noted::ui::widget::debug_overlay(
