@@ -1,21 +1,34 @@
 #pragma once
 
-// `.noted` archive — the v1 single-file container that wraps the
-// document tree + (future) assets + LayerGraph stores into one
+// `.noted` archive — the single-file container that wraps the
+// document tree + image assets + (future) LayerGraph stores into one
 // portable artifact users can email, sync, or check into git.
 //
-// Container layout (v1):
+// Container layout (current):
 //
 //     <archive>/
 //       document.json          — required, the block tree (ADR 0025)
-//       assets/                — reserved; v1 readers ignore
-//       graphs/                — reserved; v1 readers ignore
+//       assets/<asset-id>      — image-asset blob, one per
+//                                `ImageAssetRegistry` entry with
+//                                non-empty `source_bytes` (B.7.b.3 /
+//                                ADR 0036). Member name omits any
+//                                file extension — the codec is
+//                                inferred from the byte signature at
+//                                decode time. Source path (for UX)
+//                                lives in `document.json`'s
+//                                `image_assets[*].src`.
+//       graphs/                — reserved; readers ignore
 //
 // Format: standard ZIP via miniz. Choosing zip over a custom binary:
 //   - Users can unzip with any OS tool to inspect / recover.
-//   - The structure is forward-compatible: `assets/<id>.<ext>` and
-//     `graphs/<id>.json` slot in without bumping a schema version.
+//   - The structure is forward-compatible: future entries slot in
+//     without breaking older readers (they ignore unknown members).
 //   - Library cost is one single-header dep (miniz, public domain).
+//
+// Per-asset extraction cap: 64 MiB. A bundled asset member whose
+// uncompressed size exceeds that limit is rejected as corrupt —
+// sized so even multi-megapixel photos fit while bounding the
+// memory a malicious / damaged file can demand on load.
 //
 // API split:
 //   - bytes-level: `document_to_archive_bytes` /
@@ -27,9 +40,11 @@
 //     UTF-8 across platforms; on Windows the path is round-tripped
 //     through wchar to honor non-ASCII filenames.
 //
-// Rationale: see docs/architecture/0026-noted-archive-container.md.
+// Rationale: see docs/architecture/0026-noted-archive-container.md
+// and docs/architecture/0036-noted-asset-bundle.md.
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <span>
 #include <vector>
@@ -45,6 +60,14 @@ namespace noted::platform::io {
 // Filename of the document entry inside the archive. Constant so
 // tests can assert on it and the loader can probe.
 inline constexpr const char* kDocumentEntryName = "document.json";
+
+// Prefix for image-asset blob members. Each asset's bytes live at
+// `assets/<asset-id>` (decimal id as text, no extension).
+inline constexpr const char* kAssetEntryPrefix = "assets/";
+
+// Per-asset uncompressed-size cap on load. 64 MiB — see the header
+// banner for sizing rationale.
+inline constexpr std::uint64_t kMaxAssetBytes = 64ULL * 1024ULL * 1024ULL;
 
 // Serialize `doc` into a complete `.noted` archive in memory. Never
 // fails on a well-formed Document; the byte vector is the caller's

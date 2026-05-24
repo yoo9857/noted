@@ -12,6 +12,7 @@
 #include <miniz.h>
 
 #include "noted/domain/document/document.hpp"
+#include "noted/domain/document/image_asset_registry.hpp"
 #include "noted/domain/io/document_json.hpp"
 
 namespace noted::platform::io {
@@ -54,6 +55,14 @@ struct HeapBuf {
     }
 };
 
+// Build the zip member name for an asset blob: `assets/<decimal-id>`.
+// Decimal text rather than hex so a curious user inspecting the
+// archive can match it 1:1 with the `image_assets[*].id` field in
+// `document.json`.
+[[nodiscard]] auto asset_entry_name(noted::domain::AssetId id) -> std::string {
+    return std::string{kAssetEntryPrefix} + std::to_string(id);
+}
+
 }  // namespace
 
 auto document_to_archive_bytes(const noted::domain::Document& doc) -> std::vector<std::byte> {
@@ -82,6 +91,28 @@ auto document_to_archive_bytes(const noted::domain::Document& doc) -> std::vecto
                               json.size(),
                               static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION)) == 0) {
         return {};
+    }
+
+    // Image-asset blobs (B.7.b.3 / ADR 0036). Skip assets whose
+    // `source_bytes` is empty — that's the case for placeholder
+    // primitives and for v6..v9 files loaded under a pre-v10 reader
+    // that never persisted bytes. Per asset we store the encoded
+    // payload verbatim (PNG / JPG / …) with the compressor set to
+    // `MZ_NO_COMPRESSION`: PNG / JPG already pack their pixels with
+    // DEFLATE / DCT respectively, so re-deflating just burns CPU at
+    // save time with ~0 size benefit.
+    for (const auto& asset : doc.image_assets().assets()) {
+        if (asset.source_bytes.empty()) {
+            continue;
+        }
+        const std::string entry = asset_entry_name(asset.id);
+        if (mz_zip_writer_add_mem(&writer.zip,
+                                  entry.c_str(),
+                                  asset.source_bytes.data(),
+                                  asset.source_bytes.size(),
+                                  static_cast<mz_uint>(MZ_NO_COMPRESSION)) == 0) {
+            return {};
+        }
     }
 
     void* archive_ptr = nullptr;
@@ -156,6 +187,72 @@ auto document_from_archive_bytes(std::span<const std::byte> bytes)
     if (!parsed) {
         return std::unexpected(std::move(parsed).error());
     }
+
+    // Image-asset bytes (B.7.b.3 / ADR 0036). For each asset the
+    // JSON parser registered, look for a matching `assets/<id>` zip
+    // member and attach its decompressed bytes back onto the asset.
+    // Missing members are silent — they signal a v6..v9 author that
+    // never bundled, OR an asset that was placeholder-only. Strict
+    // referential integrity is enforced the other direction (every
+    // `ImagePrimitive::asset_id` must resolve in the registry); the
+    // registry → bytes direction is "best effort" so a tampered or
+    // partial archive still loads with the visual fallback intact.
+    auto& registry = parsed->image_assets_mut();
+    // Materialize the list of ids first to avoid mutating-during-
+    // iteration on the registry's internal vector via the by-id
+    // attach path. (registry.assets() is `const&`; copying ids
+    // out is cheap and keeps the contract local.)
+    std::vector<noted::domain::AssetId> ids;
+    ids.reserve(registry.size());
+    for (const auto& asset : registry.assets()) {
+        ids.push_back(asset.id);
+    }
+    for (const auto id : ids) {
+        const std::string entry = asset_entry_name(id);
+        const auto blob_index = mz_zip_reader_locate_file(&reader.zip, entry.c_str(), nullptr, 0);
+        if (blob_index < 0) {
+            continue;  // not bundled — leave source_bytes empty
+        }
+        mz_zip_archive_file_stat blob_stat{};
+        if (mz_zip_reader_file_stat(&reader.zip, static_cast<mz_uint>(blob_index), &blob_stat) ==
+            0) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::invalid_state,
+                "document_from_archive_bytes: failed to stat asset entry '" + entry + "'"));
+        }
+        if (blob_stat.m_uncomp_size > kMaxAssetBytes) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::invalid_state,
+                "document_from_archive_bytes: asset '" + entry + "' uncompressed size " +
+                    std::to_string(blob_stat.m_uncomp_size) + " exceeds " +
+                    std::to_string(kMaxAssetBytes) + " byte cap"));
+        }
+        std::size_t blob_size = 0;
+        void* blob_heap = mz_zip_reader_extract_to_heap(
+            &reader.zip, static_cast<mz_uint>(blob_index), &blob_size, 0);
+        if (blob_heap == nullptr) {
+            return std::unexpected(noted::make_error(
+                noted::ErrorCode::invalid_state,
+                "document_from_archive_bytes: failed to extract asset entry '" + entry + "'"));
+        }
+        HeapBuf blob_owned{blob_heap, blob_size};
+        std::vector<std::byte> blob_bytes(blob_size);
+        if (blob_size > 0) {
+            std::memcpy(blob_bytes.data(), blob_owned.ptr, blob_size);
+        }
+        // attach_source_bytes returns false only when the id isn't in
+        // the registry. We materialized `ids` from the registry one
+        // line above, so a false return here means concurrent
+        // mutation — which the API contract forbids. Treat as a
+        // logic error.
+        if (!registry.attach_source_bytes(id, std::move(blob_bytes))) {
+            return std::unexpected(
+                noted::make_error(noted::ErrorCode::invalid_state,
+                                  "document_from_archive_bytes: asset id " + std::to_string(id) +
+                                      " disappeared from registry between enumeration and attach"));
+        }
+    }
+
     return std::move(*parsed);
 }
 

@@ -12,7 +12,7 @@
 // Schema summary (see ADR 0025 for the full spec):
 //
 //   {
-//     "version": 9,
+//     "version": 10,
 //     "root": <BlockId>,                 // 0 when document is empty
 //     "blocks": [ ... ],                 // same as prior versions
 //     "pages": { ... },                  // same as v2
@@ -105,6 +105,16 @@
 //         respect to the legacy fields and adds the new ones at their
 //         migrated values; subsequent v9 readers therefore see exactly
 //         the curve/dynamics they would have synthesized from `ag`.
+//   - v10: no JSON-schema changes — exclusively signals that the
+//         `.noted` zip archive may carry `assets/<asset-id>` members
+//         holding the original encoded image bytes (ADR 0036,
+//         B.7.b.3). The platform-layer save/load reads those members
+//         into `ImageAsset::source_bytes` per registered asset; the
+//         JSON loader is unchanged. v6..v9 files loaded under a v10
+//         reader silently leave `source_bytes` empty (legacy authors
+//         never bundled). A v10 file loaded under a v9 reader parses
+//         fine — the v9 reader just doesn't see the extra zip
+//         members — so the bump is informational, not a wire break.
 //   Writer always emits the current version.
 //
 // The payload object's keys depend on the block's kind. See ADR 0025
@@ -130,7 +140,7 @@ namespace noted::domain::io {
 
 // On-disk schema version. Writer always emits this; reader accepts
 // this value AND every prior supported version.
-inline constexpr int kDocumentJsonVersion = 9;
+inline constexpr int kDocumentJsonVersion = 10;
 inline constexpr int kDocumentJsonMinReadableVersion = 1;
 
 // Serialize `doc` to JSON. Output is pretty-printed with 2-space

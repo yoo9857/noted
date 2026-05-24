@@ -1,7 +1,9 @@
 #include "noted/domain/document/image_asset_registry.hpp"
 
+#include <cstddef>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -39,6 +41,7 @@ TEST(ImageAssetDefaults, FieldsAreInvalid) {
     EXPECT_TRUE(a.source_path.empty());
     EXPECT_EQ(a.intrinsic_w_px, 0U);
     EXPECT_EQ(a.intrinsic_h_px, 0U);
+    EXPECT_TRUE(a.source_bytes.empty());
 }
 
 // ---- allocate --------------------------------------------------------------
@@ -191,4 +194,41 @@ TEST(ImageAssetRegistryEquality, DifferentAssetsCompareNotEqual) {
     ImageAssetRegistry r2;
     (void) r1.allocate(make_asset("a.png", 1, 1));
     EXPECT_NE(r1, r2);
+}
+
+// ---- attach_source_bytes (loader's second pass, B.7.b.3) -----------------
+
+TEST(ImageAssetRegistryAttachBytes, MissingIdReturnsFalse) {
+    ImageAssetRegistry r;
+    EXPECT_FALSE(r.attach_source_bytes(1, {std::byte{0x89}, std::byte{0x50}}));
+    EXPECT_FALSE(r.attach_source_bytes(invalid_asset_id, {}));
+}
+
+TEST(ImageAssetRegistryAttachBytes, LiveIdStoresBytes) {
+    ImageAssetRegistry r;
+    const auto id = r.allocate(make_asset("a.png", 16, 16));
+    std::vector<std::byte> blob{std::byte{0x89}, std::byte{0x50}, std::byte{0x4E}, std::byte{0x47}};
+    EXPECT_TRUE(r.attach_source_bytes(id, blob));
+    const auto* a = r.find(id);
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(a->source_bytes, blob);
+}
+
+TEST(ImageAssetRegistryAttachBytes, OverwritesExistingBytes) {
+    ImageAssetRegistry r;
+    const auto id = r.allocate(make_asset("a.png", 16, 16));
+    (void) r.attach_source_bytes(id, std::vector<std::byte>{std::byte{0x01}});
+    std::vector<std::byte> replacement{std::byte{0xAA}, std::byte{0xBB}};
+    EXPECT_TRUE(r.attach_source_bytes(id, replacement));
+    EXPECT_EQ(r.find(id)->source_bytes, replacement);
+}
+
+TEST(ImageAssetRegistryAttachBytes, EmptyBytesIsValid) {
+    // Attaching empty bytes is the same as "clear" — useful when a
+    // future load path wants to detach a stranded blob.
+    ImageAssetRegistry r;
+    const auto id = r.allocate(make_asset("a.png", 16, 16));
+    (void) r.attach_source_bytes(id, std::vector<std::byte>{std::byte{0xFF}});
+    EXPECT_TRUE(r.attach_source_bytes(id, std::vector<std::byte>{}));
+    EXPECT_TRUE(r.find(id)->source_bytes.empty());
 }

@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include "noted/domain/document/document.hpp"
+#include "noted/domain/document/image_asset_registry.hpp"
 
 namespace {
 
@@ -219,4 +220,135 @@ TEST(NotedFile, DocumentEntryNameIsStable) {
     // schema. Anyone renaming this will break every existing .noted
     // file; the test exists as a tripwire.
     EXPECT_STREQ(kDocumentEntryName, "document.json");
+}
+
+// ---- asset bundle (B.7.b.3 / ADR 0036) ------------------------------------
+
+TEST(NotedArchiveAssets, BundledBytesSurviveRoundTrip) {
+    Document src;
+    auto& registry = src.image_assets_mut();
+    noted::domain::ImageAsset spec{};
+    spec.source_path = "pic.png";
+    spec.intrinsic_w_px = 16;
+    spec.intrinsic_h_px = 16;
+    // Synthetic PNG signature + arbitrary payload bytes. The archive
+    // layer doesn't decode — it stores the byte sequence verbatim,
+    // so anything non-empty exercises the same code path as a real
+    // PNG payload would.
+    spec.source_bytes = {std::byte{0x89},
+                         std::byte{0x50},
+                         std::byte{0x4E},
+                         std::byte{0x47},
+                         std::byte{0x0D},
+                         std::byte{0x0A},
+                         std::byte{0x1A},
+                         std::byte{0x0A},
+                         std::byte{0xDE},
+                         std::byte{0xAD},
+                         std::byte{0xBE},
+                         std::byte{0xEF}};
+    const auto expected_bytes = spec.source_bytes;
+    const auto id = registry.allocate(std::move(spec));
+
+    const auto archive = document_to_archive_bytes(src);
+    ASSERT_FALSE(archive.empty());
+    auto loaded = document_from_archive_bytes(archive);
+    ASSERT_TRUE(loaded);
+    const auto* a = loaded->image_assets().find(id);
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(a->source_bytes, expected_bytes);
+    EXPECT_EQ(a->source_path, "pic.png");
+    EXPECT_EQ(a->intrinsic_w_px, 16U);
+    EXPECT_EQ(a->intrinsic_h_px, 16U);
+}
+
+TEST(NotedArchiveAssets, EmptySourceBytesProducesNoZipMember) {
+    // An asset with no payload (e.g. a placeholder primitive) must not
+    // contribute an `assets/<id>` member. Smoke-checked via byte
+    // search since the archive layer doesn't expose member iteration.
+    Document src;
+    auto& registry = src.image_assets_mut();
+    noted::domain::ImageAsset spec{};
+    spec.source_path = "placeholder";
+    (void) registry.allocate(std::move(spec));
+
+    const auto archive = document_to_archive_bytes(src);
+    ASSERT_FALSE(archive.empty());
+    const std::string_view archive_view{reinterpret_cast<const char*>(archive.data()),
+                                        archive.size()};
+    EXPECT_EQ(archive_view.find("assets/"), std::string::npos);
+
+    auto loaded = document_from_archive_bytes(archive);
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->image_assets().size(), 1U);
+    EXPECT_TRUE(loaded->image_assets().assets().front().source_bytes.empty());
+}
+
+TEST(NotedArchiveAssets, MultipleAssetsRoundTripIndependently) {
+    Document src;
+    auto& registry = src.image_assets_mut();
+
+    noted::domain::ImageAsset a{};
+    a.source_path = "a.png";
+    a.source_bytes = {std::byte{0xAA}, std::byte{0x11}};
+    const auto a_id = registry.allocate(std::move(a));
+
+    noted::domain::ImageAsset b{};
+    b.source_path = "b.jpg";
+    b.source_bytes = {std::byte{0xBB}, std::byte{0x22}, std::byte{0x33}};
+    const auto b_id = registry.allocate(std::move(b));
+
+    // Empty-bytes asset interleaved so we know the skip-empty branch
+    // doesn't shift later assets' ids in the zip member naming.
+    noted::domain::ImageAsset c{};
+    c.source_path = "placeholder";
+    const auto c_id = registry.allocate(std::move(c));
+
+    noted::domain::ImageAsset d{};
+    d.source_path = "d.png";
+    d.source_bytes = {std::byte{0xDD}};
+    const auto d_id = registry.allocate(std::move(d));
+
+    const auto archive = document_to_archive_bytes(src);
+    auto loaded = document_from_archive_bytes(archive);
+    ASSERT_TRUE(loaded);
+    const auto* la = loaded->image_assets().find(a_id);
+    const auto* lb = loaded->image_assets().find(b_id);
+    const auto* lc = loaded->image_assets().find(c_id);
+    const auto* ld = loaded->image_assets().find(d_id);
+    ASSERT_NE(la, nullptr);
+    ASSERT_NE(lb, nullptr);
+    ASSERT_NE(lc, nullptr);
+    ASSERT_NE(ld, nullptr);
+    EXPECT_EQ(la->source_bytes, (std::vector<std::byte>{std::byte{0xAA}, std::byte{0x11}}));
+    EXPECT_EQ(lb->source_bytes,
+              (std::vector<std::byte>{std::byte{0xBB}, std::byte{0x22}, std::byte{0x33}}));
+    EXPECT_TRUE(lc->source_bytes.empty());
+    EXPECT_EQ(ld->source_bytes, (std::vector<std::byte>{std::byte{0xDD}}));
+}
+
+TEST(NotedArchiveAssets, LegacyArchiveWithoutAssetMembersLoads) {
+    // A v9-era writer would have produced an archive containing only
+    // `document.json` (no `assets/*` members) even when the registry
+    // had entries. Simulate by saving a Document, then verifying
+    // the loader handles the "registry has assets, zip has no
+    // matching members" case gracefully.
+    Document src;
+    auto& registry = src.image_assets_mut();
+    noted::domain::ImageAsset spec{};
+    spec.source_path = "legacy.png";
+    spec.intrinsic_w_px = 8;
+    spec.intrinsic_h_px = 8;
+    // Leave source_bytes empty — that's what a v9 author would have
+    // had at registry build time.
+    (void) registry.allocate(std::move(spec));
+
+    const auto archive = document_to_archive_bytes(src);
+    auto loaded = document_from_archive_bytes(archive);
+    ASSERT_TRUE(loaded);
+    ASSERT_EQ(loaded->image_assets().size(), 1U);
+    const auto& a = loaded->image_assets().assets().front();
+    EXPECT_TRUE(a.source_bytes.empty());
+    EXPECT_EQ(a.source_path, "legacy.png");
+    EXPECT_EQ(a.intrinsic_w_px, 8U);
 }

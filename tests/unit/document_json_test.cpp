@@ -330,10 +330,10 @@ TEST(DocumentJson, EmittedJsonContainsVersionAndKindOrdinal) {
     (void) h;
     const auto text = document_to_json(src);
     // The output should include the wire-stable version + heading ordinal (2).
-    EXPECT_NE(text.find("\"version\": 9"), std::string::npos);
+    EXPECT_NE(text.find("\"version\": 10"), std::string::npos);
     EXPECT_NE(text.find("\"kind\": 0"), std::string::npos);  // group
     EXPECT_NE(text.find("\"kind\": 2"), std::string::npos);  // heading
-    // v2..v9 — writer emits every side-table even when empty.
+    // v2..v10 — writer emits every side-table even when empty.
     EXPECT_NE(text.find("\"pages\""), std::string::npos);
     EXPECT_NE(text.find("\"shapes\""), std::string::npos);
     EXPECT_NE(text.find("\"texts\""), std::string::npos);
@@ -1068,11 +1068,11 @@ TEST(DocumentJsonReject, V9PressureCurveUnknownKey) {
     EXPECT_FALSE(document_from_json(bad));
 }
 
-TEST(DocumentJsonReject, UnsupportedVersion10) {
+TEST(DocumentJsonReject, UnsupportedVersion11) {
     // Future versions must be rejected — silently truncating unknown
     // fields would risk data loss on round-trip.
     const auto bad = R"({
-        "version": 10, "root": 0, "blocks": [],
+        "version": 11, "root": 0, "blocks": [],
         "pages": {"gap_px": 0.0, "items": []}
     })";
     EXPECT_FALSE(document_from_json(bad));
