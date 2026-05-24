@@ -43,6 +43,16 @@ auto ImageAssetRegistry::remove(AssetId id) -> bool {
     return true;
 }
 
+auto ImageAssetRegistry::attach_source_bytes(AssetId id, std::vector<std::byte> bytes) -> bool {
+    const auto it = std::find_if(
+        assets_.begin(), assets_.end(), [id](const ImageAsset& a) { return a.id == id; });
+    if (it == assets_.end()) {
+        return false;
+    }
+    it->source_bytes = std::move(bytes);
+    return true;
+}
+
 auto ImageAssetRegistry::find(AssetId id) const noexcept -> const ImageAsset* {
     for (const auto& a : assets_) {
         if (a.id == id) {

@@ -41,6 +41,7 @@ new ADR that supersedes the old one rather than rewriting history.
 | 0033 | [Page-on-desk visual model](0033-page-desk-visual-model.md) | Accepted |
 | 0034 | [UI framework migration to Qt 6 + QML](0034-ui-framework-migration-qt6.md) | Accepted |
 | 0035 | [`.noted` v9 schema — pen-dynamics persistence](0035-noted-v9-pen-dynamics.md) | Accepted |
+| 0036 | [`.noted` asset bundle in the zip archive](0036-noted-asset-bundle.md) | Accepted |
 
 ## Format
 

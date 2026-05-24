@@ -291,6 +291,15 @@ tests/        Unit + integration + bench + fuzz scaffolds
    to capture intrinsic dimensions, fresh `AssetId` allocated and
    stamped onto `ImageOptions::pending_asset_id`. (Real GPU upload
    lives in the still-open B.7.b.2b.)
+✅ **B.7.b.3 — asset bundle in `.noted` zip (ADR 0036)**:
+   `ImageAsset` gains `source_bytes` (encoded payload, e.g. raw
+   PNG/JPG). `App::run_image_picker` reads the file bytes too.
+   The archive layer writes each non-empty asset as
+   `assets/<id>` (no compression — already-packed codecs) and
+   the loader extracts them back via
+   `ImageAssetRegistry::attach_source_bytes`. 64 MiB per-asset
+   extraction cap. JSON schema bumped to v10 (zip-layout-only;
+   v6..v9 files load unchanged with empty `source_bytes`).
 ✅ **Page-on-desk visual model + strokes persistence (PR #101,
    ADR 0033)**: single neutral desk fills viewport outside pages;
    each page carries soft drop shadow + AA edges; canvas clear
@@ -488,8 +497,8 @@ filters, color management). Phased to keep each PR focused:
 | **P.S.3** | **Persistence consolidation — images graduate** to `Document::images()` + `Add/RemoveImageCommand` + `.noted` v5 (PR #88) | ✅ |
 | **B.7.b.1** | **ImageAssetRegistry + AssetId on ImagePrimitive + `.noted` v6 (PR #98)** | ✅ |
 | **B.7.b.2** | **"Pick image…" + stb_image decode + AssetId allocation (PR #100)** | ✅ |
-| B.7.b.3 | Asset bundle in `.noted` zip — encoded payload alongside `document.json` | |
-| B.7.b.2b | VMA `VkImage` GPU upload + `ImTextureID` registry — re-decode from bundled bytes | |
+| **B.7.b.3** | **Asset bundle in `.noted` zip — encoded payload at `assets/<id>` + `.noted` v10 (ADR 0036)** | ✅ |
+| B.7.b.2b | VMA `VkImage` GPU upload + `ImTextureID` registry — re-decode from `source_bytes` | |
 | **D.1** | **Page-on-desk visual model (ADR 0033, PR #101)** — desk fill, drop shadows, AA page edges, strokes graduated to `Document` (`.noted` v7) | ✅ |
 | **D.2** | **Stroke storage refactor (PR #102)** — engine reads Document, no internal vector | ✅ |
 | **D.3** | **Smart-shape recognizer (PR #103)** — freehand → ShapePrimitive snap with dwell heuristic | ✅ |
@@ -529,33 +538,26 @@ filters, color management). Phased to keep each PR focused:
 
 ### Next session — pick up here
 
-The last 28 PRs (#100 → #128) landed three major lines of work:
-**Qt 6 migration** through Phase 3 (ADR 0034); **pen-dynamics
-stack** culminating in `.noted` v9 (ADR 0035); **layer ops**
-through merge-down / flatten-image with every mutation on the
-undo stack. The pickable next bites:
+B.7.b.3 just landed: asset bytes round-trip end-to-end through
+`.noted` v10 (ADR 0036). 659/659 unit tests green on Windows MSVC
+Release. The remaining open bites:
 
-**Option 1 — B.7.b.3 asset bundle in `.noted` zip (recommended
-finish-the-job).** B.7.b.1 (registry + AssetId, PR #98) and
-B.7.b.2 (picker + decode, PR #100) shipped, but the decoded
-pixel bytes get discarded immediately and `.noted` save/load
-round-trips an `AssetId` to nothing on the other side. Land the
-third slice:
+**Option 1 — B.7.b.2b GPU upload (the natural follow-up).** Image
+primitives now carry their bytes through save/load, but the
+renderer still draws a dashed placeholder. Land the path that
+turns `ImageAsset::source_bytes` into a sampled texture:
 
-  - `ImageAsset` gains an encoded-payload field (the original
-    PNG/JPG bytes, not decoded RGBA — much smaller and preserves
-    quality across re-saves).
-  - `App::run_image_picker` reads the file bytes alongside the
-    decode it already does.
-  - `platform::io::save_noted_file` writes each registered
-    asset's payload as its own zip member (`assets/<id>`);
-    `load_noted_file` extracts them back into `source_bytes`.
-  - Schema bump to v10 (zip-layout-only — the JSON shape stays
-    constant); v1..v9 readers retained for forward-compat.
-  - 256 MB document.json cap from ADR 0026 stays; add a
-    per-asset extraction cap (64 MiB) for the new path.
-
-  Branch: `feat/noted-asset-bundle`.
+  - `ImageAssetGpuRegistry` (engine side) — observes
+    `Document::image_assets()`, decodes each asset's
+    `source_bytes` once via stb_image, VMA-uploads to a
+    `VkImage`, exposes the `ImTextureID` keyed by `AssetId`.
+  - `image_overlay.cpp` swaps the `AddRectFilled` placeholder
+    for `AddImage` when the asset has an uploaded handle;
+    placeholder + label remain the fallback path.
+  - Lifecycle: registry handle reclaimed when the asset is
+    removed from `Document::image_assets()`. Frame-in-flight
+    safety as per ADR 0028's pattern.
+  - Branch: `feat/image-gpu-upload`.
 
 **Option 2 — ADR 0034 Phase 4: port remaining ImGui panels to
 QML.** Phases 0-3 landed the Qt build, QWindow shell, Mac chrome,
@@ -581,8 +583,9 @@ Branch: `feat/layer-blend-modes`.
 (PRs #111-#113) and smart shapes (PR #103) done. Open: pen-button
 mapping, page templates, PDF export.
 
-**Recommendation: Option 1** — finishes a half-implemented user-
-visible promise (images persist) and is scoped to one PR.
+**Recommendation: Option 1** — closes the user-visible loop
+opened by B.7.b.1/2/3 (picked images now actually paint pixels)
+and is bounded to engine + a one-line app call.
 
 ---
 

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -12,6 +13,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <imgui.h>
 #include <vulkan/vulkan.h>
@@ -1754,16 +1756,43 @@ void App::run_image_picker() {
     }
     const auto path = **picked;
 
-    // Decode the file just to read its intrinsic dimensions; the
+    // Decode the file to capture its intrinsic dimensions; the
     // decoded RGBA bytes are discarded here (B.7.b.2b's GPU upload
-    // path will re-decode at upload time). Using `load_rgba8`
-    // rather than a header-only `stbi_info` because the helper is
-    // already in `platform::image_io` and the cost on the UI thread
-    // for a typical photo is negligible.
+    // path will re-decode at upload time). Using `load_rgba8` rather
+    // than a header-only `stbi_info` because the helper is already
+    // in `platform::image_io` and the cost on the UI thread for a
+    // typical photo is negligible.
     auto loaded = noted::platform::image_io::load_rgba8(path);
     if (!loaded) {
         std::cerr << loaded.error().format() << '\n';
         return;
+    }
+
+    // Read the original encoded file bytes verbatim. These are what
+    // round-trip through the `.noted` zip (B.7.b.3 / ADR 0036) and
+    // what B.7.b.2b's GPU upload re-decodes from. Storing the
+    // encoded payload — not the RGBA expansion — keeps in-memory
+    // footprint at PNG / JPG size and lets a re-save preserve the
+    // source quality bit-for-bit.
+    std::ifstream src{path, std::ios::binary | std::ios::ate};
+    if (!src.is_open()) {
+        std::cerr << "run_image_picker: failed to open '" << path.string() << "' for byte read\n";
+        return;
+    }
+    const auto src_end = src.tellg();
+    if (src_end < 0) {
+        std::cerr << "run_image_picker: tellg failed on '" << path.string() << "'\n";
+        return;
+    }
+    src.seekg(0, std::ios::beg);
+    std::vector<std::byte> source_bytes(static_cast<std::size_t>(src_end));
+    if (src_end > 0) {
+        src.read(reinterpret_cast<char*>(source_bytes.data()),
+                 static_cast<std::streamsize>(source_bytes.size()));
+        if (!src.good() && !src.eof()) {
+            std::cerr << "run_image_picker: read from '" << path.string() << "' failed\n";
+            return;
+        }
     }
 
     // Register a fresh asset on the document. Direct mutation
@@ -1774,6 +1803,7 @@ void App::run_image_picker() {
     asset.source_path = path.string();
     asset.intrinsic_w_px = loaded->width;
     asset.intrinsic_h_px = loaded->height;
+    asset.source_bytes = std::move(source_bytes);
     const auto id = session_.document().image_assets_mut().allocate(std::move(asset));
 
     // Stamp the queued asset id + intrinsic dimensions onto the
