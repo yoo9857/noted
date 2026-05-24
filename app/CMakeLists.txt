@@ -72,3 +72,41 @@ add_custom_command(TARGET noted_app POST_BUILD
     COMMENT "Copy compiled shaders to <exe_dir>/shaders"
     VERBATIM
 )
+
+# Windows: deploy Qt runtime DLLs + platform plugins next to the
+# exe. Without this, launching `build/bin/noted_app.exe` on a
+# machine that doesn't have Qt's bin/ on PATH (the typical dev
+# setup with `aqt install-qt`) pops a "missing qwindows.dll"
+# error dialog before any of our code runs. windeployqt ships in
+# Qt's bin/ directory and resolves the dependency graph for the
+# bound binary, so the post-build step keeps the output
+# zip-distributable on Windows the same way the shader copy
+# above does. macOS / Linux have their own deployment tools
+# (`macdeployqt` / `linuxdeployqt`); skip those here — the dev
+# install on those platforms typically resolves Qt via rpath.
+if(WIN32)
+    find_program(NOTED_WINDEPLOYQT NAMES windeployqt
+        HINTS
+            "$<TARGET_FILE_DIR:Qt6::qmake>"
+            "${Qt6_DIR}/../../../bin"
+        DOC "Path to Qt's windeployqt.exe; auto-discovered from the Qt6 package"
+    )
+    if(NOTED_WINDEPLOYQT)
+        add_custom_command(TARGET noted_app POST_BUILD
+            COMMAND "${NOTED_WINDEPLOYQT}"
+                --release
+                --no-translations
+                --no-system-d3d-compiler
+                --no-opengl-sw
+                "$<TARGET_FILE:noted_app>"
+            COMMENT "windeployqt: copy Qt runtime + platform plugins to <exe_dir>"
+            VERBATIM
+        )
+    else()
+        message(WARNING
+            "windeployqt not found alongside the Qt6 install — "
+            "noted_app.exe will fail to launch with 'qwindows.dll missing' "
+            "unless Qt's bin/ is on PATH at runtime. Set CMAKE_PREFIX_PATH "
+            "to a Qt install whose bin/ contains windeployqt.exe.")
+    endif()
+endif()

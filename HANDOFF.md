@@ -290,6 +290,15 @@ tests/        Unit + integration + bench + fuzz scaffolds
    button wired via `nativefiledialog-extended`, stb_image decode
    to capture intrinsic dimensions, fresh `AssetId` allocated and
    stamped onto `ImageOptions::pending_asset_id`.
+✅ **Phase C stage 1 — Vulkan 1.4 + `dynamicRenderingLocalRead`
+   feature unlock (ADR 0038)**: instance bumped to
+   `VK_API_VERSION_1_4`, `DeviceCreateInfo` gains an
+   opportunistic `enable_dynamic_rendering_local_read` flag,
+   `Device::has_dynamic_rendering_local_read()` exposes the
+   negotiated result. No behavioural change yet (the 12 fall-
+   through modes still increment `fallback_count_`); the
+   shader-blend pipeline + per-mode math ships in stage 2.
+   Smoke-tested on GTX 1050 Ti — clean exit, zero validation.
 ✅ **B.7.b.2b — image GPU upload (ADR 0037)**:
    `compositor::ImageAssetGpuRegistry` maps `AssetId` → `gpu::Image`
    + ImGui descriptor set. `sync_image_assets` (called per frame
@@ -400,7 +409,10 @@ tests/        Unit + integration + bench + fuzz scaffolds
 
 - **12 of 16 layer blend modes** — `LayerCompositor` ships
   fixed-function pipelines for normal / multiply / linear_dodge /
-  screen and counts the rest as a fallback. Phase C item.
+  screen and counts the rest as a fallback. Phase C stage 1
+  (ADR 0038) unlocked the `dynamicRenderingLocalRead` Vulkan 1.4
+  feature the shader pipeline needs; stage 2 wires the
+  shader-blend pipeline + per-mode math.
 - **Asset / history embedding** in the `.noted` archive — image
   blobs decoded by `stb_image` live only in RAM; save/load
   round-trips an `AssetId` to nothing. **B.7.b.3** is the
@@ -538,7 +550,9 @@ filters, color management). Phased to keep each PR focused:
 | **R.2** | **App-layer decomposition** — `CameraController` extracted (PR #76, ADR 0032) | ✅ |
 | **R.3** | **App-layer decomposition** — `RenderPasses` (4-pass canvas pipeline) extracted (PR #78, ADR 0032) | ✅ |
 | **R.4** | **App-layer decomposition** — `UiPanels` (draw_widgets body) extracted (PR #79, ADR 0032) | ✅ |
-| C   | Photoshop depth — layer panel ops, shader blend modes (12 missing), filter pipeline, color management | |
+| **C.11** | **Vulkan 1.4 + `dynamicRenderingLocalRead` feature unlock for shader-blend pipeline (ADR 0038 stage 1)** | ✅ |
+| C.12 | Shader-blend pipeline + 12-mode math (ADR 0038 stage 2) | |
+| C.13 | Layer filter pipeline + color management | |
 | D   | Goodnotes polish — smart shapes, lasso + transform handles, pen-button mapping, page templates, PDF export | |
 | E   | (optional) Native chrome — ImGui → Qt/Slint per ADR 0027 v1.0 boundary | |
 
@@ -569,12 +583,25 @@ viewport that QWindow already hosts.
   `brush_options` last because it has the most controls).
   Branch family: `feat/qml-panel-*`.
 
-**Option 2 — Phase C: shader blend modes (still open).** 12 of
-the 16 declared blend modes in `LayerGraph` fall through to the
-counted fallback in `LayerCompositor`. Pure GPU work — write
-the math in `shaders/layer.slang`, add the pipelines, drop the
-fallback counter. No domain churn, no UI churn.
-Branch: `feat/layer-blend-modes`.
+**Option 2 — Phase C stage 2: shader-blend pipeline (the natural
+follow-up).** Stage 1 unlocked `dynamicRenderingLocalRead` (ADR
+0038). Stage 2 wires the shader-blend pipeline + 12-mode math:
+
+  - Slang shader entry that reads the color attachment as a
+    `SubpassInput<float4>` (Slang exposes the input-attachment
+    semantic that maps to local-read under dynamic rendering).
+  - `LayerCompositor` gains a second pipeline (`blendEnable =
+    FALSE`, pipeline create info chained with
+    `VkRenderingInputAttachmentIndexInfoKHR`) + an
+    `INPUT_ATTACHMENT` descriptor pointing at the canvas view.
+  - Per composite() inner-loop: for any of the 12 modes (and
+    only when `device.has_dynamic_rendering_local_read()`),
+    bind shader-blend pipeline + push the mode ordinal + draw.
+    `fallback_count_` only ticks on the unsupported-device
+    fallback path.
+  - 12 modes share one shader via a `switch` on the push-
+    constant ordinal — Photoshop reference formulas.
+  - Branch: `feat/layer-blend-modes-shader`.
 
 **Option 3 — Async image decode**. The synchronous decode in
 `sync_image_assets` stalls the frame on large picks (a 4K JPG
