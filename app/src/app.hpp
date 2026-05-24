@@ -30,6 +30,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include "noted/compositor/image_asset_gpu_registry.hpp"
 #include "noted/compositor/layer_compositor.hpp"
 #include "noted/domain/clipboard/clipboard.hpp"
 #include "noted/domain/clipboard/selection_ops.hpp"
@@ -261,6 +262,15 @@ private:
 
     std::optional<noted::gpu::Renderer> renderer_;
     std::optional<noted::ui::ImGuiHost> imgui_host_;
+
+    // ---- Image asset GPU registry (B.7.b.2b / ADR 0037) -----------------
+    // Holds VkImage + ImGui descriptor set per AssetId. Reconciled
+    // against `Document::image_assets()` once per frame via
+    // `compositor::sync_image_assets`. Constructed after ImGuiHost so
+    // `ImGui_ImplVulkan_AddTexture` is callable. Tear-down happens in
+    // `App::~App` before device dies; we wait-idle first so any
+    // in-flight frame stops touching the descriptor sets.
+    std::optional<noted::compositor::ImageAssetGpuRegistry> image_assets_gpu_;
 
     // ---- Runtime config snapshot ----------------------------------------
     // Populated by `App::create` from the caller's config. Members

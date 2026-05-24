@@ -37,6 +37,7 @@
 #include "noted/domain/tool/tool.hpp"
 #include "noted/engine/engine.hpp"
 #include "noted/ui/widget/debug_overlay.hpp"
+#include "noted/ui/widget/image_overlay.hpp"
 #include "noted/ui/widget/menu_bar.hpp"
 #include "noted/ui/widget/outline_panel.hpp"
 
@@ -141,6 +142,12 @@ public:
         // any state the picker needs to mutate is captured by the
         // closure (Document, ToolState).
         std::function<void()> on_pick_image;
+        // AssetId → ImGui-visible texture handle for the
+        // image_overlay's textured render path (B.7.b.2b). Empty
+        // until App constructs the GPU registry; image_overlay
+        // gracefully falls back to placeholder rendering when the
+        // callback isn't installed or returns 0.
+        noted::ui::widget::ImageTextureLookupFn image_texture_lookup;
     };
 
     [[nodiscard]] static auto create(Deps deps) -> std::unique_ptr<UiPanels>;
@@ -196,6 +203,7 @@ private:
     std::function<bool()> save_for_dirty_prompt_;
     std::function<void(noted::app::DirtyPrompt::PendingAction)> execute_pending_dirty_action_;
     std::function<void()> on_pick_image_;
+    noted::ui::widget::ImageTextureLookupFn image_texture_lookup_;
 };
 
 }  // namespace noted::app::ui

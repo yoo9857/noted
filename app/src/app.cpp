@@ -294,6 +294,17 @@ auto App::create(config::AppConfig cfg) -> Result<std::unique_ptr<App>> {
         .execute_pending_dirty_action =
             [raw](DirtyPrompt::PendingAction a) { raw->execute_pending_dirty_action(a); },
         .on_pick_image = [raw]() { raw->run_image_picker(); },
+        .image_texture_lookup = [raw](noted::domain::AssetId id) -> std::uint64_t {
+            if (!raw->image_assets_gpu_) {
+                return 0U;
+            }
+            const auto ds = raw->image_assets_gpu_->texture_for(id);
+            // ImTextureID is ImU64 in the docking branch; the
+            // Vulkan backend treats it as a VkDescriptorSet cast.
+            // reinterpret to uintptr_t first so the conversion is
+            // legal under -Wcast-function-type / strict aliasing.
+            return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(ds));
+        },
     });
 
     return app;
@@ -798,6 +809,16 @@ auto App::init_renderer_and_imgui() -> noted::Result<void> {
         return std::unexpected(std::move(imgui_host).error());
     }
     imgui_host_.emplace(std::move(*imgui_host));
+
+    // Image asset GPU registry (B.7.b.2b / ADR 0037). Constructed
+    // AFTER ImGuiHost so `ImGui_ImplVulkan_AddTexture` is available
+    // to register per-asset descriptor sets at sync time.
+    auto image_gpu = noted::compositor::ImageAssetGpuRegistry::create(*device_, *allocator_);
+    if (!image_gpu) {
+        return std::unexpected(std::move(image_gpu).error());
+    }
+    image_assets_gpu_.emplace(std::move(*image_gpu));
+
     return {};
 }
 
@@ -971,6 +992,20 @@ void App::on_frame() {
     const float dt = static_cast<float>(now - last_frame_time);
     last_frame_time = now;
     imgui_host_->begin_frame(static_cast<float>(fb_w), static_cast<float>(fb_h), dt);
+
+    // Image asset GPU reconcile (B.7.b.2b). Runs OUTSIDE any render
+    // pass so synchronous decode + upload + ImGui descriptor-set
+    // registration are safe. tick() runs after, advancing the
+    // retire-delay frame counter and freeing any handles whose
+    // delay has elapsed.
+    if (image_assets_gpu_) {
+        if (auto r = noted::compositor::sync_image_assets(*image_assets_gpu_,
+                                                          session_.document().image_assets());
+            !r) {
+            std::cerr << r.error().format() << '\n';
+        }
+        image_assets_gpu_->tick();
+    }
 
     // Workspace dockspace — must run BEFORE any `ImGui::Begin` so
     // every panel (the App-level Colour / Navigator pair AND the
